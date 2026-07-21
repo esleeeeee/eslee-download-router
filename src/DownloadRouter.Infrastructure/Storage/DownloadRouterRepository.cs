@@ -1,0 +1,431 @@
+using System.Globalization;
+using DownloadRouter.Core.Models;
+using Microsoft.Data.Sqlite;
+
+namespace DownloadRouter.Infrastructure.Storage;
+
+public sealed class DownloadRouterRepository(AppPaths paths)
+{
+    private const int CurrentSchemaVersion = 1;
+
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        paths.EnsureCreated();
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            PRAGMA journal_mode = WAL;
+            PRAGMA foreign_keys = ON;
+            PRAGMA busy_timeout = 5000;
+
+            CREATE TABLE IF NOT EXISTS MigrationHistory (
+                Version INTEGER PRIMARY KEY,
+                AppliedAt TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS Rules (
+                Id TEXT PRIMARY KEY,
+                Name TEXT NOT NULL,
+                IsEnabled INTEGER NOT NULL,
+                MatchType TEXT NOT NULL,
+                MatchValue TEXT NOT NULL,
+                MatchTarget TEXT NOT NULL,
+                StorageRoot TEXT NOT NULL,
+                StorageMode TEXT NOT NULL,
+                Priority INTEGER NOT NULL,
+                ListOrder INTEGER NOT NULL,
+                CreatedAt TEXT NOT NULL,
+                UpdatedAt TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_Rules_EnabledOrder
+                ON Rules(IsEnabled, Priority DESC, ListOrder ASC);
+
+            CREATE TABLE IF NOT EXISTS DownloadJobs (
+                Id TEXT PRIMARY KEY,
+                Browser TEXT NOT NULL,
+                BrowserDownloadId TEXT NOT NULL,
+                OriginalFileName TEXT NOT NULL,
+                CurrentFileName TEXT NOT NULL,
+                InitiatingPageUrl TEXT NULL,
+                InitialUrl TEXT NULL,
+                FinalUrl TEXT NULL,
+                ReferrerUrl TEXT NULL,
+                SanitizedSource TEXT NULL,
+                RuleId TEXT NOT NULL,
+                OriginalPath TEXT NULL,
+                FinalPath TEXT NULL,
+                SelectedRelativeFolder TEXT NULL,
+                Status TEXT NOT NULL,
+                ErrorCode TEXT NULL,
+                ErrorMessage TEXT NULL,
+                CreatedAt TEXT NOT NULL,
+                CompletedAt TEXT NULL,
+                FOREIGN KEY(RuleId) REFERENCES Rules(Id),
+                UNIQUE(Browser, BrowserDownloadId)
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_DownloadJobs_StatusCreated
+                ON DownloadJobs(Status, CreatedAt DESC);
+
+            CREATE TABLE IF NOT EXISTS DownloadEvents (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                JobId TEXT NOT NULL,
+                EventType TEXT NOT NULL,
+                Detail TEXT NULL,
+                CreatedAt TEXT NOT NULL,
+                FOREIGN KEY(JobId) REFERENCES DownloadJobs(Id)
+            );
+
+            CREATE TABLE IF NOT EXISTS BrowserConnections (
+                Browser TEXT PRIMARY KEY,
+                IsInstalled INTEGER NOT NULL DEFAULT 0,
+                IsExtensionConnected INTEGER NOT NULL DEFAULT 0,
+                LastSeenAt TEXT NULL,
+                LastError TEXT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS AppSettings (
+                Key TEXT PRIMARY KEY,
+                Value TEXT NOT NULL,
+                UpdatedAt TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS PendingSelections (
+                RuleId TEXT PRIMARY KEY,
+                RequestedAt TEXT NOT NULL,
+                FOREIGN KEY(RuleId) REFERENCES Rules(Id)
+            );
+
+            INSERT OR IGNORE INTO MigrationHistory(Version, AppliedAt)
+                VALUES ($version, $appliedAt);
+            """;
+        command.Parameters.AddWithValue("$version", CurrentSchemaVersion);
+        command.Parameters.AddWithValue("$appliedAt", Format(DateTimeOffset.UtcNow));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<DownloadRule>> GetRulesAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id, Name, IsEnabled, MatchType, MatchValue, MatchTarget,
+                   StorageRoot, StorageMode, Priority, ListOrder, CreatedAt, UpdatedAt
+            FROM Rules
+            ORDER BY ListOrder, CreatedAt, Id;
+            """;
+
+        var result = new List<DownloadRule>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            result.Add(ReadRule(reader));
+        }
+
+        return result;
+    }
+
+    public async Task<DownloadRule?> GetRuleAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id, Name, IsEnabled, MatchType, MatchValue, MatchTarget,
+                   StorageRoot, StorageMode, Priority, ListOrder, CreatedAt, UpdatedAt
+            FROM Rules WHERE Id = $id;
+            """;
+        command.Parameters.AddWithValue("$id", id.ToString("D"));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadRule(reader) : null;
+    }
+
+    public async Task UpsertRuleAsync(DownloadRule rule, CancellationToken cancellationToken = default)
+    {
+        ValidateRule(rule);
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO Rules(
+                Id, Name, IsEnabled, MatchType, MatchValue, MatchTarget, StorageRoot,
+                StorageMode, Priority, ListOrder, CreatedAt, UpdatedAt)
+            VALUES(
+                $id, $name, $enabled, $matchType, $matchValue, $matchTarget, $storageRoot,
+                $storageMode, $priority, $listOrder, $createdAt, $updatedAt)
+            ON CONFLICT(Id) DO UPDATE SET
+                Name = excluded.Name,
+                IsEnabled = excluded.IsEnabled,
+                MatchType = excluded.MatchType,
+                MatchValue = excluded.MatchValue,
+                MatchTarget = excluded.MatchTarget,
+                StorageRoot = excluded.StorageRoot,
+                StorageMode = excluded.StorageMode,
+                Priority = excluded.Priority,
+                ListOrder = excluded.ListOrder,
+                UpdatedAt = excluded.UpdatedAt;
+            """;
+        AddRuleParameters(command, rule);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task CreateJobAsync(DownloadJob job, CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO DownloadJobs(
+                Id, Browser, BrowserDownloadId, OriginalFileName, CurrentFileName,
+                InitiatingPageUrl, InitialUrl, FinalUrl, ReferrerUrl, SanitizedSource,
+                RuleId, OriginalPath, FinalPath, SelectedRelativeFolder, Status,
+                ErrorCode, ErrorMessage, CreatedAt, CompletedAt)
+            VALUES(
+                $id, $browser, $browserDownloadId, $originalFileName, $currentFileName,
+                $initiatingPageUrl, $initialUrl, $finalUrl, $referrerUrl, $sanitizedSource,
+                $ruleId, $originalPath, $finalPath, $selectedRelativeFolder, $status,
+                $errorCode, $errorMessage, $createdAt, $completedAt);
+            """;
+        AddJobParameters(command, job);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await AppendEventAsync(connection, job.Id, "job.created", job.Status.ToString(), cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<DownloadJob?> GetJobAsync(
+        BrowserKind browser,
+        string browserDownloadId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = SelectJobColumns + " WHERE Browser = $browser AND BrowserDownloadId = $downloadId;";
+        command.Parameters.AddWithValue("$browser", browser.ToString());
+        command.Parameters.AddWithValue("$downloadId", browserDownloadId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadJob(reader) : null;
+    }
+
+    public async Task<DownloadJob?> GetJobAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = SelectJobColumns + " WHERE Id = $id;";
+        command.Parameters.AddWithValue("$id", id.ToString("D"));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadJob(reader) : null;
+    }
+
+    public async Task<IReadOnlyList<DownloadJob>> GetRecentJobsAsync(
+        int limit = 200,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit is < 1 or > 1000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit));
+        }
+
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = SelectJobColumns + " ORDER BY CreatedAt DESC LIMIT $limit;";
+        command.Parameters.AddWithValue("$limit", limit);
+        var jobs = new List<DownloadJob>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            jobs.Add(ReadJob(reader));
+        }
+
+        return jobs;
+    }
+
+    public async Task UpdateJobAsync(DownloadJob job, string eventType, CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.Transaction = (SqliteTransaction)transaction;
+        command.CommandText = """
+            UPDATE DownloadJobs SET
+                CurrentFileName = $currentFileName,
+                InitialUrl = $initialUrl,
+                FinalUrl = $finalUrl,
+                ReferrerUrl = $referrerUrl,
+                SanitizedSource = $sanitizedSource,
+                OriginalPath = $originalPath,
+                FinalPath = $finalPath,
+                SelectedRelativeFolder = $selectedRelativeFolder,
+                Status = $status,
+                ErrorCode = $errorCode,
+                ErrorMessage = $errorMessage,
+                CompletedAt = $completedAt
+            WHERE Id = $id;
+            """;
+        AddJobParameters(command, job);
+        var affected = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        if (affected != 1)
+        {
+            throw new InvalidOperationException($"Download job {job.Id} was not found.");
+        }
+
+        await AppendEventAsync(connection, job.Id, eventType, job.Status.ToString(), cancellationToken, (SqliteTransaction)transaction).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task RecoverInProgressJobsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE DownloadJobs
+            SET Status = 'RetryPending',
+                ErrorCode = 'agent.restarted',
+                ErrorMessage = 'The agent restarted while this file was being moved.'
+            WHERE Status IN ('ReadyToMove', 'Moving');
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private const string SelectJobColumns = """
+        SELECT Id, Browser, BrowserDownloadId, OriginalFileName, CurrentFileName,
+               InitiatingPageUrl, InitialUrl, FinalUrl, ReferrerUrl, SanitizedSource,
+               RuleId, OriginalPath, FinalPath, SelectedRelativeFolder, Status,
+               ErrorCode, ErrorMessage, CreatedAt, CompletedAt
+        FROM DownloadJobs
+        """;
+
+    private SqliteConnection CreateConnection()
+        => new(new SqliteConnectionStringBuilder
+        {
+            DataSource = paths.DatabasePath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Cache = SqliteCacheMode.Shared,
+            ForeignKeys = true,
+            Pooling = true,
+        }.ToString());
+
+    private static void ValidateRule(DownloadRule rule)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rule.Name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(rule.MatchValue);
+        ArgumentException.ThrowIfNullOrWhiteSpace(rule.StorageRoot);
+        if (rule.Name.Length > 200 || rule.MatchValue.Length > 2048 || rule.StorageRoot.Length > 32767)
+        {
+            throw new ArgumentException("A rule field exceeds its maximum allowed length.", nameof(rule));
+        }
+    }
+
+    private static DownloadRule ReadRule(SqliteDataReader reader)
+        => new(
+            Guid.Parse(reader.GetString(0)),
+            reader.GetString(1),
+            reader.GetBoolean(2),
+            Enum.Parse<RuleMatchType>(reader.GetString(3)),
+            reader.GetString(4),
+            Enum.Parse<RuleMatchTarget>(reader.GetString(5)),
+            reader.GetString(6),
+            Enum.Parse<StorageMode>(reader.GetString(7)),
+            reader.GetInt32(8),
+            reader.GetInt32(9),
+            Parse(reader.GetString(10)),
+            Parse(reader.GetString(11)));
+
+    private static DownloadJob ReadJob(SqliteDataReader reader)
+        => new(
+            Guid.Parse(reader.GetString(0)),
+            Enum.Parse<BrowserKind>(reader.GetString(1)),
+            reader.GetString(2),
+            reader.GetString(3),
+            reader.GetString(4),
+            GetNullableString(reader, 5),
+            GetNullableString(reader, 6),
+            GetNullableString(reader, 7),
+            GetNullableString(reader, 8),
+            GetNullableString(reader, 9),
+            Guid.Parse(reader.GetString(10)),
+            GetNullableString(reader, 11),
+            GetNullableString(reader, 12),
+            GetNullableString(reader, 13),
+            Enum.Parse<DownloadJobStatus>(reader.GetString(14)),
+            GetNullableString(reader, 15),
+            GetNullableString(reader, 16),
+            Parse(reader.GetString(17)),
+            reader.IsDBNull(18) ? null : Parse(reader.GetString(18)));
+
+    private static string? GetNullableString(SqliteDataReader reader, int ordinal)
+        => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
+
+    private static void AddRuleParameters(SqliteCommand command, DownloadRule rule)
+    {
+        command.Parameters.AddWithValue("$id", rule.Id.ToString("D"));
+        command.Parameters.AddWithValue("$name", rule.Name);
+        command.Parameters.AddWithValue("$enabled", rule.IsEnabled);
+        command.Parameters.AddWithValue("$matchType", rule.MatchType.ToString());
+        command.Parameters.AddWithValue("$matchValue", rule.MatchValue);
+        command.Parameters.AddWithValue("$matchTarget", rule.MatchTarget.ToString());
+        command.Parameters.AddWithValue("$storageRoot", rule.StorageRoot);
+        command.Parameters.AddWithValue("$storageMode", rule.StorageMode.ToString());
+        command.Parameters.AddWithValue("$priority", rule.Priority);
+        command.Parameters.AddWithValue("$listOrder", rule.ListOrder);
+        command.Parameters.AddWithValue("$createdAt", Format(rule.CreatedAt));
+        command.Parameters.AddWithValue("$updatedAt", Format(rule.UpdatedAt));
+    }
+
+    private static void AddJobParameters(SqliteCommand command, DownloadJob job)
+    {
+        command.Parameters.AddWithValue("$id", job.Id.ToString("D"));
+        command.Parameters.AddWithValue("$browser", job.Browser.ToString());
+        command.Parameters.AddWithValue("$browserDownloadId", job.BrowserDownloadId);
+        command.Parameters.AddWithValue("$originalFileName", job.OriginalFileName);
+        command.Parameters.AddWithValue("$currentFileName", job.CurrentFileName);
+        command.Parameters.AddWithValue("$initiatingPageUrl", Db(job.InitiatingPageUrl));
+        command.Parameters.AddWithValue("$initialUrl", Db(job.InitialUrl));
+        command.Parameters.AddWithValue("$finalUrl", Db(job.FinalUrl));
+        command.Parameters.AddWithValue("$referrerUrl", Db(job.ReferrerUrl));
+        command.Parameters.AddWithValue("$sanitizedSource", Db(job.SanitizedSource));
+        command.Parameters.AddWithValue("$ruleId", job.RuleId.ToString("D"));
+        command.Parameters.AddWithValue("$originalPath", Db(job.OriginalPath));
+        command.Parameters.AddWithValue("$finalPath", Db(job.FinalPath));
+        command.Parameters.AddWithValue("$selectedRelativeFolder", Db(job.SelectedRelativeFolder));
+        command.Parameters.AddWithValue("$status", job.Status.ToString());
+        command.Parameters.AddWithValue("$errorCode", Db(job.ErrorCode));
+        command.Parameters.AddWithValue("$errorMessage", Db(job.ErrorMessage));
+        command.Parameters.AddWithValue("$createdAt", Format(job.CreatedAt));
+        command.Parameters.AddWithValue("$completedAt", job.CompletedAt is null ? DBNull.Value : Format(job.CompletedAt.Value));
+    }
+
+    private static async Task AppendEventAsync(
+        SqliteConnection connection,
+        Guid jobId,
+        string eventType,
+        string? detail,
+        CancellationToken cancellationToken,
+        SqliteTransaction? transaction = null)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO DownloadEvents(JobId, EventType, Detail, CreatedAt)
+            VALUES($jobId, $eventType, $detail, $createdAt);
+            """;
+        command.Parameters.AddWithValue("$jobId", jobId.ToString("D"));
+        command.Parameters.AddWithValue("$eventType", eventType);
+        command.Parameters.AddWithValue("$detail", Db(detail));
+        command.Parameters.AddWithValue("$createdAt", Format(DateTimeOffset.UtcNow));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static object Db(string? value) => value is null ? DBNull.Value : value;
+
+    private static string Format(DateTimeOffset value) => value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+
+    private static DateTimeOffset Parse(string value) => DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+}

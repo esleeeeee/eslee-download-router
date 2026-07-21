@@ -1,0 +1,40 @@
+# Build output
+**/bin/
+**/obj/
+artifacts/
+dist/
+coverage/
+TestResults/
+
+# Node
+node_modules/
+*.tsbuildinfo
+
+# Local application data
+*.db
+*.db-shm
+*.db-wal
+logs/
+data/
+config.local.json
+.env
+
+# Generated Native Messaging manifests contain machine-specific paths
+installer/generated/
+*.native-host.local.json
+
+# IDE and operating-system state
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+.DS_Store
+Thumbs.db
+
+# Signing and extension private keys
+*.pfx
+*.p12
+*.pem
+*.key
+*.crx

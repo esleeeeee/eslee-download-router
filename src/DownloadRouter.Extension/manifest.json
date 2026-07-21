@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "eslee Download Router",
+  "description": "사이트 규칙에 따라 완료된 다운로드 파일을 로컬 Windows 앱으로 안전하게 분류합니다.",
+  "version": "0.1.0",
+  "minimum_chrome_version": "120",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA6FiAo5tieDtqTtwygJFw3DHWI6jlghxpIfzRUNjLKkC5WJCi0CKZyobBlw8jhKgDFZhvf/ouOhkqE4F3WyqPVTaZPwKpqt5LFXexeSsycX3b7UC5Yy5gN4rR0eQwW4tKt6ZXKKk/W82NmeL5peasGreLps3UIs2OSMReozC1aIMIHQQZEjkCQ72GDyqNAIoUVZJvQR4/HOhe8aqo25fW7zyoDA7mqtQNr6uV8Za7SO4I5Ud/joJXPAcDl7SWQ8ZwYu2FajpTZRhRL3dTI6Se6Wm3Mum3764h5Ao4Nz5Dp/vMgadX4GzGMvmEH1WGrCHlPJiOFdTNSrxFyIsFs1Pn/QIDAQAB",
+  "permissions": [
+    "downloads",
+    "nativeMessaging"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
+}

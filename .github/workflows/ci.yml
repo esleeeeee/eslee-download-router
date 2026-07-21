@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, "feature/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.302
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: src/DownloadRouter.Extension/package-lock.json
+      - name: Restore .NET
+        run: dotnet restore DownloadRouter.slnx --configfile NuGet.Config
+      - name: Restore extension
+        working-directory: src/DownloadRouter.Extension
+        run: npm ci
+      - name: Build
+        run: .\scripts\build.ps1 -Configuration Release
+      - name: Test
+        run: .\scripts\test.ps1 -Configuration Release

@@ -1,0 +1,28 @@
+<Window
+    x:Class="DownloadRouter.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Grid>
+    <NavigationView
+        x:Name="Navigation"
+        IsBackButtonVisible="Collapsed"
+        IsSettingsVisible="False"
+        IsPaneToggleButtonVisible="True"
+        PaneDisplayMode="Auto"
+        SelectionChanged="Navigation_SelectionChanged">
+      <NavigationView.MenuItems>
+        <NavigationViewItem Content="대시보드" Tag="dashboard" Icon="Home" />
+        <NavigationViewItem Content="사이트 규칙" Tag="rules" Icon="Library" />
+        <NavigationViewItem Content="다운로드 이력" Tag="history" Icon="Download" />
+        <NavigationViewItem Content="저장 위치 선택 대기" Tag="pending" Icon="Folder" />
+        <NavigationViewItem Content="브라우저 연결" Tag="browsers" Icon="Globe" />
+        <NavigationViewItem Content="일반 설정" Tag="settings" Icon="Setting" />
+        <NavigationViewItem Content="진단 및 문제 해결" Tag="diagnostics" Icon="Repair" />
+        <NavigationViewItem Content="정보" Tag="about" Icon="Help" />
+      </NavigationView.MenuItems>
+      <ScrollViewer>
+        <StackPanel x:Name="ContentPanel" Padding="32" Spacing="16" MaxWidth="1100" HorizontalAlignment="Stretch" />
+      </ScrollViewer>
+    </NavigationView>
+  </Grid>
+</Window>

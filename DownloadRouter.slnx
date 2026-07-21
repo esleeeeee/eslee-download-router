@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DownloadRouter.App/DownloadRouter.App.csproj" />
+    <Project Path="src/DownloadRouter.Agent/DownloadRouter.Agent.csproj" />
+    <Project Path="src/DownloadRouter.Core/DownloadRouter.Core.csproj" />
+    <Project Path="src/DownloadRouter.Infrastructure/DownloadRouter.Infrastructure.csproj" />
+    <Project Path="src/DownloadRouter.NativeHost/DownloadRouter.NativeHost.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DownloadRouter.Core.Tests/DownloadRouter.Core.Tests.csproj" />
+    <Project Path="tests/DownloadRouter.Infrastructure.Tests/DownloadRouter.Infrastructure.Tests.csproj" />
+    <Project Path="tests/DownloadRouter.IntegrationTests/DownloadRouter.IntegrationTests.csproj" />
+  </Folder>
+</Solution>

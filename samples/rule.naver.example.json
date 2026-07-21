@@ -1,0 +1,10 @@
+{
+  "name": "네이버 다운로드",
+  "isEnabled": true,
+  "matchType": "DomainAndSubdomains",
+  "matchValue": "naver.com",
+  "matchTarget": "InitiatingPage",
+  "storageRoot": "{Documents}\\eslee\\naver다운로드",
+  "storageMode": "SelectSubfolder",
+  "priority": 0
+}

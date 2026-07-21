@@ -1,0 +1,10 @@
+{
+  "dataDirectory": "{LocalAppData}\\eslee\\DownloadRouter",
+  "logLevel": "Information",
+  "startAgentAtLogin": false,
+  "fileStability": {
+    "pollIntervalMilliseconds": 500,
+    "stableSampleCount": 3,
+    "maxWaitSeconds": 30
+  }
+}
