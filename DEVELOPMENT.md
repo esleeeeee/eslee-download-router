@@ -30,6 +30,14 @@ bootstrap은 버전 검사, NuGet restore, `npm ci`, 로컬 데이터 디렉터�
 - 새 패키지는 중앙 버전 파일 또는 잠금 파일에 정확한 버전을 기록합니다.
 - 사용자명, 회사 경로, 브라우저 프로필, PC별 Native Host manifest를 커밋하지 않습니다.
 
+## WinUI와 DPI
+
+- unpackaged App manifest의 `PerMonitorV2, PerMonitor` 선언을 유지합니다. 제거하면 Windows가 앱을 96 DPI 비트맵으로 확대할 수 있습니다.
+- XAML 크기와 간격은 DIP 기준이며 물리 픽셀이나 모니터 해상도별 고정 폭을 사용하지 않습니다.
+- 새 화면은 공통 `ContentPanel` 안에서 가로 stretch하고, 폼 전체는 1100 DIP `MaxWidth`를 넘지 않습니다.
+- 좁은 창은 가로 스크롤 대신 세로 스크롤을 사용하고, 최소 폭을 지정할 때는 실제 720 DIP 창에서 우측 경계를 확인합니다.
+- 시각 검증 시 `GetProcessDpiAwareness`, `GetWindowDpiAwarenessContext`, `GetDpiForWindow`와 진단 화면의 `XamlRoot.RasterizationScale`을 함께 확인합니다.
+
 ## 반복 작업
 
 ```powershell

@@ -21,13 +21,13 @@ chrome.downloads.onCreated/onChanged
 
 ### Extension
 
-Manifest V3 service worker이며 권한은 `downloads`, `nativeMessaging`뿐입니다. `onCreated`에서 referrer, 최초/최종 파일 URL을 별도 필드로 전달하고 `onChanged`에서 완료 또는 중단 상태를 전송합니다. 연결 오류는 다운로드를 취소하거나 변경하지 않습니다.
+Manifest V3 service worker이며 권한은 `downloads`, `nativeMessaging`뿐입니다. `onCreated`에서 referrer, 최초/최종 파일 URL을 별도 필드로 전달하고 `onChanged`에서 완료 또는 중단 상태를 전송합니다. 연결 오류는 다운로드를 취소하거나 변경하지 않습니다. 실패할 때만 원문 대신 `host-not-found`, `host-exited`, `agent.unavailable` 같은 제한된 분류 코드를 service worker 콘솔에 기록합니다.
 
 Chromium downloads API에는 신뢰할 수 있는 시작 탭 URL 필드가 없습니다. 따라서 활성 탭을 다운로드 출처로 추측하지 않고 `initiatingPageUrl`은 근거가 있을 때만 사용합니다. 현재 확장은 referrer를 우선 근거로 전달합니다.
 
 ### Native Host
 
-브라우저가 실행하는 짧은 수명의 브리지입니다. 고정 개발 확장 origin, 프로토콜 버전, 비어 있지 않은 request ID, 명령 allowlist, 최대 1 MiB 메시지를 검사합니다. 셸 문자열을 실행하지 않으며 장기 상태나 UI가 없습니다. Agent가 없으면 같은 설치 디렉터리의 정확한 `DownloadRouter.Agent.exe`만 시작합니다.
+브라우저가 실행하는 짧은 수명의 브리지입니다. 고정 개발 확장 origin, 프로토콜 버전, 비어 있지 않은 request ID, 명령 allowlist, 최대 1 MiB 메시지를 검사합니다. 임의 셸 문자열을 실행하지 않으며 장기 상태나 UI가 없습니다. Agent가 없으면 같은 설치 디렉터리의 정확한 `DownloadRouter.Agent.exe`만 숨김 프로세스로 분리 실행해 Native Messaging stdin/stdout/stderr를 상속하지 않게 합니다.
 
 ### Agent
 
@@ -57,6 +57,8 @@ SQLite 마이그레이션은 `schema_migrations`, `rules`, `download_jobs`, `job
 ### WinUI 3 App
 
 Agent와 동일한 Core 라이브러리를 참조하지만 DB나 파일 이동 구현을 직접 호출하지 않고 Named Pipe 명령으로 통신합니다. 현재 대시보드, 규칙, 이력, 규칙별 선택 대기 그룹, 브라우저 연결, 일반 설정, 진단, 정보 화면 골격이 있습니다.
+
+앱은 unpackaged WinUI 3 프로세스를 manifest에서 Per-Monitor V2로 선언합니다. 크기와 여백은 장치 독립 픽셀(DIP)을 사용하고 루트에서 layout rounding을 적용합니다. 모든 화면은 하나의 `NavigationView -> vertical ScrollViewer -> stretch viewport -> MaxWidth 1100 form` 구조를 공유합니다. 1200 DIP 미만에서는 16 DIP, 넓은 창에서는 32 DIP 좌우 패딩을 사용하며 가로 스크롤은 만들지 않습니다. 이력 화면은 현재 작업의 ID/상태 스냅샷이 바뀔 때만 다시 렌더링합니다.
 
 ## 작업 상태
 

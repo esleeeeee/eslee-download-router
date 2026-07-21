@@ -22,6 +22,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\register-native-ho
 ```
 
 등록은 HKCU와 `%LOCALAPPDATA%\eslee\DownloadRouter\native-host`만 사용하며 관리자 권한을 요구하지 않습니다.
+manifest는 Windows PowerShell 5.1에서도 UTF-8 BOM 없이 기록됩니다. `scripts\diagnose.ps1`의 `valid-json=yes`, `utf8-bom=False`, `host-exists=True`, `development-origin=True`를 함께 확인하세요.
 
 ## 3. 확장 로드
 
@@ -39,6 +40,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-dev.ps1 -SkipB
 ```
 
 앱의 “진단 및 문제 해결”에서 Agent 연결을 테스트합니다. 이 성공은 앱과 Agent 사이만 확인합니다. 브라우저 Native Messaging 성공은 확장 service worker 오류와 Agent 작업 이력을 함께 확인해야 합니다.
+
+“다운로드 이력”은 모든 브라우저 다운로드가 아니라 사이트 규칙에 매칭되어 추적된 작업만 표시합니다. 규칙이 없는 다운로드가 정상 완료되고 이력이 비어 있는 것은 fail-open 정책상 정상입니다. 이력 화면을 열어 둔 동안 추적 작업이 바뀌면 약 3초 안에 자동 갱신됩니다.
 
 ## 5. 테스트 규칙
 
@@ -60,5 +63,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\unregister-native-
 - 확장 ID와 `allowed_origins` 일치 확인
 - 기업 정책의 Native Messaging/개발자 모드 차단 확인
 - 브라우저를 완전히 종료 후 다시 시작
+- 확장 관리 화면의 service worker 검사에서 `[Download Router] Native host communication failed (<code>)` 확인. 로그에는 원문 URL, 토큰, 전체 로컬 경로가 포함되지 않습니다.
 
 URL query, 인증 토큰, 실제 사용자 경로가 포함된 로그를 issue나 문서에 붙이지 마세요.

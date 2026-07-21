@@ -7,8 +7,8 @@
 - 현재 단계: Phase 0 완료, Phase 1 기술 스파이크 완료, 핵심 기능 개발 중
 - 공식 저장소: https://github.com/esleeeeee/eslee-Download-Router
 - 게시 브랜치: `main`, `develop`, `feature/initial-spike` — 세 브랜치 모두 공식 원격에 생성 완료
-- 구현 기준 커밋: `9975c47bd0ac64e26fa651dcd8162aac068f73d8` (`feat: bootstrap download router spike`)
-- 원격 검증: GitHub 플러그인에서 공개 저장소, 세 브랜치, 위 커밋을 직접 확인
+- 작업 브랜치/기준 HEAD: `feature/initial-spike` / `3a4e25e86f570d03a37f61f4754b3d11bd501717`
+- 현재 문서는 위 HEAD에 적용한 로컬 진단·수정 결과를 포함하며 원격 push는 하지 않음
 
 ## 구현 완료
 
@@ -27,6 +27,9 @@
 - 규칙별 선택 대기 작업 묶음 처리 API와 App 화면
 - WinUI 3 필수 내비게이션 화면 골격과 Agent 진단
 - 브라우저 설치/관리 주소 adapter와 HKCU Native Host 등록 스크립트
+- Windows PowerShell 5.1 절대 경로/HKCU 등록 호환성과 BOM 없는 UTF-8 Native Host manifest
+- 실패할 때만 분류 코드를 남기는 Extension Native Messaging 진단 로그
+- Per-Monitor V2 WinUI 렌더링, 반응형 공통 콘텐츠/세로 스크롤, 3초 이력 변경 감지
 - self-contained win-x64 publish와 per-user Inno Setup 골격
 
 ## 빌드와 테스트
@@ -34,12 +37,15 @@
 | 항목 | 결과 |
 |---|---|
 | `.NET Debug build` | 성공, 경고 0, 오류 0 |
-| `.NET tests` | 27/27 통과(Core 21, Infrastructure 4, Integration 2) |
+| `.NET tests` | 29/29 통과(Core 21, Infrastructure 5, Integration 3) |
 | Extension ESLint/TypeScript build | 성공 |
-| Extension Node tests | 4/4 통과 |
+| Extension Node tests | 6/6 통과 |
 | Agent Named Pipe ping | 성공 |
-| Native Host self-test | 성공 |
+| Native Host self-test/길이 접두사 ping/Agent 자동 시작 | 성공 |
+| Native Host Agent 장애 fail-open | `agent.unavailable`, Host 종료 코드 0, 브라우저 비차단 응답 확인 |
 | Release win-x64 self-contained publish | App/Agent/Native Host 성공 |
+| WinUI QHD 125% | 수정 전 DPI Unaware/96 → 수정 후 Per-Monitor V2/120 확인 |
+| WinUI 반응형 폭 | 900px 창에서 우측 넘침 0, 2400px 창에서 1100 DIP 폼 중앙 정렬 확인 |
 | clean clone | 공식 `feature/initial-spike@9975c47`에서 bootstrap/build/test 성공 |
 | Installer compile/install/uninstall | 미검증 |
 
@@ -47,24 +53,24 @@
 
 | 브라우저 | 설치 탐지 | 확장 로드 | 다운로드 이벤트 | Native Messaging | 자동 저장 | 직접 선택 |
 |---|---|---|---|---|---|---|
-| Whale | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
-| Edge | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
-| Chrome | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
+| Whale | 성공 | 성공 | 성공 | 성공 | 수동 검증 필요 | 수동 검증 필요 |
+| Edge | 성공 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
+| Chrome | 성공 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
 | Brave | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
 | Vivaldi | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
 | Opera | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
 
-실제 브라우저에서 수행하지 않은 결과를 성공으로 표시하지 않았습니다.
+Whale은 설치된 , 고정 ID 확장과 `dist` 로드, HKCU 등록, 실제 미매칭 다운로드 이벤트의 Agent 도달을 확인했습니다. 규칙이 없는 다운로드는 의도적으로 작업을 만들지 않으므로 이력이 비는 것이 정상입니다. 실제 Whale에서 매칭 규칙 파일 이동과 직접 선택은 아직 성공으로 표시하지 않았습니다.
 
 ## 알려진 문제와 제한
 
 - downloads API만으로 다운로드 시작 탭 URL을 신뢰성 있게 얻을 수 없어 활성 탭을 추측하지 않습니다. 현재 referrer와 파일 URL을 분리해 사용합니다.
-- 직접 선택은 App의 대기 화면에서 규칙별 묶음으로 처리합니다. Agent의 자동 창 활성화/트레이 알림, 새 폴더 생성, 새로 고침은 미구현입니다.
+- 직접 선택은 App의 대기 화면에서 규칙별 묶음으로 처리합니다. Agent의 자동 창 활성화/트레이 알림, 새 폴더 생성, 폴더 새로 고침은 미구현입니다.
 - 시작 시 실행 UI는 실제 Windows 등록과 연결되지 않았습니다.
 - Agent 시작 시 미완료 이동 복구 워커는 미구현입니다. DB에는 작업 상태가 유지됩니다.
-- 브라우저별 Native Messaging registry adapter, 특히 Whale/Opera는 실제 PC 검증이 필요합니다.
+- Whale registry adapter는 이 PC에서 검증했습니다. Brave/Vivaldi/Opera adapter는 실제 PC 검증이 필요합니다.
 - 브라우저 자체 “다운로드 전에 저장 위치 확인” 설정 감지와 안내는 문서만 있고 UI 자동 감지는 미구현입니다.
-- 앱 UI의 실제 실행/시각·접근성 검증과 installer 동작 검증이 필요합니다.
+- QHD 125% 실제 실행과 좁은/넓은 창 시각·경계 검증은 완료했습니다. Windows 100%/150%, FHD/4K 실기기, 키보드/스크린리더 접근성 및 installer 동작 검증은 남아 있습니다.
 
 ## 보류된 결정
 
@@ -75,11 +81,11 @@
 
 ## 다음 작업
 
-1. Edge에서 개발자 모드 확장 로드와 Native Messaging 왕복을 실제 검증
-2. Edge 자동 저장과 규칙 미매칭 fail-open 실다운로드 검증
-3. 규칙별 전용 폴더 트리 picker에 새 폴더/새로 고침 추가 및 Agent 알림 연결
-4. Whale registry adapter와 다운로드/Native Messaging 검증
-5. Chrome 동일 시나리오 검증
+1. Whale에서 `example.com` 샘플 규칙으로 공개 파일 자동 이동과 이력 자동 갱신을 수동 검증
+2. Whale 직접 선택 규칙과 Native Host 장애 중 실다운로드 유지 검증
+3. Windows 100%/150% 및 FHD/4K에서 UI 실배율 시각 검증
+4. Edge에서 개발자 모드 확장 로드와 Native Messaging 왕복을 실제 검증
+5. 규칙별 전용 폴더 트리 picker에 새 폴더/새로 고침 추가 및 Agent 알림 연결
 6. Agent 시작 시 미완료 작업 복구와 시작 시 실행 옵션 구현
 7. Inno Setup 설치/제거와 앱 UI 검증
 
