@@ -6,8 +6,9 @@
 
 - 현재 단계: Phase 0 완료, Phase 1 기술 스파이크 완료, 핵심 기능 개발 중
 - 공식 저장소: https://github.com/esleeeeee/eslee-Download-Router
-- 현재 브랜치: `main` — 초기 push 후 `develop`, `feature/initial-spike` 기준 브랜치를 함께 생성할 예정
-- 마지막 주요 커밋: 아직 없음(공식 원격이 빈 저장소여서 초기 커밋 준비 중)
+- 게시 브랜치: `main`, `develop`, `feature/initial-spike` — 세 브랜치 모두 공식 원격에 생성 완료
+- 구현 기준 커밋: `9975c47bd0ac64e26fa651dcd8162aac068f73d8` (`feat: bootstrap download router spike`)
+- 원격 검증: GitHub 플러그인에서 공개 저장소, 세 브랜치, 위 커밋을 직접 확인
 
 ## 구현 완료
 
@@ -39,7 +40,7 @@
 | Agent Named Pipe ping | 성공 |
 | Native Host self-test | 성공 |
 | Release win-x64 self-contained publish | App/Agent/Native Host 성공 |
-| clean clone | 초기 push 이후 검증 예정 |
+| clean clone | 공식 `feature/initial-spike@9975c47`에서 bootstrap/build/test 성공 |
 | Installer compile/install/uninstall | 미검증 |
 
 ## 브라우저 검증
@@ -80,7 +81,7 @@
 4. Whale registry adapter와 다운로드/Native Messaging 검증
 5. Chrome 동일 시나리오 검증
 6. Agent 시작 시 미완료 작업 복구와 시작 시 실행 옵션 구현
-7. Inno Setup 설치/제거, 앱 UI, clean clone 검증
+7. Inno Setup 설치/제거와 앱 UI 검증
 
 ## 실행 명령
 

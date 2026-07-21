@@ -5,8 +5,9 @@
 ## 기준점
 
 - 저장소: `https://github.com/esleeeeee/eslee-Download-Router.git`
-- 이어서 사용할 브랜치: 초기 push 후 `feature/initial-spike`(기준 통합 브랜치는 `develop`)
-- 마지막 정상 커밋: 초기 커밋 전 — 이 세션의 push 후 실제 해시로 갱신
+- 이어서 사용할 브랜치: `feature/initial-spike`(기준 통합 브랜치는 `develop`)
+- 구현 기준 커밋: `9975c47bd0ac64e26fa651dcd8162aac068f73d8` (`feat: bootstrap download router spike`)
+- 원격 상태: `main`, `develop`, `feature/initial-spike` 게시 및 GitHub 플러그인 검증 완료
 - .NET SDK: `10.0.302`
 - Node.js: 24 이상
 - npm: 11 이상
@@ -36,6 +37,7 @@ Edge에서 `edge://extensions`를 열고 개발자 모드를 켠 뒤 “압축 �
 - Agent Named Pipe ping 성공
 - Native Host self-test 성공
 - App/Agent/Native Host self-contained Release publish 성공
+- 공식 `feature/initial-spike@9975c47` 클린 클론 bootstrap/build/test 성공
 
 브라우저 수동 검증, installer, UI 시각 검증은 아직 정상 기준에 포함되지 않습니다.
 
