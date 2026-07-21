@@ -11,12 +11,18 @@ public sealed partial class MainWindow : Window
     private readonly AgentClient agent = new();
     private readonly PathTokenResolver pathResolver = new(new WindowsKnownPathProvider());
     private readonly PathBoundaryValidator boundaryValidator = new();
+    private readonly DispatcherTimer historyRefreshTimer = new() { Interval = TimeSpan.FromSeconds(3) };
+    private string? historySnapshot;
+    private bool historyRefreshInProgress;
 
     public MainWindow()
     {
         InitializeComponent();
         Title = "eslee Download Router";
         Navigation.SelectedItem = Navigation.MenuItems[0];
+        historyRefreshTimer.Tick += HistoryRefreshTimer_Tick;
+        historyRefreshTimer.Start();
+        Closed += (_, _) => historyRefreshTimer.Stop();
         _ = ShowDashboardAsync();
     }
 
@@ -67,12 +73,12 @@ public sealed partial class MainWindow : Window
     private async Task ShowRulesAsync()
     {
         Prepare("사이트 규칙", "도메인, 정확한 호스트 또는 URL 일부를 기준으로 저장 위치를 지정합니다.");
-        var name = new TextBox { Header = "규칙 이름", PlaceholderText = "예: 네이버 다운로드" };
-        var matchValue = new TextBox { Header = "대상 사이트 또는 URL 일부", PlaceholderText = "naver.com" };
-        var storageRoot = new TextBox { Header = "저장 루트", Text = "{Downloads}\\eslee\\Routed" };
-        var matchType = new ComboBox { Header = "매칭 방식", ItemsSource = Enum.GetValues<RuleMatchType>(), SelectedIndex = 0 };
-        var matchTarget = new ComboBox { Header = "매칭 대상", ItemsSource = Enum.GetValues<RuleMatchTarget>(), SelectedItem = RuleMatchTarget.InitiatingPage };
-        var storageMode = new ComboBox { Header = "저장 방식", ItemsSource = Enum.GetValues<StorageMode>(), SelectedIndex = 0 };
+        var name = new TextBox { Header = "규칙 이름", PlaceholderText = "예: 네이버 다운로드", HorizontalAlignment = HorizontalAlignment.Stretch };
+        var matchValue = new TextBox { Header = "대상 사이트 또는 URL 일부", PlaceholderText = "naver.com", HorizontalAlignment = HorizontalAlignment.Stretch };
+        var storageRoot = new TextBox { Header = "저장 루트", Text = "{Downloads}\\eslee\\Routed", HorizontalAlignment = HorizontalAlignment.Stretch };
+        var matchType = new ComboBox { Header = "매칭 방식", ItemsSource = Enum.GetValues<RuleMatchType>(), SelectedIndex = 0, HorizontalAlignment = HorizontalAlignment.Stretch };
+        var matchTarget = new ComboBox { Header = "매칭 대상", ItemsSource = Enum.GetValues<RuleMatchTarget>(), SelectedItem = RuleMatchTarget.InitiatingPage, HorizontalAlignment = HorizontalAlignment.Stretch };
+        var storageMode = new ComboBox { Header = "저장 방식", ItemsSource = Enum.GetValues<StorageMode>(), SelectedIndex = 0, HorizontalAlignment = HorizontalAlignment.Stretch };
         var preview = new TextBlock { Text = "naver.com은 naver.com과 모든 하위 도메인에 일치합니다.", TextWrapping = TextWrapping.Wrap };
         matchValue.TextChanged += (_, _) => preview.Text = string.IsNullOrWhiteSpace(matchValue.Text)
             ? "매칭 예시가 여기에 표시됩니다."
@@ -138,26 +144,68 @@ public sealed partial class MainWindow : Window
 
     private async Task ShowHistoryAsync()
     {
-        Prepare("다운로드 작업 및 이력", "최근 작업의 성공·실패·대기 상태와 정제된 출처를 표시합니다.");
         try
         {
             var response = await agent.SendAsync("jobs.list");
             var jobs = AgentClient.ReadData<List<DownloadJob>>(response) ?? [];
-            foreach (var job in jobs)
-            {
-                AddCard(job.CurrentFileName, $"{job.Browser} · {job.Status} · {job.SanitizedSource ?? "출처 확인 불가"}\n{job.ErrorMessage ?? job.FinalPath ?? string.Empty}");
-            }
+            RenderHistory(jobs);
+        }
+        catch (Exception exception)
+        {
+            Prepare("다운로드 작업 및 이력", "사이트 규칙에 매칭되어 추적된 작업의 성공·실패·대기 상태와 정제된 출처를 표시합니다.");
+            AddError("다운로드 이력을 불러오지 못했습니다.", exception);
+        }
+    }
 
-            if (jobs.Count == 0)
+    private async void HistoryRefreshTimer_Tick(object? sender, object args)
+    {
+        if (historyRefreshInProgress
+            || !string.Equals(
+                (Navigation.SelectedItem as NavigationViewItem)?.Tag as string,
+                "history",
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        historyRefreshInProgress = true;
+        try
+        {
+            var response = await agent.SendAsync("jobs.list");
+            var jobs = AgentClient.ReadData<List<DownloadJob>>(response) ?? [];
+            if (!string.Equals(historySnapshot, CreateHistorySnapshot(jobs), StringComparison.Ordinal))
             {
-                AddMuted("아직 추적된 다운로드가 없습니다. 규칙 없는 다운로드는 브라우저 기본 동작을 유지합니다.");
+                RenderHistory(jobs);
             }
         }
         catch (Exception exception)
         {
-            AddError("다운로드 이력을 불러오지 못했습니다.", exception);
+            System.Diagnostics.Debug.WriteLine($"History refresh failed: {exception.GetType().Name}");
+        }
+        finally
+        {
+            historyRefreshInProgress = false;
         }
     }
+
+    private void RenderHistory(IReadOnlyList<DownloadJob> jobs)
+    {
+        Prepare("다운로드 작업 및 이력", "사이트 규칙에 매칭되어 추적된 작업의 성공·실패·대기 상태와 정제된 출처를 표시합니다.");
+        foreach (var job in jobs)
+        {
+            AddCard(job.CurrentFileName, $"{job.Browser} · {job.Status} · {job.SanitizedSource ?? "출처 확인 불가"}\n{job.ErrorMessage ?? job.FinalPath ?? string.Empty}");
+        }
+
+        if (jobs.Count == 0)
+        {
+            AddMuted("아직 규칙에 매칭되어 추적된 다운로드가 없습니다. 규칙 없는 다운로드는 이력에 추가하지 않고 브라우저 기본 동작을 유지합니다.");
+        }
+
+        historySnapshot = CreateHistorySnapshot(jobs);
+    }
+
+    private static string CreateHistorySnapshot(IEnumerable<DownloadJob> jobs)
+        => string.Join('|', jobs.Select(static job => $"{job.Id:N}:{job.Status}:{job.CompletedAt:O}:{job.ErrorCode}"));
 
     private async Task ShowPendingAsync()
     {
@@ -186,7 +234,7 @@ public sealed partial class MainWindow : Window
                     Header = $"{rule.Name}: {group.Count()}개 파일",
                     ItemsSource = folders,
                     SelectedIndex = folders.Count > 0 ? 0 : -1,
-                    MinWidth = 420,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
                 };
                 var apply = new Button { Content = "대기열 전체에 적용" };
                 apply.Click += async (_, _) =>
@@ -282,6 +330,12 @@ public sealed partial class MainWindow : Window
         {
             var response = await agent.SendAsync("diagnostics.status");
             AddCard("현재 진단 상태", response.Data?.GetRawText() ?? "응답 없음");
+            var rasterizationScale = ContentPanel.XamlRoot?.RasterizationScale;
+            AddCard(
+                "UI 렌더링 배율",
+                rasterizationScale is null
+                    ? "현재 창의 배율을 확인할 수 없습니다."
+                    : $"{rasterizationScale.Value * 100:0}% (XamlRoot RasterizationScale {rasterizationScale.Value:0.##})");
         }
         catch (Exception exception)
         {
@@ -341,6 +395,7 @@ public sealed partial class MainWindow : Window
         panel.Children.Add(new TextBlock { Text = value, TextWrapping = TextWrapping.Wrap });
         ContentPanel.Children.Add(new Border
         {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(16),
             CornerRadius = new CornerRadius(8),
             Background = Application.Current.Resources["CardBackgroundFillColorDefaultBrush"] as Microsoft.UI.Xaml.Media.Brush,
