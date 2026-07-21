@@ -55,7 +55,72 @@ public sealed class CommandValidationTests : IDisposable
         var response = await handler.HandleAsync(request, CancellationToken.None);
 
         Assert.True(response.Success);
+        Assert.False(response.Data!.Value.GetProperty("tracked").GetBoolean());
+        Assert.True(response.Data.Value.GetProperty("failOpen").GetBoolean());
         Assert.Empty(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task MatchedDownloadCreatesHistoryAndRoutesCompletedFile()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var incoming = Directory.CreateDirectory(Path.Combine(root, "incoming")).FullName;
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        var source = Path.Combine(incoming, "example.txt");
+        await File.WriteAllTextAsync(source, "public test fixture", CancellationToken.None);
+        var now = DateTimeOffset.UtcNow;
+        var rule = new DownloadRule(
+            Guid.NewGuid(),
+            "example.com smoke rule",
+            true,
+            RuleMatchType.DomainAndSubdomains,
+            "example.com",
+            RuleMatchTarget.InitiatingPage,
+            destination,
+            StorageMode.Automatic,
+            0,
+            0,
+            now,
+            now);
+        await repository.UpsertRuleAsync(rule, CancellationToken.None);
+
+        var started = new AgentCommand(
+            ProtocolConstants.CurrentVersion,
+            Guid.NewGuid(),
+            "download.started",
+            JsonSerializer.SerializeToElement(
+                new DownloadStartedPayload(
+                    "Whale",
+                    "example-download-1",
+                    "example.txt",
+                    null,
+                    "https://example.com/downloads",
+                    "https://example.com/example.txt",
+                    null,
+                    null),
+                ProtocolJson.Options));
+        var startedResponse = await handler.HandleAsync(started, CancellationToken.None);
+
+        Assert.True(startedResponse.Success, startedResponse.Message);
+        Assert.True(startedResponse.Data!.Value.GetProperty("tracked").GetBoolean());
+
+        var changed = new AgentCommand(
+            ProtocolConstants.CurrentVersion,
+            Guid.NewGuid(),
+            "download.changed",
+            JsonSerializer.SerializeToElement(
+                new DownloadChangedPayload("Whale", "example-download-1", "complete", source, null),
+                ProtocolJson.Options));
+        var changedResponse = await handler.HandleAsync(changed, CancellationToken.None);
+
+        Assert.True(changedResponse.Success, changedResponse.Message);
+        Assert.Equal("Completed", changedResponse.Data!.Value.GetProperty("status").GetString());
+        var job = Assert.Single(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+        Assert.Equal(DownloadJobStatus.Completed, job.Status);
+        Assert.False(File.Exists(source));
+        Assert.NotNull(job.FinalPath);
+        Assert.True(File.Exists(job.FinalPath));
+        Assert.Equal("public test fixture", await File.ReadAllTextAsync(job.FinalPath!, CancellationToken.None));
     }
 
     private async Task<(AgentCommandHandler Handler, DownloadRouterRepository Repository)> CreateHandlerAsync()

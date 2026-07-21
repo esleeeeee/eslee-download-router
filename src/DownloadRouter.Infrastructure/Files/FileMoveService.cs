@@ -77,9 +77,8 @@ public sealed class FileMoveService(
                 }
 
                 logger.LogInformation(
-                    "File move completed from {SourceFileName} to {DestinationDirectory}",
-                    Path.GetFileName(sourceFull),
-                    destinationDirectory);
+                    "File move completed for {SourceFileName}",
+                    Path.GetFileName(sourceFull));
                 return new FileMoveResult(true, destination, null, null, false);
             }
             finally
