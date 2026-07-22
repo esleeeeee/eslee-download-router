@@ -1,4 +1,3 @@
-using System.Text.Json;
 using DownloadRouter.Core.Models;
 using DownloadRouter.Core.Paths;
 using Microsoft.UI.Xaml;
@@ -11,18 +10,14 @@ public sealed partial class MainWindow : Window
     private readonly AgentClient agent = new();
     private readonly PathTokenResolver pathResolver = new(new WindowsKnownPathProvider());
     private readonly PathBoundaryValidator boundaryValidator = new();
-    private readonly DispatcherTimer historyRefreshTimer = new() { Interval = TimeSpan.FromSeconds(3) };
-    private string? historySnapshot;
-    private bool historyRefreshInProgress;
 
     public MainWindow()
     {
         InitializeComponent();
         Title = "eslee Download Router";
         Navigation.SelectedItem = Navigation.MenuItems[0];
-        historyRefreshTimer.Tick += HistoryRefreshTimer_Tick;
-        historyRefreshTimer.Start();
-        Closed += (_, _) => historyRefreshTimer.Stop();
+        InitializeLiveUpdates();
+        Closed += (_, _) => StopLiveUpdates();
         _ = ShowDashboardAsync();
     }
 
@@ -50,24 +45,12 @@ public sealed partial class MainWindow : Window
             _ => Task.CompletedTask,
         };
 
-    private async Task ShowDashboardAsync()
+    private void ContentScrollViewer_SizeChanged(object sender, SizeChangedEventArgs args)
     {
-        Prepare("대시보드", "규칙이 적용된 다운로드와 연결 상태를 한눈에 확인합니다.");
-        try
-        {
-            var jobsResponse = await agent.SendAsync("jobs.list");
-            var rulesResponse = await agent.SendAsync("rules.list");
-            var jobs = AgentClient.ReadData<List<DownloadJob>>(jobsResponse) ?? [];
-            var rules = AgentClient.ReadData<List<DownloadRule>>(rulesResponse) ?? [];
-            AddCard("활성 규칙", rules.Count(static rule => rule.IsEnabled).ToString());
-            AddCard("저장 위치 선택 대기", jobs.Count(static job => job.Status == DownloadJobStatus.WaitingForSelection).ToString());
-            AddCard("최근 완료", jobs.Count(static job => job.Status == DownloadJobStatus.Completed).ToString());
-            AddCard("재시도/실패", jobs.Count(static job => job.Status is DownloadJobStatus.RetryPending or DownloadJobStatus.Failed).ToString());
-        }
-        catch (Exception exception)
-        {
-            AddError("Agent에 연결할 수 없습니다. scripts/run-dev.ps1을 실행한 뒤 다시 시도하세요.", exception);
-        }
+        var available = Math.Max(
+            0,
+            args.NewSize.Width - ContentViewport.Padding.Left - ContentViewport.Padding.Right);
+        ContentPanel.Width = Math.Min(1100, available);
     }
 
     private async Task ShowRulesAsync()
@@ -139,130 +122,6 @@ public sealed partial class MainWindow : Window
         catch (Exception exception)
         {
             AddError("규칙 목록을 불러오지 못했습니다.", exception);
-        }
-    }
-
-    private async Task ShowHistoryAsync()
-    {
-        try
-        {
-            var response = await agent.SendAsync("jobs.list");
-            var jobs = AgentClient.ReadData<List<DownloadJob>>(response) ?? [];
-            RenderHistory(jobs);
-        }
-        catch (Exception exception)
-        {
-            Prepare("다운로드 작업 및 이력", "사이트 규칙에 매칭되어 추적된 작업의 성공·실패·대기 상태와 정제된 출처를 표시합니다.");
-            AddError("다운로드 이력을 불러오지 못했습니다.", exception);
-        }
-    }
-
-    private async void HistoryRefreshTimer_Tick(object? sender, object args)
-    {
-        if (historyRefreshInProgress
-            || !string.Equals(
-                (Navigation.SelectedItem as NavigationViewItem)?.Tag as string,
-                "history",
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        historyRefreshInProgress = true;
-        try
-        {
-            var response = await agent.SendAsync("jobs.list");
-            var jobs = AgentClient.ReadData<List<DownloadJob>>(response) ?? [];
-            if (!string.Equals(historySnapshot, CreateHistorySnapshot(jobs), StringComparison.Ordinal))
-            {
-                RenderHistory(jobs);
-            }
-        }
-        catch (Exception exception)
-        {
-            System.Diagnostics.Debug.WriteLine($"History refresh failed: {exception.GetType().Name}");
-        }
-        finally
-        {
-            historyRefreshInProgress = false;
-        }
-    }
-
-    private void RenderHistory(IReadOnlyList<DownloadJob> jobs)
-    {
-        Prepare("다운로드 작업 및 이력", "사이트 규칙에 매칭되어 추적된 작업의 성공·실패·대기 상태와 정제된 출처를 표시합니다.");
-        foreach (var job in jobs)
-        {
-            AddCard(job.CurrentFileName, $"{job.Browser} · {job.Status} · {job.SanitizedSource ?? "출처 확인 불가"}\n{job.ErrorMessage ?? job.FinalPath ?? string.Empty}");
-        }
-
-        if (jobs.Count == 0)
-        {
-            AddMuted("아직 규칙에 매칭되어 추적된 다운로드가 없습니다. 규칙 없는 다운로드는 이력에 추가하지 않고 브라우저 기본 동작을 유지합니다.");
-        }
-
-        historySnapshot = CreateHistorySnapshot(jobs);
-    }
-
-    private static string CreateHistorySnapshot(IEnumerable<DownloadJob> jobs)
-        => string.Join('|', jobs.Select(static job => $"{job.Id:N}:{job.Status}:{job.CompletedAt:O}:{job.ErrorCode}"));
-
-    private async Task ShowPendingAsync()
-    {
-        Prepare("저장 위치 선택 대기", "각 규칙의 루트와 실제 하위 폴더만 선택할 수 있습니다.");
-        try
-        {
-            var jobs = AgentClient.ReadData<List<DownloadJob>>(await agent.SendAsync("jobs.list")) ?? [];
-            var rules = (AgentClient.ReadData<List<DownloadRule>>(await agent.SendAsync("rules.list")) ?? [])
-                .ToDictionary(static rule => rule.Id);
-            var groups = jobs
-                .Where(static job => job.Status == DownloadJobStatus.WaitingForSelection)
-                .GroupBy(static job => job.RuleId)
-                .ToList();
-
-            foreach (var group in groups)
-            {
-                if (!rules.TryGetValue(group.Key, out var rule))
-                {
-                    continue;
-                }
-
-                var root = pathResolver.Resolve(rule.StorageRoot);
-                var folders = EnumerateSafeFolders(root);
-                var picker = new ComboBox
-                {
-                    Header = $"{rule.Name}: {group.Count()}개 파일",
-                    ItemsSource = folders,
-                    SelectedIndex = folders.Count > 0 ? 0 : -1,
-                    HorizontalAlignment = HorizontalAlignment.Stretch,
-                };
-                var apply = new Button { Content = "대기열 전체에 적용" };
-                apply.Click += async (_, _) =>
-                {
-                    if (picker.SelectedItem is not string selected)
-                    {
-                        await ShowMessageAsync("하위 폴더를 선택하세요.");
-                        return;
-                    }
-
-                    var response = await agent.SendAsync("selection.complete", new SelectionCompletedPayload(
-                        group.Select(static job => job.Id).ToArray(),
-                        selected == "." ? string.Empty : selected));
-                    await ShowMessageAsync(response.Success ? "선택을 적용했습니다." : response.Message ?? "선택 적용에 실패했습니다.");
-                    await ShowPendingAsync();
-                };
-                ContentPanel.Children.Add(picker);
-                ContentPanel.Children.Add(apply);
-            }
-
-            if (groups.Count == 0)
-            {
-                AddMuted("현재 선택을 기다리는 파일이 없습니다.");
-            }
-        }
-        catch (Exception exception)
-        {
-            AddError("선택 대기 목록을 불러오지 못했습니다.", exception);
         }
     }
 
@@ -417,13 +276,21 @@ public sealed partial class MainWindow : Window
 
     private async Task ShowMessageAsync(string message)
     {
-        var dialog = new ContentDialog
+        blockingDialogOpen = true;
+        try
         {
-            Title = "eslee Download Router",
-            Content = message,
-            CloseButtonText = "확인",
-            XamlRoot = ContentPanel.XamlRoot,
-        };
-        await dialog.ShowAsync();
+            var dialog = new ContentDialog
+            {
+                Title = "eslee Download Router",
+                Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+                CloseButtonText = "확인",
+                XamlRoot = ContentPanel.XamlRoot,
+            };
+            await dialog.ShowAsync();
+        }
+        finally
+        {
+            blockingDialogOpen = false;
+        }
     }
 }
