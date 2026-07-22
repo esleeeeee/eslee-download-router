@@ -1,7 +1,9 @@
 using DownloadRouter.Core.Models;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Windows.UI;
 
 namespace DownloadRouter.App;
 
@@ -61,6 +63,7 @@ public sealed class ThemeManager(AppThemePreference initialPreference)
         {
             root.RequestedTheme = ToElementTheme(CurrentPreference);
             ApplyBackground(root);
+            ApplyTitleBar(window, root.ActualTheme);
         }
     }
 
@@ -79,8 +82,31 @@ public sealed class ThemeManager(AppThemePreference initialPreference)
         }
     }
 
-    private static void Root_ActualThemeChanged(FrameworkElement sender, object args)
-        => ApplyBackground(sender);
+    private void Root_ActualThemeChanged(FrameworkElement sender, object args)
+    {
+        ApplyBackground(sender);
+        var window = roots.FirstOrDefault(pair => ReferenceEquals(pair.Value, sender)).Key;
+        if (window is not null)
+        {
+            ApplyTitleBar(window, sender.ActualTheme);
+        }
+    }
+
+    private static void ApplyTitleBar(Window window, ElementTheme theme)
+    {
+        var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(
+            WinRT.Interop.WindowNative.GetWindowHandle(window));
+        var titleBar = AppWindow.GetFromWindowId(windowId).TitleBar;
+        var dark = theme == ElementTheme.Dark;
+        titleBar.BackgroundColor = dark ? Color.FromArgb(255, 32, 32, 32) : Color.FromArgb(255, 243, 243, 243);
+        titleBar.ForegroundColor = dark ? Color.FromArgb(255, 255, 255, 255) : Color.FromArgb(255, 0, 0, 0);
+        titleBar.ButtonBackgroundColor = titleBar.BackgroundColor;
+        titleBar.ButtonForegroundColor = titleBar.ForegroundColor;
+        titleBar.ButtonHoverBackgroundColor = dark ? Color.FromArgb(255, 56, 56, 56) : Color.FromArgb(255, 229, 229, 229);
+        titleBar.ButtonHoverForegroundColor = titleBar.ForegroundColor;
+        titleBar.ButtonPressedBackgroundColor = dark ? Color.FromArgb(255, 74, 74, 74) : Color.FromArgb(255, 210, 210, 210);
+        titleBar.ButtonPressedForegroundColor = titleBar.ForegroundColor;
+    }
 
     private void Window_Closed(object sender, WindowEventArgs args)
     {
