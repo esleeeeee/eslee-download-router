@@ -9,8 +9,8 @@
     <Version>$(VersionPrefix)</Version>
     <AssemblyVersion>$(VersionPrefix).0</AssemblyVersion>
     <FileVersion>$(VersionPrefix).0</FileVersion>
-    <InformationalVersion Condition="'$(SourceRevisionId)' == ''">$(VersionPrefix)</InformationalVersion>
-    <InformationalVersion Condition="'$(SourceRevisionId)' != ''">$(VersionPrefix)+$(SourceRevisionId)</InformationalVersion>
+    <InformationalVersion>$(VersionPrefix)</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>true</IncludeSourceRevisionInInformationalVersion>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
     <DebugType>portable</DebugType>
