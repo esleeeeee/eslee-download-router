@@ -2,7 +2,7 @@
     x:Class="DownloadRouter.App.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-  <Grid UseLayoutRounding="True">
+  <Grid Background="{ThemeResource WindowBackgroundBrush}" UseLayoutRounding="True">
     <VisualStateManager.VisualStateGroups>
       <VisualStateGroup x:Name="WindowWidthStates">
         <VisualState x:Name="Compact">
