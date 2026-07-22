@@ -35,7 +35,11 @@
         <NavigationViewItem Content="대시보드" Tag="dashboard" Icon="Home" />
         <NavigationViewItem Content="사이트 규칙" Tag="rules" Icon="Library" />
         <NavigationViewItem Content="다운로드 이력" Tag="history" Icon="Download" />
-        <NavigationViewItem Content="저장 위치 선택 대기" Tag="pending" Icon="Folder" />
+        <NavigationViewItem x:Name="PendingNavigationItem" Content="저장 위치 선택 대기" Tag="pending" Icon="Folder">
+          <NavigationViewItem.InfoBadge>
+            <InfoBadge x:Name="PendingInfoBadge" Visibility="Collapsed" />
+          </NavigationViewItem.InfoBadge>
+        </NavigationViewItem>
         <NavigationViewItem Content="브라우저 연결" Tag="browsers" Icon="Globe" />
         <NavigationViewItem Content="일반 설정" Tag="settings" Icon="Setting" />
         <NavigationViewItem Content="진단 및 문제 해결" Tag="diagnostics" Icon="Repair" />

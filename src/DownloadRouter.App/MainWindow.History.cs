@@ -1,4 +1,5 @@
 using DownloadRouter.Core.Models;
+using DownloadRouter.Core.Jobs;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -9,6 +10,7 @@ namespace DownloadRouter.App;
 public sealed partial class MainWindow
 {
     private IReadOnlyList<DownloadJob> historyJobs = [];
+    private IReadOnlyDictionary<Guid, DownloadRule> historyRules = new Dictionary<Guid, DownloadRule>();
     private readonly HashSet<Guid> selectedHistoryJobs = [];
     private HistoryFilter historyFilter = HistoryFilter.All;
     private string? historySnapshot;
@@ -19,7 +21,10 @@ public sealed partial class MainWindow
         try
         {
             var response = await agent.SendAsync("jobs.list");
+            var rulesResponse = await agent.SendAsync("rules.list");
             historyJobs = AgentClient.ReadData<List<DownloadJob>>(response) ?? [];
+            historyRules = (AgentClient.ReadData<List<DownloadRule>>(rulesResponse) ?? [])
+                .ToDictionary(static rule => rule.Id);
             RenderHistory();
         }
         catch (Exception exception)
@@ -43,9 +48,44 @@ public sealed partial class MainWindow
         filter.SelectionChanged += (_, _) =>
         {
             historyFilter = (HistoryFilter)Math.Max(filter.SelectedIndex, 0);
+            selectedHistoryJobs.Clear();
             RenderHistory();
         };
         ContentPanel.Children.Add(filter);
+
+        var visible = historyJobs.Where(MatchesHistoryFilter).ToList();
+        var visibleIds = visible.Select(static job => job.Id).ToHashSet();
+        var selectedVisibleCount = visibleIds.Count(selectedHistoryJobs.Contains);
+        var selectAll = new CheckBox
+        {
+            Content = "현재 필터의 항목 전체 선택",
+            IsThreeState = true,
+            IsChecked = visible.Count == 0 || selectedVisibleCount == 0
+                ? false
+                : selectedVisibleCount == visible.Count ? true : null,
+        };
+        selectAll.Checked += (_, _) =>
+        {
+            selectedHistoryJobs.UnionWith(visibleIds);
+            RenderHistory();
+        };
+        selectAll.Unchecked += (_, _) =>
+        {
+            selectedHistoryJobs.ExceptWith(visibleIds);
+            RenderHistory();
+        };
+        selectAll.Indeterminate += (_, _) =>
+        {
+            selectedHistoryJobs.ExceptWith(visibleIds);
+            RenderHistory();
+        };
+        ContentPanel.Children.Add(selectAll);
+        ContentPanel.Children.Add(new TextBlock
+        {
+            Text = $"선택됨: {selectedHistoryJobs.Count}개 · 필터 변경 시 선택은 초기화됩니다.",
+            Opacity = 0.7,
+            TextWrapping = TextWrapping.Wrap,
+        });
 
         var deleteSelected = new Button
         {
@@ -68,7 +108,6 @@ public sealed partial class MainWindow
                 .ToArray());
         ContentPanel.Children.Add(clearCancelled);
 
-        var visible = historyJobs.Where(MatchesHistoryFilter).ToList();
         foreach (var job in visible)
         {
             ContentPanel.Children.Add(CreateHistoryCard(job));
@@ -106,7 +145,7 @@ public sealed partial class MainWindow
 
         var title = new TextBlock
         {
-            Text = job.CurrentFileName,
+            Text = DownloadPresentation.DisplayFileName(job),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
             TextDecorations = job.BrowserState == BrowserTransferState.Cancelled
@@ -115,11 +154,26 @@ public sealed partial class MainWindow
         };
         panel.Children.Add(title);
         panel.Children.Add(CreateStatusBadge(job));
-        panel.Children.Add(new TextBlock
+        var auxiliary = new TextBlock
         {
             Text = $"{job.Browser} · {GetSourceHost(job)} · 시작 {job.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}",
             TextWrapping = TextWrapping.Wrap,
-        });
+            TextDecorations = DownloadPresentation.IsCancelled(job)
+                ? TextDecorations.Strikethrough
+                : TextDecorations.None,
+            Opacity = DownloadPresentation.IsCancelled(job) ? 0.55 : 1,
+        };
+        panel.Children.Add(auxiliary);
+
+        if (DownloadPresentation.IsCancelled(job))
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = "사용자가 다운로드를 취소했습니다.",
+                TextWrapping = TextWrapping.Wrap,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            });
+        }
 
         if (!string.IsNullOrWhiteSpace(job.FinalPath))
         {
@@ -129,6 +183,31 @@ public sealed partial class MainWindow
         if (!string.IsNullOrWhiteSpace(job.ErrorCode))
         {
             panel.Children.Add(new TextBlock { Text = $"오류 코드: {job.ErrorCode}", TextWrapping = TextWrapping.Wrap });
+        }
+
+        if (DownloadPresentation.CanChangeRoute(job) && historyRules.TryGetValue(job.RuleId, out var rule))
+        {
+            var route = new Button
+            {
+                Content = job.RoutingState == RoutingState.Completed ? "다른 위치로 이동" : "저장 위치 선택/변경",
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+            };
+            route.Click += async (_, _) => await ChangeHistoryRouteAsync(job, rule);
+            panel.Children.Add(route);
+        }
+        else if (job.BrowserState is BrowserTransferState.Cancelled or BrowserTransferState.Interrupted
+                 || job.RoutingState is RoutingState.Failed or RoutingState.RetryPending)
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = job.BrowserState == BrowserTransferState.Cancelled
+                    ? "취소된 다운로드는 저장 위치를 변경할 수 없습니다."
+                    : job.BrowserState == BrowserTransferState.Interrupted
+                        ? "중단된 다운로드는 저장 위치를 변경할 수 없습니다."
+                        : "실패 또는 재시도 상태에서는 먼저 원본 파일 상태를 확인하세요.",
+                TextWrapping = TextWrapping.Wrap,
+                Opacity = 0.7,
+            });
         }
 
         var delete = new Button { Content = "이력에서 삭제", HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -144,6 +223,49 @@ public sealed partial class MainWindow
             Opacity = job.BrowserState == BrowserTransferState.Cancelled ? 0.55 : 1,
             Child = panel,
         };
+    }
+
+    private async Task ChangeHistoryRouteAsync(DownloadJob job, DownloadRule rule)
+    {
+        var root = pathResolver.Resolve(rule.StorageRoot);
+        var completedMove = job.RoutingState == RoutingState.Completed;
+        if (completedMove && !await ShowConfirmationAsync(
+                "이미 이동된 파일을 다시 이동",
+                "기존 안전 이동 절차를 사용해 이 파일만 다른 위치로 이동합니다. 같은 이름의 파일은 덮어쓰지 않습니다."))
+        {
+            return;
+        }
+
+        var result = await new FolderSelectionWindow().ShowAsync(
+            root,
+            job.SelectedRelativeFolder,
+            $"파일: {DownloadPresentation.DisplayFileName(job)}\n현재 상태: {DescribeStatus(job)}\n저장 루트: {root}",
+            allowLater: !completedMove,
+            allowSkip: !completedMove);
+        if (result.Action == FolderSelectionAction.Skip)
+        {
+            var skipped = await agent.SendAsync("selection.skip", new SelectionSkippedPayload(job.Id));
+            if (!skipped.Success)
+            {
+                await ShowMessageAsync(skipped.Message ?? "이동 건너뛰기에 실패했습니다.");
+            }
+        }
+        else if (result.Action == FolderSelectionAction.Later)
+        {
+            deferredSelectionPrompts.Add(job.Id);
+        }
+        else if (result.Action == FolderSelectionAction.Apply)
+        {
+            var response = await agent.SendAsync(
+                "route.change",
+                new JobRouteChangePayload(job.Id, result.RelativeFolder, completedMove));
+            if (!response.Success)
+            {
+                await ShowMessageAsync(response.Message ?? "저장 위치 변경에 실패했습니다.");
+            }
+        }
+
+        await ShowHistoryAsync();
     }
 
     private static Border CreateStatusBadge(DownloadJob job)
@@ -226,7 +348,7 @@ public sealed partial class MainWindow
 
     private static string CreateHistorySnapshot(IEnumerable<DownloadJob> jobs)
         => string.Join('|', jobs.Select(static job =>
-            $"{job.Id:N}:{job.BrowserState}:{job.RoutingState}:{job.CompletedAt:O}:{job.ErrorCode}"));
+            $"{job.Id:N}:{job.CurrentFileName}:{job.BrowserState}:{job.RoutingState}:{job.SelectedRelativeFolder}:{job.FinalPath}:{job.CompletedAt:O}:{job.ErrorCode}"));
 
     private static string DescribeStatus(DownloadJob job)
         => job.BrowserState switch

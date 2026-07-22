@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using DownloadRouter.Core.Jobs;
 using DownloadRouter.Core.Models;
 using Microsoft.UI.Xaml;
@@ -11,13 +10,16 @@ public sealed partial class MainWindow
     private readonly DispatcherTimer liveUpdateTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly SelectionPromptQueue selectionPromptQueue = new();
     private readonly HashSet<Guid> deferredSelectionPrompts = [];
-    private ContentDialog? currentSelectionDialog;
+    private CancellationTokenSource? currentSelectionCancellation;
     private Guid? currentSelectionJobId;
+    private DownloadRule? currentSelectionRule;
+    private FolderSelectionWindow? currentSelectionWindow;
     private string? currentSelectionSnapshot;
     private bool currentSelectionInvalidated;
     private bool liveUpdateInProgress;
     private bool selectionPromptInProgress;
     private string? livePageSnapshot;
+    private int previousPendingCount;
 
     private void InitializeLiveUpdates()
     {
@@ -28,7 +30,7 @@ public sealed partial class MainWindow
     private void StopLiveUpdates()
     {
         liveUpdateTimer.Stop();
-        currentSelectionDialog?.Hide();
+        currentSelectionCancellation?.Cancel();
     }
 
     private async Task ShowDashboardAsync()
@@ -73,6 +75,7 @@ public sealed partial class MainWindow
             var jobs = AgentClient.ReadData<List<DownloadJob>>(await agent.SendAsync("jobs.list")) ?? [];
             var rules = AgentClient.ReadData<List<DownloadRule>>(await agent.SendAsync("rules.list")) ?? [];
             var active = DownloadJobQueries.ActiveSelections(jobs);
+            UpdatePendingBadge(active.Count);
             SynchronizeSelectionPrompt(active);
 
             if (!selectionPromptInProgress && !blockingDialogOpen)
@@ -98,7 +101,7 @@ public sealed partial class MainWindow
         if (currentSelectionJobId is Guid current && !activeIds.Contains(current))
         {
             currentSelectionInvalidated = true;
-            currentSelectionDialog?.Hide();
+            currentSelectionCancellation?.Cancel();
         }
         else if (currentSelectionJobId is Guid activeCurrent)
         {
@@ -106,9 +109,12 @@ public sealed partial class MainWindow
             var updatedSnapshot = CreateSelectionPromptSnapshot(currentJob, active.Count);
             if (!string.Equals(currentSelectionSnapshot, updatedSnapshot, StringComparison.Ordinal))
             {
-                currentSelectionInvalidated = true;
-                selectionPromptQueue.EnqueueFirst(activeCurrent);
-                currentSelectionDialog?.Hide();
+                currentSelectionSnapshot = updatedSnapshot;
+                if (currentSelectionRule is not null)
+                {
+                    currentSelectionWindow?.UpdateDescription(
+                        CreateSelectionDescription(currentJob, currentSelectionRule, Math.Max(0, active.Count - 1)));
+                }
             }
         }
 
@@ -143,77 +149,38 @@ public sealed partial class MainWindow
     {
         selectionPromptInProgress = true;
         currentSelectionJobId = job.Id;
+        currentSelectionRule = rule;
         currentSelectionSnapshot = CreateSelectionPromptSnapshot(job, otherPendingCount + 1);
         currentSelectionInvalidated = false;
-        string? action = null;
         try
         {
             var root = pathResolver.Resolve(rule.StorageRoot);
-            var folders = EnumerateSafeFolders(root);
-            var picker = CreateFolderPicker("선택 가능한 하위 폴더", folders, job.SelectedRelativeFolder);
-            var content = new StackPanel { Spacing = 10, MinWidth = 360 };
-            content.Children.Add(new TextBlock
-            {
-                Text = $"파일: {job.CurrentFileName}\n출처 사이트: {GetSourceHost(job)}\n상태: {DescribeStatus(job)}\n규칙: {rule.Name}\n저장 루트: {root}\n동시에 대기 중인 다른 파일: {otherPendingCount}개",
-                TextWrapping = TextWrapping.Wrap,
-            });
-            content.Children.Add(picker);
-
-            var send = new Button { Content = "이 위치로 보내기", HorizontalAlignment = HorizontalAlignment.Stretch };
-            send.Click += (_, _) =>
-            {
-                if (picker.SelectedItem is not string)
-                {
-                    return;
-                }
-
-                action = "apply";
-                currentSelectionDialog?.Hide();
-            };
-            content.Children.Add(send);
-
-            var later = new Button { Content = "나중에 선택", HorizontalAlignment = HorizontalAlignment.Stretch };
-            later.Click += (_, _) =>
-            {
-                action = "later";
-                currentSelectionDialog?.Hide();
-            };
-            content.Children.Add(later);
-
-            var skip = new Button { Content = "이번 파일은 이동하지 않기", HorizontalAlignment = HorizontalAlignment.Stretch };
-            skip.Click += (_, _) =>
-            {
-                action = "skip";
-                currentSelectionDialog?.Hide();
-            };
-            content.Children.Add(skip);
-
-            currentSelectionDialog = new ContentDialog
-            {
-                Title = "다운로드 저장 위치 선택",
-                Content = content,
-                XamlRoot = ContentPanel.XamlRoot,
-            };
-            BringSelectionWindowToFront();
-            await currentSelectionDialog.ShowAsync();
+            currentSelectionCancellation = new CancellationTokenSource();
+            currentSelectionWindow = new FolderSelectionWindow();
+            var result = await currentSelectionWindow.ShowAsync(
+                root,
+                job.SelectedRelativeFolder,
+                CreateSelectionDescription(job, rule, otherPendingCount),
+                allowLater: true,
+                allowSkip: true,
+                currentSelectionCancellation.Token);
 
             if (currentSelectionInvalidated)
             {
                 return;
             }
 
-            if (action == "apply" && picker.SelectedItem is string selectedFolder)
+            if (result.Action == FolderSelectionAction.Apply)
             {
-                var relativeFolder = selectedFolder == "." ? string.Empty : selectedFolder;
                 var response = await agent.SendAsync(
                     "selection.complete",
-                    new SelectionCompletedPayload([job.Id], relativeFolder));
+                    new SelectionCompletedPayload([job.Id], result.RelativeFolder));
                 if (!response.Success)
                 {
                     await ShowMessageAsync(response.Message ?? "선택 적용에 실패했습니다.");
                 }
             }
-            else if (action == "skip")
+            else if (result.Action == FolderSelectionAction.Skip)
             {
                 var response = await agent.SendAsync("selection.skip", new SelectionSkippedPayload(job.Id));
                 if (!response.Success)
@@ -233,10 +200,13 @@ public sealed partial class MainWindow
         }
         finally
         {
-            currentSelectionDialog = null;
             currentSelectionJobId = null;
+            currentSelectionRule = null;
+            currentSelectionWindow = null;
             currentSelectionSnapshot = null;
             currentSelectionInvalidated = false;
+            currentSelectionCancellation?.Dispose();
+            currentSelectionCancellation = null;
             selectionPromptInProgress = false;
         }
     }
@@ -245,7 +215,7 @@ public sealed partial class MainWindow
         IReadOnlyList<DownloadJob> jobs,
         IReadOnlyList<DownloadRule> rules)
     {
-        if (blockingDialogOpen || currentSelectionDialog is not null)
+        if (blockingDialogOpen || selectionPromptInProgress)
         {
             return;
         }
@@ -265,6 +235,7 @@ public sealed partial class MainWindow
                 break;
             case "history":
                 historyJobs = jobs;
+                historyRules = rules.ToDictionary(static rule => rule.Id);
                 selectedHistoryJobs.IntersectWith(jobs.Select(static job => job.Id));
                 RenderHistory();
                 break;
@@ -274,22 +245,21 @@ public sealed partial class MainWindow
         }
     }
 
-    private void BringSelectionWindowToFront()
-    {
-        Activate();
-        var windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
-        _ = ShowWindow(windowHandle, 9);
-        _ = SetForegroundWindow(windowHandle);
-    }
-
     private static string CreateSelectionPromptSnapshot(DownloadJob job, int activeCount)
         => $"{job.Id:N}:{job.CurrentFileName}:{job.BrowserState}:{job.RoutingState}:{activeCount}";
 
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetForegroundWindow(nint windowHandle);
+    private string CreateSelectionDescription(DownloadJob job, DownloadRule rule, int otherPendingCount)
+        => $"파일: {DownloadPresentation.DisplayFileName(job)}\n출처 사이트: {GetSourceHost(job)}\n상태: {DescribeStatus(job)}\n규칙: {rule.Name}\n저장 루트: {pathResolver.Resolve(rule.StorageRoot)}\n동시에 대기 중인 다른 파일: {otherPendingCount}개";
 
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool ShowWindow(nint windowHandle, int command);
+    private void UpdatePendingBadge(int count)
+    {
+        PendingInfoBadge.Value = count;
+        PendingInfoBadge.Visibility = count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (count > previousPendingCount)
+        {
+            trayIcon?.ShowSelectionNotification(count);
+        }
+        previousPendingCount = count;
+    }
+
 }

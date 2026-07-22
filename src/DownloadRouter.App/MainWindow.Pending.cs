@@ -43,7 +43,6 @@ public sealed partial class MainWindow
     private void AddPendingRuleGroup(DownloadRule rule, IReadOnlyList<DownloadJob> jobs)
     {
         var root = pathResolver.Resolve(rule.StorageRoot);
-        var folders = EnumerateSafeFolders(root);
         var selectedJobs = new HashSet<Guid>();
 
         ContentPanel.Children.Add(new TextBlock
@@ -61,14 +60,12 @@ public sealed partial class MainWindow
 
         foreach (var job in jobs)
         {
-            ContentPanel.Children.Add(CreatePendingCard(job, rule, root, folders, selectedJobs));
+            ContentPanel.Children.Add(CreatePendingCard(job, rule, root, selectedJobs));
         }
 
-        var batchPicker = CreateFolderPicker("선택한 파일에 적용할 하위 폴더", folders, null);
-        ContentPanel.Children.Add(batchPicker);
         var applySelected = new Button
         {
-            Content = "체크한 파일에만 일괄 적용",
+            Content = "체크한 파일의 저장 위치 선택",
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         applySelected.Click += async (_, _) =>
@@ -79,13 +76,18 @@ public sealed partial class MainWindow
                 return;
             }
 
-            if (batchPicker.SelectedItem is not string folder)
+            var result = await new FolderSelectionWindow().ShowAsync(
+                root,
+                selectedRelativeFolder: null,
+                $"{selectedJobs.Count}개 파일에 같은 하위 폴더를 적용합니다. 체크하지 않은 파일은 변경하지 않습니다.",
+                allowLater: false,
+                allowSkip: false);
+            if (result.Action != FolderSelectionAction.Apply)
             {
-                await ShowMessageAsync("하위 폴더를 선택하세요.");
                 return;
             }
 
-            await ApplySelectionAsync(selectedJobs.ToArray(), folder);
+            await ApplySelectionAsync(selectedJobs.ToArray(), result.RelativeFolder);
         };
         ContentPanel.Children.Add(applySelected);
         ContentPanel.Children.Add(new Border { Height = 1, Opacity = 0.35, Margin = new Thickness(0, 8, 0, 8) });
@@ -95,7 +97,6 @@ public sealed partial class MainWindow
         DownloadJob job,
         DownloadRule rule,
         string root,
-        IReadOnlyList<string> folders,
         ISet<Guid> selectedJobs)
     {
         var panel = new StackPanel { Spacing = 8 };
@@ -105,7 +106,7 @@ public sealed partial class MainWindow
         panel.Children.Add(selected);
         panel.Children.Add(new TextBlock
         {
-            Text = job.CurrentFileName,
+            Text = DownloadPresentation.DisplayFileName(job),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             TextWrapping = TextWrapping.Wrap,
         });
@@ -116,19 +117,27 @@ public sealed partial class MainWindow
             TextWrapping = TextWrapping.Wrap,
         });
 
-        var picker = CreateFolderPicker("이 파일의 하위 폴더", folders, job.SelectedRelativeFolder);
-        panel.Children.Add(picker);
-
-        var apply = new Button { Content = "이 파일에 적용", HorizontalAlignment = HorizontalAlignment.Stretch };
+        var apply = new Button { Content = "이 파일의 저장 위치 선택/변경", HorizontalAlignment = HorizontalAlignment.Stretch };
         apply.Click += async (_, _) =>
         {
-            if (picker.SelectedItem is not string folder)
+            var result = await new FolderSelectionWindow().ShowAsync(
+                root,
+                job.SelectedRelativeFolder,
+                $"파일: {DownloadPresentation.DisplayFileName(job)}\n현재 선택: {DisplayFolder(job.SelectedRelativeFolder)}",
+                allowLater: true,
+                allowSkip: true);
+            if (result.Action == FolderSelectionAction.Apply)
             {
-                await ShowMessageAsync("하위 폴더를 선택하세요.");
-                return;
+                await ApplySelectionAsync([job.Id], result.RelativeFolder);
             }
-
-            await ApplySelectionAsync([job.Id], folder);
+            else if (result.Action == FolderSelectionAction.Skip)
+            {
+                await SkipSelectionAsync(job.Id);
+            }
+            else if (result.Action == FolderSelectionAction.Later)
+            {
+                deferredSelectionPrompts.Add(job.Id);
+            }
         };
         panel.Children.Add(apply);
 
@@ -151,22 +160,6 @@ public sealed partial class MainWindow
             CornerRadius = new CornerRadius(8),
             Background = Application.Current.Resources["CardBackgroundFillColorDefaultBrush"] as Brush,
             Child = panel,
-        };
-    }
-
-    private static ComboBox CreateFolderPicker(
-        string header,
-        IReadOnlyList<string> folders,
-        string? selectedRelativeFolder)
-    {
-        var selected = string.IsNullOrEmpty(selectedRelativeFolder) ? "." : selectedRelativeFolder;
-        var selectedIndex = folders.ToList().FindIndex(folder => string.Equals(folder, selected, StringComparison.OrdinalIgnoreCase));
-        return new ComboBox
-        {
-            Header = header,
-            ItemsSource = folders,
-            SelectedIndex = selectedIndex >= 0 ? selectedIndex : folders.Count > 0 ? 0 : -1,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
         };
     }
 
