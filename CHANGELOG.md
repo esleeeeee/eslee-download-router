@@ -12,17 +12,22 @@
 - 도메인·정확한 호스트·URL 포함 규칙과 출처 대상 선택
 - 경로 토큰, 루트 경계와 reparse point 방어
 - 동일/교차 볼륨 안전 이동, 안정화 확인, SHA-256 검증, 중복 이름 보존
-- WinUI 대시보드, 규칙, 이력, 선택 대기 그룹, 브라우저, 진단 화면
-- 27개 .NET 테스트, 4개 TypeScript 테스트, Agent/Native Host 스모크 테스트
+- WinUI 대시보드, 규칙, 파일별 선택 대기, 상태 필터·삭제 이력, 브라우저, 진단 화면
+- 38개 .NET 테스트, 8개 TypeScript 테스트, Agent/Native Host 스모크 테스트
 - per-user Native Host 등록 및 Inno Setup 설치 골격
 - Native Host 등록의 Windows PowerShell 5.1 회귀 테스트와 개인정보 로그 회귀 테스트
 - 매칭 규칙의 작업 생성·실제 파일 이동을 검증하는 Agent 통합 테스트
+- BrowserTransferState/RoutingState 분리와 기존 DB v2 마이그레이션
+- 단일 FIFO 선택 팝업, App 자동 시작 요청, 파일별/선택 항목 폴더 적용과 이동 건너뛰기
+- Extension 시작 시 진행 중 브라우저 다운로드 상태 재조정
 
 ### Changed
 
 - WinUI 앱을 Per-Monitor V2로 선언하고 공통 콘텐츠를 세로 ScrollViewer, stretch viewport, 1100 DIP 반응형 폼으로 재구성
 - 다운로드 이력이 규칙에 매칭된 작업만 표시함을 명시하고 데이터 변경 시 3초 간격으로 자동 갱신
 - Whale 설치 탐지에 Program Files와 Program Files (x86) 후보를 추가
+- 대시보드가 다운로드 중, 선택 대기, 완료, 취소/중단, 재시도/실패를 별도로 집계
+- 취소 이력을 자동 삭제하지 않고 취소선과 낮은 opacity로 유지하며 DB 이력만 사용자 삭제
 
 ### Fixed
 
@@ -32,6 +37,10 @@
 - PowerShell 5.1이 Native Host manifest에 UTF-8 BOM을 붙이던 문제
 - Extension이 Native Messaging 실패를 아무 진단 없이 무시하던 문제
 - Native Host가 자동 시작한 Agent에 브라우저 표준 스트림 핸들을 상속하던 문제
+- `WaitingForSelection` 하나로 전송 중/완료/취소를 동시에 표현해 취소 항목이 Pending에 남던 문제
+- ScrollViewer가 좁은 창에서도 1100 DIP 폼을 측정해 우측 콘텐츠가 창 밖으로 나가던 문제
+- 모든 페이지 제목이 TitleBar 바로 아래에 붙어 보이던 공통 상단 여백
+- 다운로드 완료로 파일명이 바뀐 동안 열린 선택 팝업이 이전 이름과 상태를 유지하던 문제
 
 ### Security
 
@@ -41,7 +50,7 @@
 
 ### Known limitations
 
-- Whale의 매칭 규칙 자동 이동/직접 선택은 실제 브라우저 검증 전
+- Whale Automatic 규칙과 다른 Chromium 브라우저의 실제 이동은 검증 전
 - Windows 100%/150% 및 FHD/4K 실제 디스플레이 시각 검증 전
-- 선택 대기 자동 알림/팝업, 새 폴더 생성/새로 고침 미구현
+- 트레이/Windows 알림, 새 폴더 생성/새로 고침 미구현
 - 시작 시 실행 토글과 미완료 작업 자동 복구 미연결

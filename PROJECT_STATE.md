@@ -1,14 +1,13 @@
 # 프로젝트 상태
 
-기준일: 2026-07-21 (Asia/Seoul)
+기준일: 2026-07-22 (Asia/Seoul)
 
 ## 요약
 
 - 현재 단계: Phase 0 완료, Phase 1 기술 스파이크 완료, 핵심 기능 개발 중
 - 공식 저장소: https://github.com/esleeeeee/eslee-Download-Router
 - 게시 브랜치: `main`, `develop`, `feature/initial-spike` — 세 브랜치 모두 공식 원격에 생성 완료
-- 작업 브랜치/기준 HEAD: `feature/initial-spike` / `3a4e25e86f570d03a37f61f4754b3d11bd501717`
-- 현재 문서는 위 HEAD에 적용한 로컬 진단·수정 결과를 포함하며 원격 push는 하지 않음
+- 작업 브랜치: `feature/initial-spike`, 기존 Draft PR #1에서 후속 변경 추적
 
 ## 구현 완료
 
@@ -24,12 +23,15 @@
 - 다운로드 완료 파일 안정화와 동일 볼륨 move
 - 교차 볼륨 copy -> 크기/SHA-256 검증 -> rename -> 원본 삭제
 - 중복 파일 번호 보존과 재시도 상태
-- 규칙별 선택 대기 작업 묶음 처리 API와 App 화면
+- 브라우저 전송 상태와 라우팅 상태를 분리한 작업 모델과 v1 → v2 SQLite 마이그레이션
+- 파일별 SelectSubfolder 카드, 명시적으로 체크한 항목만 일괄 적용, 건너뛰기와 세션 단위 나중에 선택
+- 단일 FIFO 선택 팝업, 실행 중 App 활성화, 미실행 App 시작 요청, 취소 시 자동 닫기
+- 취소선·상태 필터·개별/선택/취소 이력 삭제 UI와 실제 파일 비삭제 보장
 - WinUI 3 필수 내비게이션 화면 골격과 Agent 진단
 - 브라우저 설치/관리 주소 adapter와 HKCU Native Host 등록 스크립트
 - Windows PowerShell 5.1 절대 경로/HKCU 등록 호환성과 BOM 없는 UTF-8 Native Host manifest
 - 실패할 때만 분류 코드를 남기는 Extension Native Messaging 진단 로그
-- Per-Monitor V2 WinUI 렌더링, 반응형 공통 콘텐츠/세로 스크롤, 3초 이력 변경 감지
+- Per-Monitor V2 WinUI 렌더링, 뷰포트 실폭 제한, 32/48 DIP 공통 상단 여백, 1초 상태 변경 감지
 - self-contained win-x64 publish와 per-user Inno Setup 골격
 
 ## 빌드와 테스트
@@ -37,9 +39,9 @@
 | 항목 | 결과 |
 |---|---|
 | `.NET Debug build` | 성공, 경고 0, 오류 0 |
-| `.NET tests` | 29/29 통과(Core 21, Infrastructure 5, Integration 3) |
+| `.NET tests` | 38/38 통과(Core 24, Infrastructure 6, Integration 8) |
 | Extension ESLint/TypeScript build | 성공 |
-| Extension Node tests | 6/6 통과 |
+| Extension Node tests | 8/8 통과 |
 | Agent Named Pipe ping | 성공 |
 | Native Host self-test/길이 접두사 ping/Agent 자동 시작 | 성공 |
 | Native Host Agent 장애 fail-open | `agent.unavailable`, Host 종료 코드 0, 브라우저 비차단 응답 확인 |
@@ -53,21 +55,22 @@
 
 | 브라우저 | 설치 탐지 | 확장 로드 | 다운로드 이벤트 | Native Messaging | 자동 저장 | 직접 선택 |
 |---|---|---|---|---|---|---|
-| Whale | 성공 | 성공 | 성공 | 성공 | 수동 검증 필요 | 수동 검증 필요 |
+| Whale | 성공 | 성공 | 성공 | 성공 | 수동 검증 필요 | 성공(SelectSubfolder) |
 | Edge | 성공 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
 | Chrome | 성공 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
 | Brave | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
 | Vivaldi | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
 | Opera | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
 
-Whale은 설치된 , 고정 ID 확장과 `dist` 로드, HKCU 등록, 실제 미매칭 다운로드 이벤트의 Agent 도달을 확인했습니다. 규칙이 없는 다운로드는 의도적으로 작업을 만들지 않으므로 이력이 비는 것이 정상입니다. 실제 Whale에서 매칭 규칙 파일 이동과 직접 선택은 아직 성공으로 표시하지 않았습니다.
+Whale 에서 로컬 HTTP 테스트 파일과 격리 DB/저장 루트를 사용했습니다. 완료 후 `quick-a.bin → A`, `quick-b.bin → B`, 다운로드 중 선택 후 완료된 `select-slow.bin → D` 이동을 확인했습니다. 4개 동시 시작은 팝업 중첩 없이 FIFO로 하나씩 표시됐고 각 파일을 A/B/C/D에 개별 적용했습니다. 브라우저 취소는 팝업 자동 닫기, `Cancelled / NotRequired`, Pending 제외, 이동 0건으로 확인했습니다. 취소 이력 정리 후 이미 이동된 실제 파일은 모두 유지됐습니다. Automatic 규칙의 실브라우저 검증은 별도 항목으로 남습니다.
 
 ## 알려진 문제와 제한
 
 - downloads API만으로 다운로드 시작 탭 URL을 신뢰성 있게 얻을 수 없어 활성 탭을 추측하지 않습니다. 현재 referrer와 파일 URL을 분리해 사용합니다.
-- 직접 선택은 App의 대기 화면에서 규칙별 묶음으로 처리합니다. Agent의 자동 창 활성화/트레이 알림, 새 폴더 생성, 폴더 새로 고침은 미구현입니다.
+- App 실행 파일을 찾을 수 있으면 Agent가 선택 UI를 시작하고, 실행 중이면 1초 폴링과 창 활성화로 FIFO 팝업을 표시합니다. 설치 손상으로 App 실행 파일을 찾지 못해도 다운로드는 원래 위치에서 완료되고 Pending에 남습니다.
+- “나중에 선택” 팝업 억제는 현재 App 세션 동안만 유지됩니다. 트레이/Windows 알림, 새 폴더 생성, 폴더 새로 고침은 미구현입니다.
 - 시작 시 실행 UI는 실제 Windows 등록과 연결되지 않았습니다.
-- Agent 시작 시 미완료 이동 복구 워커는 미구현입니다. DB에는 작업 상태가 유지됩니다.
+- Extension 시작 시 Agent의 진행 중 ID를 브라우저 다운로드 기록과 대조해 완료·취소·중단을 재전송합니다. 브라우저 기록에서 사라진 오래된 작업은 근거 없이 완료·삭제하지 않습니다.
 - Whale registry adapter는 이 PC에서 검증했습니다. Brave/Vivaldi/Opera adapter는 실제 PC 검증이 필요합니다.
 - 브라우저 자체 “다운로드 전에 저장 위치 확인” 설정 감지와 안내는 문서만 있고 UI 자동 감지는 미구현입니다.
 - QHD 125% 실제 실행과 좁은/넓은 창 시각·경계 검증은 완료했습니다. Windows 100%/150%, FHD/4K 실기기, 키보드/스크린리더 접근성 및 installer 동작 검증은 남아 있습니다.
@@ -81,12 +84,12 @@ Whale은 설치된 , 고정 ID 확장과 `dist` 로드, HKCU 등록, 실제 미�
 
 ## 다음 작업
 
-1. Whale에서 `example.com` 샘플 규칙으로 공개 파일 자동 이동과 이력 자동 갱신을 수동 검증
-2. Whale 직접 선택 규칙과 Native Host 장애 중 실다운로드 유지 검증
-3. Windows 100%/150% 및 FHD/4K에서 UI 실배율 시각 검증
-4. Edge에서 개발자 모드 확장 로드와 Native Messaging 왕복을 실제 검증
-5. 규칙별 전용 폴더 트리 picker에 새 폴더/새로 고침 추가 및 Agent 알림 연결
-6. Agent 시작 시 미완료 작업 복구와 시작 시 실행 옵션 구현
+1. Whale Automatic 규칙과 Native Host 장애 중 실다운로드 유지 검증
+2. Windows 100%/150% 및 FHD/4K에서 UI 실배율 시각 검증
+3. Edge에서 개발자 모드 확장 로드와 Native Messaging 왕복을 실제 검증
+4. 파일별 picker에 새 폴더/새로 고침 및 영구 알림 설정 추가
+5. 브라우저 기록에서 사라진 오래된 비종료 작업의 사용자 확인 복구 흐름 설계
+6. 시작 시 실행 옵션 구현
 7. Inno Setup 설치/제거와 앱 UI 검증
 
 ## 실행 명령

@@ -6,7 +6,7 @@
 
 - 저장소: `https://github.com/esleeeeee/eslee-Download-Router.git`
 - 이어서 사용할 브랜치: `feature/initial-spike`(기준 통합 브랜치는 `develop`)
-- 구현 기준 커밋: `9975c47bd0ac64e26fa651dcd8162aac068f73d8` (`feat: bootstrap download router spike`)
+- 구현 기준: Draft PR #1의 최신 `feature/initial-spike`
 - 원격 상태: `main`, `develop`, `feature/initial-spike` 게시 및 GitHub 플러그인 검증 완료
 - .NET SDK: `10.0.302`
 - Node.js: 24 이상
@@ -32,20 +32,20 @@ Edge에서 `edge://extensions`를 열고 개발자 모드를 켠 뒤 “압축 �
 ## 현재 정상 기준
 
 - Debug solution build 성공, 경고 0/오류 0
-- .NET tests 27/27 통과
-- Extension lint/build와 Node tests 4/4 통과
+- .NET tests 38/38 통과
+- Extension lint/build와 Node tests 8/8 통과
 - Agent Named Pipe ping 성공
 - Native Host self-test 성공
 - App/Agent/Native Host self-contained Release publish 성공
-- 공식 `feature/initial-spike@9975c47` 클린 클론 bootstrap/build/test 성공
+- QHD 125% Per-Monitor V2, 900×850 수평 넘침 0, 파일별 SelectSubfolder Whale 실검증 성공
 
-브라우저 수동 검증, installer, UI 시각 검증은 아직 정상 기준에 포함되지 않습니다.
+Whale Automatic 규칙, 다른 Chromium 브라우저, installer, 100%/150% 및 FHD/4K 시각 검증은 아직 정상 기준에 포함되지 않습니다.
 
 ## 가장 먼저 할 작업
 
 Edge에서 실제 확장 -> Native Host -> Agent ping과 다운로드 이벤트를 확인하세요. 성공/실패 로그를 `docs/BROWSER_COMPATIBILITY.md`에 기록하고, 실패하면 `scripts\diagnose.ps1`과 Native Host `-Action Status` 결과부터 확인합니다.
 
-그 다음 자동 규칙, 미매칭 fail-open, 직접 선택 묶음, 중복 이름, 취소/중단 순서로 검증합니다.
+그 다음 자동 규칙, 미매칭 fail-open, 파일별 직접 선택, 중복 이름, 취소/중단 순서로 검증합니다.
 
 ## PC별로 다시 지정할 항목
 

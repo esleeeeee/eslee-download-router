@@ -34,7 +34,8 @@ bootstrap은 버전 검사, NuGet restore, `npm ci`, 로컬 데이터 디렉터�
 
 - unpackaged App manifest의 `PerMonitorV2, PerMonitor` 선언을 유지합니다. 제거하면 Windows가 앱을 96 DPI 비트맵으로 확대할 수 있습니다.
 - XAML 크기와 간격은 DIP 기준이며 물리 픽셀이나 모니터 해상도별 고정 폭을 사용하지 않습니다.
-- 새 화면은 공통 `ContentPanel` 안에서 가로 stretch하고, 폼 전체는 1100 DIP `MaxWidth`를 넘지 않습니다.
+- 새 화면은 공통 `ContentPanel` 안에서 가로 stretch하고, 폼 전체는 `min(1100 DIP, ScrollViewer viewport - padding)`을 넘지 않습니다.
+- Compact/Wide의 공통 상단 여백 32/48 DIP를 화면별 Spacer로 중복 구현하지 않습니다.
 - 좁은 창은 가로 스크롤 대신 세로 스크롤을 사용하고, 최소 폭을 지정할 때는 실제 720 DIP 창에서 우측 경계를 확인합니다.
 - 시각 검증 시 `GetProcessDpiAwareness`, `GetWindowDpiAwarenessContext`, `GetDpiForWindow`와 진단 화면의 `XamlRoot.RasterizationScale`을 함께 확인합니다.
 
@@ -49,6 +50,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Configu
 
 # Agent 파이프 왕복 확인
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-agent.ps1 -Configuration Debug
+
+# SelectSubfolder 완료 전 선택/취소용 로컬 지연 다운로드
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\manual-download-server.ps1 `
+  -Root .\artifacts\manual-whale\server -Port 8765
 
 # 설치 페이로드 준비
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\publish.ps1 -Configuration Release
