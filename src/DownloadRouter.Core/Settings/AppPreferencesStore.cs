@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using DownloadRouter.Core.Models;
 
 namespace DownloadRouter.Core.Settings;
@@ -70,8 +71,22 @@ public sealed class AppPreferencesStore
         {
             Theme = AppThemePolicy.ToStorageValue(preferences.ThemePreference),
         };
+        JsonObject document;
+        try
+        {
+            document = File.Exists(configPath)
+                ? JsonNode.Parse(File.ReadAllText(configPath)) as JsonObject ?? []
+                : [];
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            document = [];
+        }
+
+        document["closeBehavior"] = (int)normalized.CloseBehavior;
+        document["theme"] = normalized.Theme;
         var temporary = configPath + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(normalized, ProtocolJson.Options));
+        File.WriteAllText(temporary, document.ToJsonString(ProtocolJson.Options));
         File.Move(temporary, configPath, overwrite: true);
     }
 }

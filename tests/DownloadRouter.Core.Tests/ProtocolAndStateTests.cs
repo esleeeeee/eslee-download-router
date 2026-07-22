@@ -164,11 +164,16 @@ public sealed class ProtocolAndStateTests
         var path = Path.Combine(directory, "config.local.json");
         try
         {
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(path, "{\"dataDirectory\":\"preserve-me\",\"fileStability\":{\"maxWaitSeconds\":30}}");
             var store = new AppPreferencesStore(path);
             store.Save(new AppPreferences(WindowCloseBehavior.ExitApplication, "Dark"));
             var restored = store.Load();
             Assert.Equal(WindowCloseBehavior.ExitApplication, restored.CloseBehavior);
             Assert.Equal(AppThemePreference.Dark, restored.ThemePreference);
+            var savedJson = File.ReadAllText(path);
+            Assert.Contains("preserve-me", savedJson, StringComparison.Ordinal);
+            Assert.Contains("maxWaitSeconds", savedJson, StringComparison.Ordinal);
 
             File.WriteAllText(path, "{\"closeBehavior\":1,\"theme\":\"retired-theme\"}");
             restored = store.Load();
