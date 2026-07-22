@@ -206,7 +206,7 @@ public sealed class AgentCommandHandler(
             stateMachine.EnsureCanTransition(job.RoutingState, routing);
             var reportedFileName = string.IsNullOrWhiteSpace(payload.FilePath)
                 ? job.CurrentFileName
-                : Path.GetFileName(NormalizeOptionalSourcePath(payload.FilePath));
+                : Path.GetFileName(NormalizeOptionalSourcePath(payload.FilePath)) ?? job.CurrentFileName;
             job = job with
             {
                 BrowserState = next,
