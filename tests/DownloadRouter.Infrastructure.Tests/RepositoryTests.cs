@@ -93,6 +93,10 @@ public sealed class RepositoryTests : IDisposable
         Assert.Equal(1L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
         versionCommand.CommandText = "SELECT COUNT(*) FROM MigrationHistory WHERE Version = 3;";
         Assert.Equal(1L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
+        versionCommand.CommandText = "SELECT COUNT(*) FROM MigrationHistory WHERE Version = 4;";
+        Assert.Equal(1L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
+        Assert.NotNull(migrated.LastBrowserEventAt);
+        Assert.False(migrated.IsBrowserRecordStale);
     }
 
     [Fact]

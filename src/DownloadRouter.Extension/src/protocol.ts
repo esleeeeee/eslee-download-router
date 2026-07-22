@@ -6,6 +6,8 @@ export type AgentCommandName =
   | "download.started"
   | "download.metadata"
   | "download.changed"
+  | "download.cancelled"
+  | "download.interrupted"
   | "downloads.active";
 
 export interface AgentRequest<TPayload> {

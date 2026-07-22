@@ -6,6 +6,12 @@
 
 ### Added
 
+- 30분 자동 팝업 정책, 이전 세션 대기 작업 안내와 선택 창의 `모두 나중에 선택` 큐 일괄 숨김
+- Extension `download.cancelled`/`download.interrupted`, 시작 시 complete/interrupted/in_progress/stale 재조정과 정제된 연결 진단
+- 전역 `ThemeManager`, System/Light/Dark 사용자 설정 저장과 열린/새 Window 즉시 적용
+- 정보 화면 제품명·0.3.0 버전·commit·설치형/개발 빌드 표시, 데이터 폴더/GitHub 열기
+- `Directory.Build.props` 단일 버전 원본과 App/Agent/Native Host/Installer 일치 검증
+
 - .NET 10/WinUI 3 모노레포와 재현 가능한 bootstrap/build/test/publish 스크립트
 - Manifest V3 TypeScript 확장, Native Messaging 브리지, Named Pipe Agent
 - SQLite 스키마와 마이그레이션, 규칙/작업/이벤트 저장
@@ -13,7 +19,7 @@
 - 경로 토큰, 루트 경계와 reparse point 방어
 - 동일/교차 볼륨 안전 이동, 안정화 확인, SHA-256 검증, 중복 이름 보존
 - WinUI 대시보드, 규칙, 파일별 선택 대기, 상태 필터·삭제 이력, 브라우저, 진단 화면
-- 53개 .NET 테스트, 10개 TypeScript 테스트, Agent/Native Host 스모크 테스트
+- 67개 .NET 테스트, 13개 TypeScript 테스트, Agent/Native Host 스모크 테스트
 - per-user Native Host 등록 및 Inno Setup 설치 골격
 - Native Host 등록의 Windows PowerShell 5.1 회귀 테스트와 개인정보 로그 회귀 테스트
 - 매칭 규칙의 작업 생성·실제 파일 이동을 검증하는 Agent 통합 테스트
@@ -29,6 +35,10 @@
 
 ### Changed
 
+- 취소 상태는 선택 여부와 관계없이 `Cancelled`가 되고 Waiting/SelectionReady 라우팅은 `NotRequired`로 종료
+- UI 상태 갱신 주기를 500ms로 줄여 취소 후 팝업·Pending·이력을 1초 이내 반영
+- 브라우저 기록에서 찾지 못한 진행 작업은 취소로 추측하지 않고 stale 진단 상태로 보존하며 자동 팝업에서 제외
+
 - WinUI 앱을 Per-Monitor V2로 선언하고 공통 콘텐츠를 세로 ScrollViewer, stretch viewport, 1100 DIP 반응형 폼으로 재구성
 - 다운로드 이력이 규칙에 매칭된 작업만 표시함을 명시하고 데이터 변경 시 3초 간격으로 자동 갱신
 - Whale 설치 탐지에 Program Files와 Program Files (x86) 후보를 추가
@@ -38,6 +48,12 @@
 - 사이트 규칙 화면을 규칙 편집 Card와 저장된 규칙 Card 섹션으로 구분
 
 ### Fixed
+
+- 앱 시작 때 오래된 `WaitingForSelection` 전체를 FIFO에 재삽입해 20개 이상 팝업이 연속 표시되던 문제
+- Whale가 `state` delta 없이 `error.current=USER_CANCELED`만 보낼 때 Extension이 조기 반환해 취소가 누락되던 문제
+- `downloads.onErased`와 실제 사용자 취소를 혼동할 수 있는 시작 재조정 공백
+- 일반 설정의 테마 ComboBox가 저장·적용 로직에 연결되지 않아 화면이 바뀌지 않던 문제
+- 정보 화면에 실행 버전이 없고 설치 프로그램 버전만 별도 하드코딩되어 구성 요소가 불일치할 수 있던 문제
 
 - DPI awareness 누락으로 QHD 125%에서 앱 전체가 96 DPI 비트맵으로 확대되던 흐릿한 렌더링
 - NavigationView 콘텐츠 폭/중복 패딩과 고정 MinWidth 때문에 좁은 창에서 오른쪽이 잘리던 레이아웃

@@ -8,6 +8,9 @@ param(
 $root = Get-RepositoryRoot
 $dotnet = Assert-DotNetVersion
 $nodeTools = Assert-NodeTools
+$gitRevision = & git -C $root rev-parse HEAD 2>$null
+$sourceRevisionId = if ($LASTEXITCODE -eq 0) { ([string]$gitRevision).Trim() } else { '' }
+$versionProperty = if ($sourceRevisionId) { "-p:SourceRevisionId=$sourceRevisionId" } else { $null }
 $publishRoot = Join-Path $root 'artifacts\publish\app'
 $stagingRoot = Join-Path $root 'artifacts\publish\staging'
 
@@ -16,7 +19,7 @@ if (Test-Path -LiteralPath $stagingRoot) { Remove-Item -LiteralPath $stagingRoot
 New-Item -ItemType Directory -Path $publishRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $stagingRoot -Force | Out-Null
 
-& $dotnet publish (Join-Path $root 'src\DownloadRouter.App\DownloadRouter.App.csproj') --configuration $Configuration --runtime win-x64 --self-contained true --output $publishRoot --nologo
+& $dotnet publish (Join-Path $root 'src\DownloadRouter.App\DownloadRouter.App.csproj') --configuration $Configuration --runtime win-x64 --self-contained true --output $publishRoot --nologo $versionProperty
 if ($LASTEXITCODE -ne 0) { throw 'Settings app publish failed.' }
 foreach ($resource in @('App.xbf', 'MainWindow.xbf', 'DownloadRouter.App.pri')) {
     if (-not (Test-Path -LiteralPath (Join-Path $publishRoot $resource) -PathType Leaf)) {
@@ -26,7 +29,7 @@ foreach ($resource in @('App.xbf', 'MainWindow.xbf', 'DownloadRouter.App.pri')) 
 
 foreach ($project in @('DownloadRouter.Agent', 'DownloadRouter.NativeHost')) {
     $projectOutput = Join-Path $stagingRoot $project
-    & $dotnet publish (Join-Path $root "src\$project\$project.csproj") --configuration $Configuration --runtime win-x64 --self-contained true --output $projectOutput --nologo
+    & $dotnet publish (Join-Path $root "src\$project\$project.csproj") --configuration $Configuration --runtime win-x64 --self-contained true --output $projectOutput --nologo $versionProperty
     if ($LASTEXITCODE -ne 0) { throw "$project publish failed." }
     Copy-Item -Path (Join-Path $projectOutput '*') -Destination $publishRoot -Recurse -Force
 }

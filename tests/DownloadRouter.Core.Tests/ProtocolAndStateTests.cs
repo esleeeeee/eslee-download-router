@@ -3,6 +3,11 @@ using DownloadRouter.Core.Ipc;
 using DownloadRouter.Core.Jobs;
 using DownloadRouter.Core.Models;
 using DownloadRouter.Core.Paths;
+using DownloadRouter.Core.Settings;
+using System.Reflection;
+using System.Reflection.Emit;
+using System.Diagnostics;
+using System.Xml.Linq;
 
 namespace DownloadRouter.Core.Tests;
 
@@ -96,6 +101,140 @@ public sealed class ProtocolAndStateTests
         Assert.True(queue.TryDequeue(out var queuedNext));
         Assert.Equal(current, refreshed);
         Assert.Equal(next, queuedNext);
+    }
+
+    [Fact]
+    public void SelectionPromptQueueCanBeHiddenAsOneSessionBatch()
+    {
+        var queue = new SelectionPromptQueue();
+        var ids = Enumerable.Range(0, 23).Select(_ => Guid.NewGuid()).ToArray();
+        foreach (var id in ids)
+        {
+            queue.Enqueue(id);
+        }
+
+        Assert.Equal(ids, queue.Drain());
+        Assert.Equal(0, queue.Count);
+        Assert.False(queue.TryDequeue(out _));
+    }
+
+    [Fact]
+    public void AutomaticSelectionPolicyKeepsOldAndStaleJobsInPendingWithoutPopup()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var recent = CreateJob(BrowserTransferState.InProgress, RoutingState.WaitingForSelection) with
+        {
+            CreatedAt = now.AddMinutes(-5),
+            LastBrowserEventAt = now.AddMinutes(-1),
+        };
+        var old = recent with
+        {
+            Id = Guid.NewGuid(),
+            CreatedAt = now.AddHours(-1),
+            LastBrowserEventAt = now.AddMinutes(-31),
+        };
+        var stale = recent with { Id = Guid.NewGuid(), IsBrowserRecordStale = true };
+        var cancelled = recent with { Id = Guid.NewGuid(), BrowserState = BrowserTransferState.Cancelled };
+
+        var pending = DownloadJobQueries.ActiveSelections([recent, old, stale, cancelled]);
+        var automatic = DownloadJobQueries.AutomaticSelections([old, stale, recent, cancelled], now);
+
+        Assert.Equal(3, pending.Count);
+        Assert.Equal(recent.Id, Assert.Single(automatic).Id);
+        Assert.True(SelectionPromptPolicy.IsPreviousSessionPending(old, now));
+        Assert.True(SelectionPromptPolicy.IsPreviousSessionPending(stale, now));
+    }
+
+    [Theory]
+    [InlineData(null, AppThemePreference.System, "Default")]
+    [InlineData("invalid-old-value", AppThemePreference.System, "Default")]
+    [InlineData("Light", AppThemePreference.Light, "Light")]
+    [InlineData("dark", AppThemePreference.Dark, "Dark")]
+    public void ThemeSettingsMapSafely(string? value, AppThemePreference expected, string elementTheme)
+    {
+        var preference = AppThemePolicy.Parse(value);
+        Assert.Equal(expected, preference);
+        Assert.Equal(elementTheme, AppThemePolicy.ToElementThemeName(preference));
+    }
+
+    [Fact]
+    public void PreferencesPersistAndInvalidThemeFallsBackWithoutLosingOtherSettings()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "download-router-preferences-tests", Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(directory, "config.local.json");
+        try
+        {
+            var store = new AppPreferencesStore(path);
+            store.Save(new AppPreferences(WindowCloseBehavior.ExitApplication, "Dark"));
+            var restored = store.Load();
+            Assert.Equal(WindowCloseBehavior.ExitApplication, restored.CloseBehavior);
+            Assert.Equal(AppThemePreference.Dark, restored.ThemePreference);
+
+            File.WriteAllText(path, "{\"closeBehavior\":1,\"theme\":\"retired-theme\"}");
+            restored = store.Load();
+            Assert.Equal(WindowCloseBehavior.ExitApplication, restored.CloseBehavior);
+            Assert.Equal(AppThemePreference.System, restored.ThemePreference);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void ProductVersionUsesAssemblyInformationalVersionAndSurvivesMissingCommit()
+    {
+        var current = ProductVersionInfo.Read(typeof(ProductVersionInfo).Assembly, AppContext.BaseDirectory);
+        var assemblyName = new AssemblyName("NoInformationalVersion") { Version = new Version(7, 2, 1, 0) };
+        var dynamicAssembly = AssemblyBuilder.DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.Run);
+        var fallback = ProductVersionInfo.Read(dynamicAssembly, AppContext.BaseDirectory);
+
+        Assert.False(string.IsNullOrWhiteSpace(current.InformationalVersion));
+        Assert.StartsWith(current.SemanticVersion, current.InformationalVersion, StringComparison.Ordinal);
+        Assert.Equal("7.2.1", fallback.SemanticVersion);
+        Assert.Null(fallback.Commit);
+    }
+
+    [Fact]
+    public void AppAndInstallerDeriveTheirVersionFromDirectoryBuildProps()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var document = XDocument.Load(Path.Combine(repositoryRoot, "Directory.Build.props"));
+        var version = document.Descendants("VersionPrefix").Single().Value;
+        var appExecutable = Directory
+            .EnumerateFiles(
+                Path.Combine(repositoryRoot, "src", "DownloadRouter.App", "bin"),
+                "DownloadRouter.App.exe",
+                SearchOption.AllDirectories)
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .First();
+        var appProductVersion = FileVersionInfo.GetVersionInfo(appExecutable).ProductVersion;
+        var installerSource = File.ReadAllText(Path.Combine(repositoryRoot, "installer", "DownloadRouter.iss"));
+        var installerBuild = File.ReadAllText(Path.Combine(repositoryRoot, "scripts", "build-installer.ps1"));
+
+        Assert.Matches("^\\d+\\.\\d+\\.\\d+$", version);
+        Assert.True(
+            string.Equals(appProductVersion, version, StringComparison.Ordinal)
+            || appProductVersion?.StartsWith(version + "+", StringComparison.Ordinal) == true);
+        Assert.Contains("#ifndef AppVersion", installerSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("#define AppVersion \"", installerSource, StringComparison.Ordinal);
+        Assert.Contains("Directory.Build.props", installerBuild, StringComparison.Ordinal);
+        Assert.Contains("/DAppVersion=", installerBuild, StringComparison.Ordinal);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null && !File.Exists(Path.Combine(current.FullName, "Directory.Build.props")))
+        {
+            current = current.Parent;
+        }
+
+        return current?.FullName
+            ?? throw new DirectoryNotFoundException("Repository root was not found from the test output path.");
     }
 
     [Fact]

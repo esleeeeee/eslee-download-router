@@ -21,7 +21,7 @@ chrome.downloads.onCreated/onChanged
 
 ### Extension
 
-Manifest V3 service worker이며 권한은 `downloads`, `nativeMessaging`뿐입니다. `onCreated`에서 referrer, 최초/최종 파일 URL을 별도 필드로 전달하고, `onChanged`의 `filename` delta를 같은 Job의 메타데이터 갱신으로 전송합니다. 완료 시 `downloads.search({ id })`로 최종 파일명을 다시 확인합니다. `download`, `*.crdownload` 같은 임시 이름은 확정 이름으로 취급하지 않습니다. 시작 시 Agent가 가진 진행 중 ID만 재확인해 놓친 종료 이벤트를 재전송합니다. 연결 오류는 다운로드를 취소하거나 변경하지 않습니다. 실패할 때만 원문 대신 제한된 분류 코드를 기록합니다.
+Manifest V3 service worker이며 권한은 `downloads`, `nativeMessaging`뿐입니다. `onCreated`에서 referrer, 최초/최종 파일 URL을 별도 필드로 전달하고, `onChanged`의 `filename` delta를 같은 Job의 메타데이터 갱신으로 전송합니다. `USER_CANCELED` error delta는 state delta를 기다리지 않고 즉시 idempotent `download.cancelled`로 전송합니다. interrupted는 `downloads.search({ id })` 후 delta error → item error → 마지막 error 순서로 원인을 결정합니다. `onErased`는 기록 삭제 진단일 뿐 취소가 아닙니다. 시작 재조정은 complete/cancelled/interrupted/in_progress/stale을 구분하고 item 누락을 취소로 추측하지 않습니다. 연결 로그에는 정제된 ID/state/error/전송 결과만 기록합니다.
 
 Chromium downloads API에는 신뢰할 수 있는 시작 탭 URL 필드가 없습니다. 따라서 활성 탭을 다운로드 출처로 추측하지 않고 `initiatingPageUrl`은 근거가 있을 때만 사용합니다. 현재 확장은 referrer를 우선 근거로 전달합니다.
 
@@ -56,7 +56,7 @@ SQLite 마이그레이션은 `schema_migrations`, `rules`, `download_jobs`, `job
 
 ### WinUI 3 App
 
-Agent와 동일한 Core 라이브러리를 참조하지만 DB나 파일 이동 구현을 직접 호출하지 않고 Named Pipe 명령으로 통신합니다. App은 사용자 범위 mutex로 단일 인스턴스를 유지하는 트레이 호스트이며 `--background`에서는 메인 창을 표시하지 않습니다. 1초 간격으로 Pending을 읽고 중복 없는 FIFO `FolderSelectionWindow`를 하나씩 표시합니다. 선택 창은 메인 창과 독립적이어서 메인 창이 숨김·최소화 상태여도 활성화되며, 포커스 확보 실패 시 작업표시줄 점멸을 사용합니다.
+Agent와 동일한 Core 라이브러리를 참조하지만 DB나 파일 이동 구현을 직접 호출하지 않고 Named Pipe 명령으로 통신합니다. App은 사용자 범위 mutex로 단일 인스턴스를 유지하는 트레이 호스트이며 `--background`에서는 메인 창을 표시하지 않습니다. 500ms 간격으로 Pending을 읽되 자동 팝업 정책을 통과한 항목만 중복 없는 FIFO `FolderSelectionWindow`로 표시합니다. 선택 창은 메인 창과 독립적이어서 메인 창이 숨김·최소화 상태여도 활성화되며, 포커스 확보 실패 시 작업표시줄 점멸을 사용합니다.
 
 공통 `FolderTreePicker`는 루트 하나만 먼저 만들고 노드 확장 시 해당 단계의 자식만 비동기로 읽습니다. 로드된 노드를 중복 조회하지 않고, 접근 불가 항목은 노드 단위 오류로 제한하며 reparse point는 선택 경계에서 제외합니다. 팝업, 선택 대기, 이력 경로 변경이 같은 컴포넌트와 Agent 명령을 사용합니다. 규칙의 저장 루트는 경계가 아직 정해지지 않은 선택이므로 HWND로 초기화한 Windows `FolderPicker`를 사용합니다.
 
@@ -76,11 +76,17 @@ Interrupted                RetryPending
                            NotRequired
 ```
 
-두 축의 상태 전이는 `DownloadJobStateMachine`이 각각 검사합니다. 완료 전에 선택하면 `InProgress / SelectionReady`만 저장하고 파일을 이동하지 않습니다. `Complete / SelectionReady`가 된 뒤에만 Moving으로 전이합니다. 사용자 취소는 BrowserTransferState만 `Cancelled`로 바꾸고 당시 RoutingState를 보존하되, 표시·Pending·이동 가능 여부는 항상 BrowserTransferState를 우선합니다. 다른 중단은 `Interrupted / Failed`입니다. 기존 단일 `Status` 열은 마이그레이션과 호환 표시용 파생 값으로 유지합니다.
+두 축의 상태 전이는 `DownloadJobStateMachine`이 각각 검사합니다. 완료 전에 선택하면 `InProgress / SelectionReady`만 저장하고 파일을 이동하지 않습니다. `Complete / SelectionReady`가 된 뒤에만 Moving으로 전이합니다. 사용자 취소는 BrowserTransferState를 `Cancelled`로 바꾸고 WaitingForSelection/SelectionReady는 `NotRequired`로 종료합니다. Skipped/Failed 같은 이미 확정된 진단 라우팅은 보존할 수 있으며, 표시·Pending·이동 가능 여부는 항상 BrowserTransferState를 우선합니다. 다른 중단은 일반적으로 `Interrupted / Failed`입니다. 기존 단일 `Status` 열은 마이그레이션과 호환 표시용 파생 값으로 유지합니다.
 
 ## 저장 위치 선택 경계
 
 저장 루트를 정규화한 뒤 상대 경로를 결합하고 다시 루트 내부인지 확인합니다. `..`, 루트 경로 자체 변경, reparse point 통과를 거부합니다. App은 reparse point 디렉터리를 열거하지 않습니다. 보안 결정은 UI가 아니라 Agent에서도 다시 검증합니다.
+
+## 팝업 수명과 테마
+
+자동 선택 팝업은 `SelectionPromptPolicy.AutoPromptWindow`의 30분 안에 생성되었거나 브라우저 이벤트가 갱신된 SelectSubfolder 대기 Job만 대상으로 합니다. 오래되거나 브라우저 record가 stale인 Job은 DB/대기 탭/InfoBadge에 남고 자동 큐에는 들어가지 않습니다. `모두 나중에 선택`은 메모리의 현재 큐 ID만 세션 숨김 집합으로 옮기므로 RoutingState와 파일은 바뀌지 않고 이후 새 ID는 다시 큐에 들어옵니다.
+
+`ThemeManager`는 App 시작 때 `config.local.json`의 System/Light/Dark를 정규화하고 모든 Window 루트 FrameworkElement를 등록합니다. 설정 변경은 등록된 열린 Window 전체에 적용되고 새 FolderSelectionWindow는 Content 지정 직후 등록됩니다. System은 `ElementTheme.Default`입니다. UI 설정 저장은 SQLite 이력 스키마와 분리합니다.
 
 ## 배포
 
@@ -88,6 +94,7 @@ Interrupted                RetryPending
 - 확장: `npm ci` 후 TypeScript compile, manifest 복사, ZIP 생성
 - Native Host: HKCU 브라우저별 registry adapter와 `%LOCALAPPDATA%` manifest
 - Installer: per-user, `PrivilegesRequired=lowest`
+- 버전: `Directory.Build.props` VersionPrefix를 App/Agent/Native Host assembly와 Installer AppVersion의 단일 원본으로 사용
 - 자동 시작: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`에 설치 App의 정확한 따옴표 경로와 `--background`
 - X 버튼: 기본은 AppWindow 숨김, 트레이 `종료` 또는 `--shutdown`만 App/Agent 정상 종료
 - 제거: 설치 파일·자동 시작·Native Host만 제거하고 사용자 DB와 규칙은 보존

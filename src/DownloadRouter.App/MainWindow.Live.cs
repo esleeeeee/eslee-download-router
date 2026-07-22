@@ -7,9 +7,10 @@ namespace DownloadRouter.App;
 
 public sealed partial class MainWindow
 {
-    private readonly DispatcherTimer liveUpdateTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly DispatcherTimer liveUpdateTimer = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private readonly SelectionPromptQueue selectionPromptQueue = new();
     private readonly HashSet<Guid> deferredSelectionPrompts = [];
+    private readonly HashSet<Guid> sessionAutoPromptJobs = [];
     private CancellationTokenSource? currentSelectionCancellation;
     private Guid? currentSelectionJobId;
     private DownloadRule? currentSelectionRule;
@@ -19,7 +20,8 @@ public sealed partial class MainWindow
     private bool liveUpdateInProgress;
     private bool selectionPromptInProgress;
     private string? livePageSnapshot;
-    private int previousPendingCount;
+    private int previousAutomaticCount;
+    private int shownAutoPromptCount;
 
     private void InitializeLiveUpdates()
     {
@@ -75,12 +77,13 @@ public sealed partial class MainWindow
             var jobs = AgentClient.ReadData<List<DownloadJob>>(await agent.SendAsync("jobs.list")) ?? [];
             var rules = AgentClient.ReadData<List<DownloadRule>>(await agent.SendAsync("rules.list")) ?? [];
             var active = DownloadJobQueries.ActiveSelections(jobs);
-            UpdatePendingBadge(active.Count);
-            SynchronizeSelectionPrompt(active);
+            var automatic = DownloadJobQueries.AutomaticSelections(jobs, DateTimeOffset.UtcNow);
+            UpdatePendingBadge(active.Count, automatic.Count);
+            SynchronizeSelectionPrompt(active, automatic);
 
             if (!selectionPromptInProgress && !blockingDialogOpen)
             {
-                _ = ProcessNextSelectionPromptAsync(active, rules);
+                _ = ProcessNextSelectionPromptAsync(automatic, rules);
             }
 
             await RefreshVisibleLivePageAsync(jobs, rules);
@@ -95,7 +98,9 @@ public sealed partial class MainWindow
         }
     }
 
-    private void SynchronizeSelectionPrompt(IReadOnlyList<DownloadJob> active)
+    private void SynchronizeSelectionPrompt(
+        IReadOnlyList<DownloadJob> active,
+        IReadOnlyList<DownloadJob> automatic)
     {
         var activeIds = active.Select(static job => job.Id).ToHashSet();
         if (currentSelectionJobId is Guid current && !activeIds.Contains(current))
@@ -113,16 +118,24 @@ public sealed partial class MainWindow
                 if (currentSelectionRule is not null)
                 {
                     currentSelectionWindow?.UpdateDescription(
-                        CreateSelectionDescription(currentJob, currentSelectionRule, Math.Max(0, active.Count - 1)));
+                        CreateSelectionDescription(
+                            currentJob,
+                            currentSelectionRule,
+                            Math.Max(0, active.Count - 1),
+                            Math.Max(1, shownAutoPromptCount),
+                            Math.Max(shownAutoPromptCount, sessionAutoPromptJobs.Count)));
                 }
             }
         }
 
-        foreach (var job in active)
+        foreach (var job in automatic)
         {
             if (job.Id != currentSelectionJobId && !deferredSelectionPrompts.Contains(job.Id))
             {
-                selectionPromptQueue.Enqueue(job.Id);
+                if (selectionPromptQueue.Enqueue(job.Id))
+                {
+                    sessionAutoPromptJobs.Add(job.Id);
+                }
             }
         }
     }
@@ -140,12 +153,25 @@ public sealed partial class MainWindow
                 continue;
             }
 
-            await ShowSelectionPromptAsync(job, rule, Math.Max(0, active.Count - 1));
+            shownAutoPromptCount++;
+            await ShowSelectionPromptAsync(
+                job,
+                rule,
+                Math.Max(0, active.Count - 1),
+                shownAutoPromptCount,
+                Math.Max(shownAutoPromptCount, sessionAutoPromptJobs.Count),
+                active.Select(static candidate => candidate.Id).ToArray());
             return;
         }
     }
 
-    private async Task ShowSelectionPromptAsync(DownloadJob job, DownloadRule rule, int otherPendingCount)
+    private async Task ShowSelectionPromptAsync(
+        DownloadJob job,
+        DownloadRule rule,
+        int otherPendingCount,
+        int queuePosition,
+        int queueTotal,
+        IReadOnlyList<Guid> currentQueueJobIds)
     {
         selectionPromptInProgress = true;
         currentSelectionJobId = job.Id;
@@ -156,14 +182,15 @@ public sealed partial class MainWindow
         {
             var root = pathResolver.Resolve(rule.StorageRoot);
             currentSelectionCancellation = new CancellationTokenSource();
-            currentSelectionWindow = new FolderSelectionWindow();
+            currentSelectionWindow = new FolderSelectionWindow(themeManager);
             var result = await currentSelectionWindow.ShowAsync(
                 root,
                 job.SelectedRelativeFolder,
-                CreateSelectionDescription(job, rule, otherPendingCount),
+                CreateSelectionDescription(job, rule, otherPendingCount, queuePosition, queueTotal),
                 allowLater: true,
                 allowSkip: true,
-                currentSelectionCancellation.Token);
+                cancellationToken: currentSelectionCancellation.Token,
+                allowLaterAll: true);
 
             if (currentSelectionInvalidated)
             {
@@ -187,6 +214,17 @@ public sealed partial class MainWindow
                 {
                     await ShowMessageAsync(response.Message ?? "이동 건너뛰기 적용에 실패했습니다.");
                 }
+            }
+            else if (result.Action == FolderSelectionAction.LaterAll)
+            {
+                foreach (var queuedJobId in currentQueueJobIds)
+                {
+                    deferredSelectionPrompts.Add(queuedJobId);
+                }
+
+                selectionPromptQueue.Drain();
+                sessionAutoPromptJobs.Clear();
+                shownAutoPromptCount = 0;
             }
             else
             {
@@ -248,18 +286,23 @@ public sealed partial class MainWindow
     private static string CreateSelectionPromptSnapshot(DownloadJob job, int activeCount)
         => $"{job.Id:N}:{job.CurrentFileName}:{job.BrowserState}:{job.RoutingState}:{activeCount}";
 
-    private string CreateSelectionDescription(DownloadJob job, DownloadRule rule, int otherPendingCount)
-        => $"파일: {DownloadPresentation.DisplayFileName(job)}\n출처 사이트: {GetSourceHost(job)}\n상태: {DescribeStatus(job)}\n규칙: {rule.Name}\n저장 루트: {pathResolver.Resolve(rule.StorageRoot)}\n동시에 대기 중인 다른 파일: {otherPendingCount}개";
+    private string CreateSelectionDescription(
+        DownloadJob job,
+        DownloadRule rule,
+        int otherPendingCount,
+        int queuePosition = 1,
+        int queueTotal = 1)
+        => $"{queuePosition} / {queueTotal}\n파일: {DownloadPresentation.DisplayFileName(job)}\n출처 사이트: {GetSourceHost(job)}\n상태: {DescribeStatus(job)}\n규칙: {rule.Name}\n저장 루트: {pathResolver.Resolve(rule.StorageRoot)}\n동시에 대기 중인 다른 파일 {otherPendingCount}개";
 
-    private void UpdatePendingBadge(int count)
+    private void UpdatePendingBadge(int count, int automaticCount)
     {
         PendingInfoBadge.Value = count;
         PendingInfoBadge.Visibility = count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        if (count > previousPendingCount)
+        if (automaticCount > previousAutomaticCount)
         {
             trayIcon?.ShowSelectionNotification(count);
         }
-        previousPendingCount = count;
+        previousAutomaticCount = automaticCount;
     }
 
 }

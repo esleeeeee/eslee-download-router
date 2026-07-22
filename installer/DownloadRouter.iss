@@ -1,5 +1,10 @@
 #define AppName "eslee Download Router"
-#define AppVersion "0.2.0"
+#ifndef AppVersion
+  #error AppVersion must be supplied from Directory.Build.props by scripts/build-installer.ps1
+#endif
+#ifndef AppCommit
+  #define AppCommit "unknown"
+#endif
 #define Publisher "eslee"
 
 [Setup]
@@ -20,6 +25,9 @@ DisableProgramGroupPage=yes
 WizardStyle=modern
 CloseApplications=yes
 RestartApplications=no
+VersionInfoVersion={#AppVersion}.0
+VersionInfoProductVersion={#AppVersion}
+VersionInfoDescription={#AppName} installer ({#AppCommit})
 
 [Tasks]
 Name: "desktopicon"; Description: "바탕 화면 바로가기 만들기"; GroupDescription: "추가 바로가기:"; Flags: unchecked

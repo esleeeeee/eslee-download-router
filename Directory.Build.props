@@ -5,6 +5,12 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <VersionPrefix>0.3.0</VersionPrefix>
+    <Version>$(VersionPrefix)</Version>
+    <AssemblyVersion>$(VersionPrefix).0</AssemblyVersion>
+    <FileVersion>$(VersionPrefix).0</FileVersion>
+    <InformationalVersion Condition="'$(SourceRevisionId)' == ''">$(VersionPrefix)</InformationalVersion>
+    <InformationalVersion Condition="'$(SourceRevisionId)' != ''">$(VersionPrefix)+$(SourceRevisionId)</InformationalVersion>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
     <DebugType>portable</DebugType>

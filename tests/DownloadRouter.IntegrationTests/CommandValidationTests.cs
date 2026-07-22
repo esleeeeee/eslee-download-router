@@ -209,13 +209,13 @@ public sealed class CommandValidationTests : IDisposable
 
         var response = await SendAsync(
             handler,
-            "download.changed",
+            "download.cancelled",
             new DownloadChangedPayload("Whale", "cancel-1", "cancelled", source, "USER_CANCELED"));
 
         Assert.True(response.Success, response.Message);
         var job = await repository.GetJobAsync(jobId, CancellationToken.None);
         Assert.Equal(BrowserTransferState.Cancelled, job!.BrowserState);
-        Assert.Equal(RoutingState.WaitingForSelection, job.RoutingState);
+        Assert.Equal(RoutingState.NotRequired, job.RoutingState);
         Assert.Equal("download.cancelled", job.ErrorCode);
         Assert.Equal("cancelled.txt", job.CurrentFileName);
         Assert.Empty(DownloadJobQueries.ActiveSelections(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None)));
@@ -248,6 +248,82 @@ public sealed class CommandValidationTests : IDisposable
         Assert.Equal(RoutingState.Failed, job.RoutingState);
         Assert.Equal("download.interrupted.unknown", job.ErrorCode);
         Assert.DoesNotContain("secret", job.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("no-selection")]
+    [InlineData("selection-ready")]
+    [InlineData("later")]
+    [InlineData("skipped")]
+    public async Task ExplicitUserCancellationIsIdempotentForEverySelectionFlow(string scenario)
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var incoming = Directory.CreateDirectory(Path.Combine(root, "incoming")).FullName;
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        Directory.CreateDirectory(Path.Combine(destination, "selected"));
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var downloadId = "cancel-" + scenario;
+        var jobId = await StartAsync(handler, downloadId, scenario + ".bin");
+        if (scenario == "selection-ready")
+        {
+            Assert.True((await SendAsync(
+                handler,
+                "selection.complete",
+                new SelectionCompletedPayload([jobId], "selected"))).Success);
+        }
+        else if (scenario == "skipped")
+        {
+            Assert.True((await SendAsync(
+                handler,
+                "selection.skip",
+                new SelectionSkippedPayload(jobId))).Success);
+        }
+
+        var source = Path.Combine(incoming, scenario + ".bin");
+        await File.WriteAllTextAsync(source, "partial", CancellationToken.None);
+        var payload = new DownloadChangedPayload("Whale", downloadId, "cancelled", source, "USER_CANCELED");
+        var first = await SendAsync(handler, "download.cancelled", payload);
+        var duplicate = await SendAsync(handler, "download.cancelled", payload);
+
+        Assert.True(first.Success, first.Message);
+        Assert.True(duplicate.Success, duplicate.Message);
+        var job = await repository.GetJobAsync(jobId, CancellationToken.None);
+        Assert.Equal(BrowserTransferState.Cancelled, job!.BrowserState);
+        Assert.Equal(
+            scenario == "skipped" ? RoutingState.Skipped : RoutingState.NotRequired,
+            job.RoutingState);
+        Assert.Equal("download.cancelled", job.ErrorCode);
+        Assert.Empty(DownloadJobQueries.ActiveSelections([job]));
+        Assert.True(File.Exists(source));
+        Assert.Empty(Directory.EnumerateFiles(destination, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task MissingBrowserRecordBecomesStaleWithoutBeingGuessedCancelled()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartAsync(handler, "stale-1", "stale.bin");
+
+        Assert.True((await SendAsync(
+            handler,
+            "download.changed",
+            new DownloadChangedPayload("Whale", "stale-1", "stale", null, null))).Success);
+        var stale = await repository.GetJobAsync(jobId, CancellationToken.None);
+        Assert.Equal(BrowserTransferState.InProgress, stale!.BrowserState);
+        Assert.Equal(RoutingState.WaitingForSelection, stale.RoutingState);
+        Assert.True(stale.IsBrowserRecordStale);
+        Assert.Single(DownloadJobQueries.ActiveSelections([stale]));
+        Assert.Empty(DownloadJobQueries.AutomaticSelections([stale], DateTimeOffset.UtcNow));
+
+        Assert.True((await SendAsync(
+            handler,
+            "download.changed",
+            new DownloadChangedPayload("Whale", "stale-1", "in_progress", null, null))).Success);
+        var restored = await repository.GetJobAsync(jobId, CancellationToken.None);
+        Assert.False(restored!.IsBrowserRecordStale);
+        Assert.Single(DownloadJobQueries.AutomaticSelections([restored], DateTimeOffset.UtcNow));
     }
 
     [Fact]
@@ -419,7 +495,7 @@ public sealed class CommandValidationTests : IDisposable
         Assert.Equal("route.change-not-allowed", response.ErrorCode);
         var cancelled = await repository.GetJobAsync(jobId, CancellationToken.None);
         Assert.Equal(BrowserTransferState.Cancelled, cancelled!.BrowserState);
-        Assert.Equal(RoutingState.SelectionReady, cancelled.RoutingState);
+        Assert.Equal(RoutingState.NotRequired, cancelled.RoutingState);
     }
 
     [Fact]

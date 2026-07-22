@@ -1,7 +1,10 @@
 using DownloadRouter.Core.Models;
 using DownloadRouter.Core.Paths;
+using DownloadRouter.Core.Settings;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Windows.Storage;
+using Windows.System;
 
 namespace DownloadRouter.App;
 
@@ -11,9 +14,16 @@ public sealed partial class MainWindow : Window
     private readonly PathTokenResolver pathResolver = new(new WindowsKnownPathProvider());
     private readonly PathBoundaryValidator boundaryValidator = new();
 
-    public MainWindow()
+    public MainWindow(
+        AppPreferencesStore preferencesStore,
+        ThemeManager themeManager,
+        AppPreferences preferences)
     {
+        this.preferencesStore = preferencesStore;
+        this.themeManager = themeManager;
+        this.preferences = preferences;
         InitializeComponent();
+        themeManager.RegisterWindow(this);
         Title = "eslee Download Router";
         Navigation.SelectedItem = Navigation.MenuItems[0];
         InitializeLiveUpdates();
@@ -136,13 +146,48 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private Task ShowAboutAsync()
+    private async Task ShowAboutAsync()
     {
-        Prepare("eslee Download Router", "Chromium 다운로드를 사이트 규칙에 따라 안전하게 정리하는 로컬 Windows 프로그램입니다.");
+        var version = ProductVersionInfo.Read(typeof(App).Assembly, AppContext.BaseDirectory);
+        Prepare(version.ProductName, "Chromium 다운로드를 사이트 규칙에 따라 안전하게 정리하는 로컬 Windows 프로그램입니다.");
+        AddCard("현재 버전", version.DisplayVersion);
+        AddCard("빌드", $"{version.BuildDescription} · {version.InformationalVersion}");
+        AddCard("배포 형태", version.DistributionDescription);
         AddCard("개인정보", "서버 전송, 텔레메트리, 광고 SDK가 없습니다. 다운로드 처리에 필요한 최소 정보만 로컬에 저장합니다.");
         AddCard("지원 범위", "Windows 11 x64 · Whale / Edge / Chrome 공식 지원 · Brave / Vivaldi / Opera 호환 지원 · Firefox 제외");
         AddCard("프로토콜", $"Native Messaging ↔ 현재 사용자 Named Pipe v{ProtocolConstants.CurrentVersion} ↔ 단일 Agent");
-        return Task.CompletedTask;
+
+        var openData = new Button
+        {
+            Content = "데이터 저장 위치 열기",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        openData.Click += async (_, _) =>
+        {
+            try
+            {
+                var dataDirectory = Path.GetDirectoryName(preferencesStore.ConfigPath)
+                    ?? throw new InvalidOperationException("데이터 저장 위치를 확인할 수 없습니다.");
+                Directory.CreateDirectory(dataDirectory);
+                var folder = await StorageFolder.GetFolderFromPathAsync(dataDirectory);
+                _ = await Launcher.LaunchFolderAsync(folder);
+            }
+            catch (Exception exception)
+            {
+                await ShowMessageAsync("데이터 저장 위치 열기 실패: " + exception.Message);
+            }
+        };
+        ContentPanel.Children.Add(openData);
+
+        var openGitHub = new Button
+        {
+            Content = "GitHub 저장소 열기",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        openGitHub.Click += async (_, _) =>
+            _ = await Launcher.LaunchUriAsync(new Uri("https://github.com/esleeeeee/eslee-Download-Router"));
+        ContentPanel.Children.Add(openGitHub);
+        await Task.CompletedTask;
     }
 
     private void Prepare(string title, string description)

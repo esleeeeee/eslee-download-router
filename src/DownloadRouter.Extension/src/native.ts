@@ -7,23 +7,26 @@ import {
 export function sendNative<TPayload, TData = unknown>(
   request: AgentRequest<TPayload>,
 ): Promise<AgentResponse<TData> | null> {
+  const context = nativeDiagnosticContext(request);
   return new Promise((resolve) => {
     chrome.runtime.sendNativeMessage(nativeHostName, request, (response: unknown) => {
       if (chrome.runtime.lastError) {
         // Fail open: browser downloads must never depend on the local host.
-        reportNativeFailure(classifyNativeRuntimeError(chrome.runtime.lastError.message));
+        reportNativeFailure(context, classifyNativeRuntimeError(chrome.runtime.lastError.message));
         resolve(null);
         return;
       }
 
       if (!isAgentResponse(response)) {
-        reportNativeFailure("invalid-response");
+        reportNativeFailure(context, "invalid-response");
         resolve(null);
         return;
       }
 
       if (!response.success) {
-        reportNativeFailure(safeAgentErrorCode(response.errorCode));
+        reportNativeFailure(context, safeAgentErrorCode(response.errorCode));
+      } else {
+        console.debug(`[Download Router] native-send ${context} result=success`);
       }
 
       resolve(response as AgentResponse<TData>);
@@ -56,8 +59,15 @@ export function safeAgentErrorCode(errorCode: string | undefined): string {
   return "agent-request-failed";
 }
 
-function reportNativeFailure(code: string): void {
-  console.warn(`[Download Router] Native host communication failed (${code}); the browser download remains unchanged.`);
+function reportNativeFailure(context: string, code: string): void {
+  console.warn(`[Download Router] native-send ${context} result=failure code=${code}; browser download unchanged.`);
+}
+
+export function nativeDiagnosticContext<TPayload>(request: AgentRequest<TPayload>): string {
+  const payload = request.payload as { downloadId?: unknown };
+  const rawId = typeof payload.downloadId === "string" ? payload.downloadId : "none";
+  const downloadId = /^[0-9]{1,20}$/u.test(rawId) ? rawId : "invalid";
+  return `command=${request.command} downloadId=${downloadId}`;
 }
 
 function isAgentResponse(value: unknown): value is AgentResponse {

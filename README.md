@@ -2,7 +2,7 @@
 
 Chromium 기반 브라우저에서 완료된 다운로드를 사이트 규칙에 따라 Windows 폴더로 분류하는 로컬 전용 애플리케이션입니다. 규칙이 없거나 로컬 구성 요소가 응답하지 않으면 브라우저의 원래 다운로드를 그대로 유지하는 fail-open 방식을 사용합니다.
 
-> 현재 상태: 핵심 라우팅, 계층형 폴더 선택, 트레이 상주, 로그인 자동 시작, 규칙/이력 관리와 사용자 단위 설치 흐름을 구현했습니다. Whale 에서 Automatic과 SelectSubfolder의 실제 C: → D: 이동을 검증했습니다. 자세한 결과와 남은 제약은 [PROJECT_STATE.md](PROJECT_STATE.md)를 확인하세요.
+> 현재 상태: 핵심 라우팅, 계층형 폴더 선택, 트레이 상주, 로그인 자동 시작, 규칙/이력 관리와 사용자 단위 설치 흐름을 구현했습니다. 30분 자동 팝업 정책, Whale 취소 재조정, 전역 System/Light/Dark 테마와 단일 0.3.0 제품 버전 체계를 포함합니다. 자세한 결과와 남은 제약은 [PROJECT_STATE.md](PROJECT_STATE.md)를 확인하세요.
 
 ## 구성 요소
 
@@ -96,6 +96,10 @@ PowerShell 실행 정책이 로컬 스크립트를 막는 경우 예시처럼 `p
 
 설치/업그레이드 시 기존 프로세스는 정상 종료 신호를 받고, Whale·Edge·Chrome·Brave·Vivaldi·Opera의 HKCU Native Host가 설치 경로로 등록됩니다. 제거 시 자동 시작, 바로가기와 Native Host 등록만 제거하며 `%LOCALAPPDATA%\eslee\DownloadRouter`의 규칙·이력 DB는 보존합니다.
 
+`Directory.Build.props`의 `VersionPrefix`가 App, Agent, Native Host, 설치 프로그램의 단일 버전 원본입니다. 정보 화면은 실행 assembly의 informational version과 짧은 commit, 설치형/개발 빌드 구분을 표시합니다. 일반 설정의 시스템/라이트/다크 테마는 `%LOCALAPPDATA%\eslee\DownloadRouter\config.local.json`에 저장되어 열린 창, 새 선택 창, 트레이 복원과 백그라운드 시작에 동일하게 적용됩니다.
+
+SelectSubfolder 자동 팝업은 생성 또는 마지막 브라우저 이벤트가 30분 이내인 작업만 대상으로 합니다. 오래된 작업과 브라우저 기록을 찾을 수 없는 작업은 삭제하지 않고 대기 탭과 배지에 유지합니다. 선택 창의 `모두 나중에 선택`은 현재 App 세션의 기존 큐만 숨기며 이후 새 다운로드는 정상 표시합니다.
+
 설계와 위협 모델은 [ARCHITECTURE.md](ARCHITECTURE.md), [SECURITY.md](SECURITY.md)를 참고하세요.
 
 ## 현재 제한
@@ -103,6 +107,7 @@ PowerShell 실행 정책이 로컬 스크립트를 막는 경우 예시처럼 `p
 - Chromium downloads API가 다운로드 시작 탭 URL을 직접 제공하지 않으므로, 신뢰할 수 없는 활성 탭 추측은 하지 않습니다. 제공되는 referrer, 최초 URL, 최종 URL을 분리해 사용합니다.
 - 폴더 트리는 lazy loading과 선택 노드 새로 고침을 지원하지만 새 폴더 만들기는 제공하지 않습니다.
 - Windows 로그아웃/로그인 또는 재부팅 자체는 작업 환경을 중단하므로 수행하지 않았습니다. HKCU Run 등록과 `--background` 실행은 각각 확인했습니다.
+- `System` 테마는 WinUI의 `ElementTheme.Default`를 사용합니다. Windows 앱 테마 실시간 변경은 WinUI 알림에 따르며, 최소한 다음 창 생성과 App 재시작 시에는 현재 시스템 값을 반영합니다.
 - UI는 QHD 125%에서 실제 검증했습니다. FHD/4K와 Windows 100%/150%는 Per-Monitor V2/DIP 구조 및 좁은·넓은 창 경계 테스트만 완료했고 물리 디스플레이 전환 검증은 남아 있습니다.
 - Edge·Chrome·Brave·Vivaldi·Opera의 실제 다운로드는 아직 수동 검증하지 않았습니다.
 - 설치 파일은 현재 코드 서명되지 않았습니다.

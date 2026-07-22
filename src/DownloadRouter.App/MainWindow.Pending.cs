@@ -17,6 +17,18 @@ public sealed partial class MainWindow
             var rules = (AgentClient.ReadData<List<DownloadRule>>(await agent.SendAsync("rules.list")) ?? [])
                 .ToDictionary(static rule => rule.Id);
             var active = DownloadJobQueries.ActiveSelections(jobs);
+            var previousSessionCount = active.Count(job =>
+                SelectionPromptPolicy.IsPreviousSessionPending(job, DateTimeOffset.UtcNow));
+            if (previousSessionCount > 0)
+            {
+                ContentPanel.Children.Add(new InfoBar
+                {
+                    IsOpen = true,
+                    Severity = InfoBarSeverity.Informational,
+                    Title = "이전 세션의 대기 작업",
+                    Message = $"30분 이상 지났거나 브라우저 기록을 확인할 수 없는 {previousSessionCount}개 작업은 자동 팝업 없이 이 탭에서만 유지됩니다.",
+                });
+            }
             var groups = active.GroupBy(static job => job.RuleId).ToList();
 
             foreach (var group in groups)
@@ -76,7 +88,7 @@ public sealed partial class MainWindow
                 return;
             }
 
-            var result = await new FolderSelectionWindow().ShowAsync(
+            var result = await new FolderSelectionWindow(themeManager).ShowAsync(
                 root,
                 selectedRelativeFolder: null,
                 $"{selectedJobs.Count}개 파일에 같은 하위 폴더를 적용합니다. 체크하지 않은 파일은 변경하지 않습니다.",
@@ -111,6 +123,17 @@ public sealed partial class MainWindow
             TextWrapping = TextWrapping.Wrap,
         });
         panel.Children.Add(CreateStatusBadge(job));
+        if (SelectionPromptPolicy.IsPreviousSessionPending(job, DateTimeOffset.UtcNow))
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = job.IsBrowserRecordStale
+                    ? "이전 세션의 대기 작업 · 브라우저 기록을 찾을 수 없어 자동 표시하지 않음"
+                    : "이전 세션의 대기 작업 · 30분 자동 팝업 기한 경과",
+                Opacity = 0.75,
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
         panel.Children.Add(new TextBlock
         {
             Text = $"출처 호스트: {GetSourceHost(job)}\n브라우저: {job.Browser}\n다운로드 시작: {job.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}\n규칙: {rule.Name}\n저장 루트: {root}\n현재 선택: {DisplayFolder(job.SelectedRelativeFolder)}",
@@ -120,7 +143,7 @@ public sealed partial class MainWindow
         var apply = new Button { Content = "이 파일의 저장 위치 선택/변경", HorizontalAlignment = HorizontalAlignment.Stretch };
         apply.Click += async (_, _) =>
         {
-            var result = await new FolderSelectionWindow().ShowAsync(
+            var result = await new FolderSelectionWindow(themeManager).ShowAsync(
                 root,
                 job.SelectedRelativeFolder,
                 $"파일: {DownloadPresentation.DisplayFileName(job)}\n현재 선택: {DisplayFolder(job.SelectedRelativeFolder)}",

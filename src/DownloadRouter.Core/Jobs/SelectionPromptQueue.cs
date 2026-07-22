@@ -63,4 +63,12 @@ public sealed class SelectionPromptQueue
 
         return true;
     }
+
+    public IReadOnlyList<Guid> Drain()
+    {
+        var result = queue.ToArray();
+        queue.Clear();
+        queued.Clear();
+        return result;
+    }
 }

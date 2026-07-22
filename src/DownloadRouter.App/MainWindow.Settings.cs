@@ -1,5 +1,6 @@
 using DownloadRouter.Core.Models;
 using DownloadRouter.Core.Startup;
+using DownloadRouter.Core.Settings;
 using Microsoft.UI.Xaml.Controls;
 
 namespace DownloadRouter.App;
@@ -55,13 +56,32 @@ public sealed partial class MainWindow
         ContentPanel.Children.Add(closeBehavior);
         AddMuted("기본값은 트레이로 최소화입니다. 트레이 메뉴의 ‘종료’는 설정과 관계없이 UI와 트레이를 종료합니다.");
 
-        ContentPanel.Children.Add(new ComboBox
+        var theme = new ComboBox
         {
             Header = "테마",
             ItemsSource = new[] { "시스템 설정", "라이트", "다크" },
-            SelectedIndex = 0,
+            SelectedIndex = preferences.ThemePreference switch
+            {
+                AppThemePreference.Light => 1,
+                AppThemePreference.Dark => 2,
+                _ => 0,
+            },
             HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Stretch,
-        });
+        };
+        theme.SelectionChanged += (_, _) =>
+        {
+            var selected = theme.SelectedIndex switch
+            {
+                1 => AppThemePreference.Light,
+                2 => AppThemePreference.Dark,
+                _ => AppThemePreference.System,
+            };
+            preferences = preferences with { Theme = AppThemePolicy.ToStorageValue(selected) };
+            preferencesStore.Save(preferences);
+            themeManager.SetPreference(selected);
+        };
+        ContentPanel.Children.Add(theme);
+        AddMuted("시스템 설정은 ElementTheme.Default를 사용하므로 Windows 앱 테마 변경을 따릅니다. 라이트/다크 선택은 열린 창과 이후 생성되는 저장 위치 선택 창에 즉시 적용됩니다.");
         return Task.CompletedTask;
     }
 }

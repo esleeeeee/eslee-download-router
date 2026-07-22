@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using DownloadRouter.Core.Models;
+using DownloadRouter.Core.Settings;
 
 namespace DownloadRouter.App;
 
@@ -70,7 +71,10 @@ public partial class App : Application
             return;
         }
 
-        var mainWindow = new MainWindow();
+        var preferencesStore = new AppPreferencesStore();
+        var preferences = preferencesStore.Load();
+        var themeManager = new ThemeManager(preferences.ThemePreference);
+        var mainWindow = new MainWindow(preferencesStore, themeManager, preferences);
         window = mainWindow;
         activationEvent = new EventWaitHandle(
             initialState: false,

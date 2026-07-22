@@ -1,11 +1,17 @@
 import { detectBrowser } from "./browser.js";
-import { reportedDownloadState } from "./download-state.js";
+import {
+  isUserCancelled,
+  preferredDownloadError,
+  safeDownloadError,
+} from "./download-state.js";
 import { trustedDownloadFileName } from "./file-name.js";
 import { sendNative } from "./native.js";
-import { createRequest } from "./protocol.js";
+import { createRequest, type AgentCommandName } from "./protocol.js";
 import { sourceMetadata } from "./source-attribution.js";
 
 const browser = detectBrowser(navigator.userAgent);
+const lastErrors = new Map<number, string>();
+const reportedTerminalStates = new Map<number, "cancelled" | "interrupted" | "complete">();
 
 interface ActiveBrowserDownload {
   jobId: string;
@@ -13,6 +19,8 @@ interface ActiveBrowserDownload {
 }
 
 chrome.downloads.onCreated.addListener((item) => {
+  lastErrors.delete(item.id);
+  reportedTerminalStates.delete(item.id);
   const metadata = sourceMetadata(item);
   void sendNative(
     createRequest("download.started", {
@@ -25,6 +33,20 @@ chrome.downloads.onCreated.addListener((item) => {
 
 chrome.downloads.onChanged.addListener((delta) => {
   const state = delta.state?.current;
+  const deltaError = delta.error?.current ?? null;
+  if (deltaError) {
+    lastErrors.set(delta.id, deltaError);
+  }
+
+  console.debug(
+    `[Download Router] onChanged downloadId=${safeDownloadId(delta.id)} state=${safeDownloadState(state)} error=${safeDownloadError(deltaError)}`,
+  );
+
+  if (isUserCancelled(deltaError)) {
+    reportTerminalWithoutItem(delta.id, "download.cancelled", "cancelled", deltaError);
+    return;
+  }
+
   if (!delta.filename && state !== "complete" && state !== "interrupted") {
     return;
   }
@@ -32,6 +54,9 @@ chrome.downloads.onChanged.addListener((delta) => {
   chrome.downloads.search({ id: delta.id }, (items) => {
     const item = items[0];
     if (!item) {
+      if (state === "interrupted") {
+        reportStale(delta.id);
+      }
       return;
     }
 
@@ -39,29 +64,71 @@ chrome.downloads.onChanged.addListener((delta) => {
       reportDownloadMetadata(item);
     }
 
-    if (state === "complete" || state === "interrupted") {
-      reportChangedDownload(item, state, delta.error?.current ?? item.error ?? null);
+    if (state === "complete") {
+      reportTerminal(item, "download.changed", "complete", null);
+      return;
+    }
+
+    if (state === "interrupted") {
+      const error = preferredDownloadError(deltaError, item.error, lastErrors.get(delta.id));
+      reportTerminal(
+        item,
+        isUserCancelled(error) ? "download.cancelled" : "download.interrupted",
+        isUserCancelled(error) ? "cancelled" : "interrupted",
+        error,
+      );
     }
   });
 });
 
+chrome.downloads.onErased.addListener((downloadId) => {
+  console.debug(`[Download Router] onErased downloadId=${safeDownloadId(downloadId)} event=history-erased`);
+  lastErrors.delete(downloadId);
+  reportedTerminalStates.delete(downloadId);
+});
+
 void reconcileActiveDownloads();
 
-function reportChangedDownload(
+function reportTerminal(
   item: chrome.downloads.DownloadItem,
-  state: "complete" | "interrupted",
+  command: AgentCommandName,
+  state: "complete" | "interrupted" | "cancelled",
   error: string | null,
 ): void {
+  if (!markTerminalReported(item.id, state)) {
+    return;
+  }
+
   void sendNative(
-    createRequest("download.changed", {
+    createRequest(command, {
       browser,
       downloadId: item.id.toString(),
-      state: reportedDownloadState(state, error),
+      state,
       filePath: item.filename || null,
       fileName: trustedDownloadFileName(item.filename),
       error,
     }),
   );
+}
+
+function reportTerminalWithoutItem(
+  downloadId: number,
+  command: AgentCommandName,
+  state: "cancelled" | "interrupted",
+  error: string | null,
+): void {
+  if (!markTerminalReported(downloadId, state)) {
+    return;
+  }
+
+  void sendNative(createRequest(command, {
+    browser,
+    downloadId: downloadId.toString(),
+    state,
+    filePath: null,
+    fileName: null,
+    error,
+  }));
 }
 
 function reportDownloadMetadata(item: chrome.downloads.DownloadItem): void {
@@ -73,6 +140,44 @@ function reportDownloadMetadata(item: chrome.downloads.DownloadItem): void {
       fileName: trustedDownloadFileName(item.filename),
     }),
   );
+}
+
+function reportReconciledState(item: chrome.downloads.DownloadItem): void {
+  if (item.state === "complete") {
+    reportTerminal(item, "download.changed", "complete", null);
+    return;
+  }
+
+  if (item.state === "interrupted") {
+    const error = preferredDownloadError(null, item.error, lastErrors.get(item.id));
+    reportTerminal(
+      item,
+      isUserCancelled(error) ? "download.cancelled" : "download.interrupted",
+      isUserCancelled(error) ? "cancelled" : "interrupted",
+      error,
+    );
+    return;
+  }
+
+  void sendNative(createRequest("download.changed", {
+    browser,
+    downloadId: item.id.toString(),
+    state: "in_progress",
+    filePath: null,
+    fileName: null,
+    error: null,
+  }));
+}
+
+function reportStale(downloadId: number): void {
+  void sendNative(createRequest("download.changed", {
+    browser,
+    downloadId: downloadId.toString(),
+    state: "stale",
+    filePath: null,
+    fileName: null,
+    error: null,
+  }));
 }
 
 async function reconcileActiveDownloads(): Promise<void> {
@@ -91,11 +196,29 @@ async function reconcileActiveDownloads(): Promise<void> {
 
     chrome.downloads.search({ id }, (items) => {
       const item = items[0];
-      if (!item || (item.state !== "complete" && item.state !== "interrupted")) {
+      if (!item) {
+        reportStale(id);
         return;
       }
 
-      reportChangedDownload(item, item.state, item.error ?? null);
+      reportReconciledState(item);
     });
   }
+}
+
+function markTerminalReported(id: number, state: "cancelled" | "interrupted" | "complete"): boolean {
+  if (reportedTerminalStates.get(id) === state) {
+    return false;
+  }
+
+  reportedTerminalStates.set(id, state);
+  return true;
+}
+
+function safeDownloadId(id: number): string {
+  return Number.isSafeInteger(id) && id >= 0 ? id.toString() : "invalid";
+}
+
+function safeDownloadState(state: string | undefined): string {
+  return state === "in_progress" || state === "complete" || state === "interrupted" ? state : "none";
 }

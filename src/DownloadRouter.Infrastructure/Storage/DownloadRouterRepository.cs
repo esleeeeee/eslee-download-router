@@ -6,7 +6,7 @@ namespace DownloadRouter.Infrastructure.Storage;
 
 public sealed class DownloadRouterRepository(AppPaths paths)
 {
-    private const int CurrentSchemaVersion = 3;
+    private const int CurrentSchemaVersion = 4;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -66,6 +66,8 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 ErrorMessage TEXT NULL,
                 CreatedAt TEXT NOT NULL,
                 CompletedAt TEXT NULL,
+                LastBrowserEventAt TEXT NULL,
+                IsBrowserRecordStale INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY(RuleId) REFERENCES Rules(Id),
                 UNIQUE(Browser, BrowserDownloadId)
             );
@@ -210,12 +212,14 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 Id, Browser, BrowserDownloadId, OriginalFileName, CurrentFileName,
                 InitiatingPageUrl, InitialUrl, FinalUrl, ReferrerUrl, SanitizedSource,
                 RuleId, OriginalPath, FinalPath, SelectedRelativeFolder, Status,
-                BrowserState, RoutingState, ErrorCode, ErrorMessage, CreatedAt, CompletedAt)
+                BrowserState, RoutingState, ErrorCode, ErrorMessage, CreatedAt, CompletedAt,
+                LastBrowserEventAt, IsBrowserRecordStale)
             VALUES(
                 $id, $browser, $browserDownloadId, $originalFileName, $currentFileName,
                 $initiatingPageUrl, $initialUrl, $finalUrl, $referrerUrl, $sanitizedSource,
                 $ruleId, $originalPath, $finalPath, $selectedRelativeFolder, $status,
-                $browserState, $routingState, $errorCode, $errorMessage, $createdAt, $completedAt);
+                $browserState, $routingState, $errorCode, $errorMessage, $createdAt, $completedAt,
+                $lastBrowserEventAt, $isBrowserRecordStale);
             """;
         AddJobParameters(command, job);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -294,7 +298,9 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 RoutingState = $routingState,
                 ErrorCode = $errorCode,
                 ErrorMessage = $errorMessage,
-                CompletedAt = $completedAt
+                CompletedAt = $completedAt,
+                LastBrowserEventAt = $lastBrowserEventAt,
+                IsBrowserRecordStale = $isBrowserRecordStale
             WHERE Id = $id;
             """;
         AddJobParameters(command, job);
@@ -356,8 +362,7 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             SELECT Id, BrowserDownloadId
             FROM DownloadJobs
             WHERE Browser = $browser
-              AND BrowserState = 'InProgress'
-              AND RoutingState NOT IN ('Completed', 'Skipped');
+              AND BrowserState = 'InProgress';
             """;
         command.Parameters.AddWithValue("$browser", browser.ToString());
         var result = new List<ActiveBrowserDownload>();
@@ -390,7 +395,8 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         SELECT Id, Browser, BrowserDownloadId, OriginalFileName, CurrentFileName,
                InitiatingPageUrl, InitialUrl, FinalUrl, ReferrerUrl, SanitizedSource,
                RuleId, OriginalPath, FinalPath, SelectedRelativeFolder, Status,
-               BrowserState, RoutingState, ErrorCode, ErrorMessage, CreatedAt, CompletedAt
+               BrowserState, RoutingState, ErrorCode, ErrorMessage, CreatedAt, CompletedAt,
+               LastBrowserEventAt, IsBrowserRecordStale
         FROM DownloadJobs
         """;
 
@@ -488,7 +494,38 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             cancellationToken,
             transaction).ConfigureAwait(false);
 
-        if (CurrentSchemaVersion != 3)
+        if (!columns.Contains("LastBrowserEventAt"))
+        {
+            await ExecuteAsync(
+                connection,
+                "ALTER TABLE DownloadJobs ADD COLUMN LastBrowserEventAt TEXT NULL;",
+                cancellationToken,
+                transaction).ConfigureAwait(false);
+        }
+
+        if (!columns.Contains("IsBrowserRecordStale"))
+        {
+            await ExecuteAsync(
+                connection,
+                "ALTER TABLE DownloadJobs ADD COLUMN IsBrowserRecordStale INTEGER NOT NULL DEFAULT 0;",
+                cancellationToken,
+                transaction).ConfigureAwait(false);
+        }
+
+        await ExecuteAsync(
+            connection,
+            """
+            UPDATE DownloadJobs
+            SET LastBrowserEventAt = CreatedAt
+            WHERE LastBrowserEventAt IS NULL;
+
+            INSERT OR IGNORE INTO MigrationHistory(Version, AppliedAt)
+            VALUES (4, CURRENT_TIMESTAMP);
+            """,
+            cancellationToken,
+            transaction).ConfigureAwait(false);
+
+        if (CurrentSchemaVersion != 4)
         {
             throw new InvalidOperationException("Repository migration version is inconsistent.");
         }
@@ -565,7 +602,9 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             GetNullableString(reader, 17),
             GetNullableString(reader, 18),
             Parse(reader.GetString(19)),
-            reader.IsDBNull(20) ? null : Parse(reader.GetString(20)));
+            reader.IsDBNull(20) ? null : Parse(reader.GetString(20)),
+            reader.IsDBNull(21) ? null : Parse(reader.GetString(21)),
+            reader.GetBoolean(22));
 
     private static string? GetNullableString(SqliteDataReader reader, int ordinal)
         => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
@@ -609,6 +648,10 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         command.Parameters.AddWithValue("$errorMessage", Db(job.ErrorMessage));
         command.Parameters.AddWithValue("$createdAt", Format(job.CreatedAt));
         command.Parameters.AddWithValue("$completedAt", job.CompletedAt is null ? DBNull.Value : Format(job.CompletedAt.Value));
+        command.Parameters.AddWithValue(
+            "$lastBrowserEventAt",
+            job.LastBrowserEventAt is null ? DBNull.Value : Format(job.LastBrowserEventAt.Value));
+        command.Parameters.AddWithValue("$isBrowserRecordStale", job.IsBrowserRecordStale);
     }
 
     private static async Task AppendEventAsync(

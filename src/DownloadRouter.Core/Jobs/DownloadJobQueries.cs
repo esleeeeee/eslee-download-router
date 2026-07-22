@@ -7,6 +7,15 @@ public static class DownloadJobQueries
     public static IReadOnlyList<DownloadJob> ActiveSelections(IEnumerable<DownloadJob> jobs)
         => jobs.Where(static job => job.IsSelectionPending).ToList();
 
+    public static IReadOnlyList<DownloadJob> AutomaticSelections(
+        IEnumerable<DownloadJob> jobs,
+        DateTimeOffset now)
+        => jobs
+            .Where(job => SelectionPromptPolicy.IsAutoPromptEligible(job, now))
+            .OrderBy(static job => job.LastBrowserEventAt ?? job.CreatedAt)
+            .ThenBy(static job => job.CreatedAt)
+            .ToList();
+
     public static DashboardCounts CountDashboard(IEnumerable<DownloadJob> jobs)
     {
         var snapshot = jobs.ToList();

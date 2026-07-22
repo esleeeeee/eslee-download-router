@@ -10,6 +10,7 @@ public enum FolderSelectionAction
 {
     Apply,
     Later,
+    LaterAll,
     Skip,
     Closed,
 }
@@ -18,7 +19,7 @@ public sealed record FolderSelectionResult(
     FolderSelectionAction Action,
     string RelativeFolder);
 
-public sealed class FolderSelectionWindow
+public sealed class FolderSelectionWindow(ThemeManager themeManager)
 {
     private const int DefaultWidthDip = 560;
     private const int DefaultHeightDip = 760;
@@ -43,10 +44,12 @@ public sealed class FolderSelectionWindow
         string description,
         bool allowLater,
         bool allowSkip,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool allowLaterAll = false)
     {
         window.Title = "다운로드 저장 위치 선택";
-        window.Content = CreateContent(description, allowLater, allowSkip);
+        window.Content = CreateContent(description, allowLater, allowSkip, allowLaterAll);
+        themeManager.RegisterWindow(window);
         window.Closed += (_, _) => CompleteWithoutClosing(FolderSelectionAction.Closed);
         await picker.InitializeAsync(storageRoot, selectedRelativeFolder, cancellationToken);
         window.Activate();
@@ -58,7 +61,7 @@ public sealed class FolderSelectionWindow
         return await completion.Task;
     }
 
-    private UIElement CreateContent(string description, bool allowLater, bool allowSkip)
+    private UIElement CreateContent(string description, bool allowLater, bool allowSkip, bool allowLaterAll)
     {
         var root = new Grid
         {
@@ -112,6 +115,17 @@ public sealed class FolderSelectionWindow
             };
             later.Click += (_, _) => Complete(FolderSelectionAction.Later);
             buttons.Children.Add(later);
+        }
+
+        if (allowLaterAll)
+        {
+            var laterAll = new Button
+            {
+                Content = "모두 나중에 선택",
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+            };
+            laterAll.Click += (_, _) => Complete(FolderSelectionAction.LaterAll);
+            buttons.Children.Add(laterAll);
         }
 
         if (allowSkip)

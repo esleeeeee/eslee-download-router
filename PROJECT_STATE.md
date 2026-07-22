@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-기준일: 2026-07-22 (Asia/Seoul)
+기준일: 2026-07-23 (Asia/Seoul)
 
 ## 요약
 
@@ -25,8 +25,10 @@
 - 중복 파일 번호 보존과 재시도 상태
 - 브라우저 전송 상태와 라우팅 상태를 분리한 작업 모델과 v1 → v2 SQLite 마이그레이션
 - 파일별 SelectSubfolder 카드, 명시적으로 체크한 항목만 일괄 적용, 건너뛰기와 세션 단위 나중에 선택
+- 생성/마지막 브라우저 이벤트 기준 30분 자동 팝업 정책, 이전 세션 대기 표시, 현재 큐 `모두 나중에 선택`
 - 고정 DIP 전용 선택 창, lazy 계층형 FolderTreePicker, 단일 FIFO, 숨김/최소화 상태 직접 표시, 취소 시 자동 닫기
 - `onCreated`/`filename` delta/완료 검색을 통한 같은 Job 파일명 갱신과 임시 이름 차단
+- `USER_CANCELED` 즉시 전송, interrupted 오류 우선순위, onErased 비취소 처리와 service worker 시작 재조정
 - 이력의 Job별 저장 위치 선택·변경, 완료 파일 명시적 재이동, 이동 안 함/나중에 선택
 - 취소선·상태 필터·개별/선택/취소 이력 삭제 UI와 실제 파일 비삭제 보장
 - 현재 필터 전체 선택/해제와 선택 수 표시
@@ -38,16 +40,18 @@
 - Windows PowerShell 5.1 절대 경로/HKCU 등록 호환성과 BOM 없는 UTF-8 Native Host manifest
 - 실패할 때만 분류 코드를 남기는 Extension Native Messaging 진단 로그
 - Per-Monitor V2 WinUI 렌더링, 뷰포트 실폭 제한, 32/48 DIP 공통 상단 여백, 1초 상태 변경 감지
-- self-contained win-x64 publish와 설치/업그레이드/제거가 검증된 per-user Inno Setup 0.2.0
+- 저장된 System/Light/Dark를 열린 모든 Window와 이후 생성 Window에 적용하는 공통 ThemeManager
+- assembly informational version을 표시하는 정보 화면과 `Directory.Build.props` 기반 App/Agent/Native Host/Installer 단일 0.3.0 버전
+- self-contained win-x64 publish와 설치/업그레이드/제거가 검증된 per-user Inno Setup 0.3.0
 
 ## 빌드와 테스트
 
 | 항목 | 결과 |
 |---|---|
 | `.NET Debug build` | 성공, 경고 0, 오류 0 |
-| `.NET tests` | 53/53 통과(Core 32, Infrastructure 7, Integration 14) |
+| `.NET tests` | 67/67 통과(Core 41, Infrastructure 7, Integration 19) |
 | Extension ESLint/TypeScript build | 성공 |
-| Extension Node tests | 10/10 통과 |
+| Extension Node tests | 13/13 통과 |
 | Agent Named Pipe ping | 성공 |
 | Native Host self-test/길이 접두사 ping/Agent 자동 시작 | 성공 |
 | Native Host Agent 장애 fail-open | `agent.unavailable`, Host 종료 코드 0, 브라우저 비차단 응답 확인 |
@@ -74,11 +78,12 @@ Whale 에서 로컬 HTTP fixture로 Automatic과 SelectSubfolder를 실제 검�
 
 - downloads API만으로 다운로드 시작 탭 URL을 신뢰성 있게 얻을 수 없어 활성 탭을 추측하지 않습니다. 현재 referrer와 파일 URL을 분리해 사용합니다.
 - App 실행 파일을 찾을 수 있으면 Agent가 선택 UI를 시작하고, 실행 중이면 1초 폴링과 독립 창으로 FIFO를 표시합니다. 설치 손상으로 App을 찾지 못해도 다운로드는 원래 위치에서 완료되고 Pending에 남습니다.
-- “나중에 선택” 팝업 억제는 현재 App 세션 동안만 유지됩니다. 트리는 선택 노드 새로 고침을 지원하지만 새 폴더 생성은 미구현입니다.
+- “나중에 선택”과 “모두 나중에 선택” 팝업 억제는 현재 App 세션 동안만 유지됩니다. 30분이 지난 작업은 대기 탭에서 수동 처리하며 트리의 새 폴더 생성은 미구현입니다.
 - Extension 시작 시 Agent의 진행 중 ID를 브라우저 다운로드 기록과 대조해 완료·취소·중단을 재전송합니다. 브라우저 기록에서 사라진 오래된 작업은 근거 없이 완료·삭제하지 않습니다.
 - Whale registry adapter는 이 PC에서 검증했습니다. Brave/Vivaldi/Opera adapter는 실제 PC 검증이 필요합니다.
 - 브라우저 자체 “다운로드 전에 저장 위치 확인” 설정 감지와 안내는 문서만 있고 UI 자동 감지는 미구현입니다.
 - QHD 125% 실제 실행과 좁은/넓은 창 시각·경계 검증은 완료했습니다. Windows 100%/150%, FHD/4K 실기기와 키보드/스크린리더 접근성 검증은 남아 있습니다.
+- 전역 테마의 매핑·저장·fallback은 자동 검증했습니다. 실제 QHD 125%의 다크/라이트 전환, 선택 창, 트레이 복원, 재실행 검증 결과는 아래 최신 설치본 검증 기록을 기준으로 하며 100%/150% 실기기 전환은 남아 있습니다.
 - HKCU 자동 시작 명령과 백그라운드 실행은 확인했지만 실제 로그아웃/로그인 또는 재부팅은 수행하지 않았습니다.
 - 설치 파일은 코드 서명되지 않았습니다.
 
@@ -91,8 +96,8 @@ Whale 에서 로컬 HTTP fixture로 Automatic과 SelectSubfolder를 실제 검�
 
 ## 다음 작업
 
-1. Native Host 장애 중 Whale 실다운로드 유지 검증
-2. Windows 100%/150% 및 FHD/4K에서 UI 실배율 시각 검증
+1. Windows 100%/150% 및 FHD/4K에서 UI 실배율·테마 시각 검증
+2. Native Host 장애 중 Whale 실다운로드 유지 검증
 3. Edge에서 개발자 모드 확장 로드와 Native Messaging 왕복을 실제 검증
 4. FolderTreePicker 새 폴더 만들기와 영구 알림 설정 추가
 5. 브라우저 기록에서 사라진 오래된 비종료 작업의 사용자 확인 복구 흐름 설계

@@ -1,13 +1,15 @@
 using System.Runtime.InteropServices;
 using DownloadRouter.Core.Models;
+using DownloadRouter.Core.Settings;
 using Microsoft.UI.Windowing;
 
 namespace DownloadRouter.App;
 
 public sealed partial class MainWindow
 {
-    private readonly AppPreferencesStore preferencesStore = new();
-    private AppPreferences preferences = new();
+    private readonly AppPreferencesStore preferencesStore;
+    private readonly ThemeManager themeManager;
+    private AppPreferences preferences;
     private AppWindow? appWindow;
     private TrayIconHost? trayIcon;
     private bool exitRequested;
@@ -16,7 +18,6 @@ public sealed partial class MainWindow
     public void InitializeHost(bool background, Action onExit)
     {
         exitCallback = onExit;
-        preferences = preferencesStore.Load();
         var handle = WinRT.Interop.WindowNative.GetWindowHandle(this);
         var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(handle);
         appWindow = AppWindow.GetFromWindowId(windowId);

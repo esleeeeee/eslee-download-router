@@ -39,6 +39,13 @@ public enum WindowCloseBehavior
     ExitApplication,
 }
 
+public enum AppThemePreference
+{
+    System,
+    Light,
+    Dark,
+}
+
 public enum DownloadJobStatus
 {
     Detected,
@@ -124,7 +131,9 @@ public sealed record DownloadJob(
     string? ErrorCode,
     string? ErrorMessage,
     DateTimeOffset CreatedAt,
-    DateTimeOffset? CompletedAt)
+    DateTimeOffset? CompletedAt,
+    DateTimeOffset? LastBrowserEventAt = null,
+    bool IsBrowserRecordStale = false)
 {
     public DownloadJobStatus Status
         => BrowserState switch
@@ -243,6 +252,8 @@ public static class ProtocolConstants
         "download.started",
         "download.metadata",
         "download.changed",
+        "download.cancelled",
+        "download.interrupted",
         "rules.list",
         "rules.upsert",
         "rules.delete",
