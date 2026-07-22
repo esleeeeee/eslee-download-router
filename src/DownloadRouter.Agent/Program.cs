@@ -38,6 +38,7 @@ builder.Services.AddSingleton<IKnownPathProvider, WindowsKnownPathProvider>();
 builder.Services.AddSingleton<PathTokenResolver>();
 builder.Services.AddSingleton<PathBoundaryValidator>();
 builder.Services.AddSingleton<FileMoveService>();
+builder.Services.AddSingleton<ISelectionUiLauncher, SelectionUiLauncher>();
 builder.Services.AddSingleton<AgentCommandHandler>();
 builder.Services.AddHostedService<AgentPipeServer>();
 

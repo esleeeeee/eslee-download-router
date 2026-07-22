@@ -6,7 +6,7 @@ namespace DownloadRouter.Infrastructure.Storage;
 
 public sealed class DownloadRouterRepository(AppPaths paths)
 {
-    private const int CurrentSchemaVersion = 1;
+    private const int CurrentSchemaVersion = 2;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -59,6 +59,8 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 FinalPath TEXT NULL,
                 SelectedRelativeFolder TEXT NULL,
                 Status TEXT NOT NULL,
+                BrowserState TEXT NOT NULL DEFAULT 'InProgress',
+                RoutingState TEXT NOT NULL DEFAULT 'NotRequired',
                 ErrorCode TEXT NULL,
                 ErrorMessage TEXT NULL,
                 CreatedAt TEXT NOT NULL,
@@ -100,11 +102,11 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             );
 
             INSERT OR IGNORE INTO MigrationHistory(Version, AppliedAt)
-                VALUES ($version, $appliedAt);
+                VALUES (1, $appliedAt);
             """;
-        command.Parameters.AddWithValue("$version", CurrentSchemaVersion);
         command.Parameters.AddWithValue("$appliedAt", Format(DateTimeOffset.UtcNow));
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await MigrateToCurrentVersionAsync(connection, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<DownloadRule>> GetRulesAsync(CancellationToken cancellationToken = default)
@@ -183,12 +185,12 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 Id, Browser, BrowserDownloadId, OriginalFileName, CurrentFileName,
                 InitiatingPageUrl, InitialUrl, FinalUrl, ReferrerUrl, SanitizedSource,
                 RuleId, OriginalPath, FinalPath, SelectedRelativeFolder, Status,
-                ErrorCode, ErrorMessage, CreatedAt, CompletedAt)
+                BrowserState, RoutingState, ErrorCode, ErrorMessage, CreatedAt, CompletedAt)
             VALUES(
                 $id, $browser, $browserDownloadId, $originalFileName, $currentFileName,
                 $initiatingPageUrl, $initialUrl, $finalUrl, $referrerUrl, $sanitizedSource,
                 $ruleId, $originalPath, $finalPath, $selectedRelativeFolder, $status,
-                $errorCode, $errorMessage, $createdAt, $completedAt);
+                $browserState, $routingState, $errorCode, $errorMessage, $createdAt, $completedAt);
             """;
         AddJobParameters(command, job);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -263,6 +265,8 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 FinalPath = $finalPath,
                 SelectedRelativeFolder = $selectedRelativeFolder,
                 Status = $status,
+                BrowserState = $browserState,
+                RoutingState = $routingState,
                 ErrorCode = $errorCode,
                 ErrorMessage = $errorMessage,
                 CompletedAt = $completedAt
@@ -279,6 +283,68 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<int> DeleteJobsAsync(
+        IReadOnlyCollection<Guid> jobIds,
+        CancellationToken cancellationToken = default)
+    {
+        var ids = jobIds.Where(static id => id != Guid.Empty).Distinct().ToArray();
+        if (ids.Length is < 1 or > 1000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(jobIds), "Delete between 1 and 1000 history items.");
+        }
+
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        var placeholders = ids.Select((_, index) => $"$id{index}").ToArray();
+        var inClause = string.Join(", ", placeholders);
+
+        await using (var deleteEvents = connection.CreateCommand())
+        {
+            deleteEvents.Transaction = (SqliteTransaction)transaction;
+            deleteEvents.CommandText = $"DELETE FROM DownloadEvents WHERE JobId IN ({inClause});";
+            AddIdParameters(deleteEvents, ids);
+            await deleteEvents.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        int affected;
+        await using (var deleteJobs = connection.CreateCommand())
+        {
+            deleteJobs.Transaction = (SqliteTransaction)transaction;
+            deleteJobs.CommandText = $"DELETE FROM DownloadJobs WHERE Id IN ({inClause});";
+            AddIdParameters(deleteJobs, ids);
+            affected = await deleteJobs.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return affected;
+    }
+
+    public async Task<IReadOnlyList<ActiveBrowserDownload>> GetActiveBrowserDownloadsAsync(
+        BrowserKind browser,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id, BrowserDownloadId
+            FROM DownloadJobs
+            WHERE Browser = $browser
+              AND BrowserState = 'InProgress'
+              AND RoutingState NOT IN ('Completed', 'Skipped');
+            """;
+        command.Parameters.AddWithValue("$browser", browser.ToString());
+        var result = new List<ActiveBrowserDownload>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            result.Add(new ActiveBrowserDownload(Guid.Parse(reader.GetString(0)), reader.GetString(1)));
+        }
+
+        return result;
+    }
+
     public async Task RecoverInProgressJobsAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = CreateConnection();
@@ -287,9 +353,10 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         command.CommandText = """
             UPDATE DownloadJobs
             SET Status = 'RetryPending',
+                RoutingState = 'RetryPending',
                 ErrorCode = 'agent.restarted',
                 ErrorMessage = 'The agent restarted while this file was being moved.'
-            WHERE Status IN ('ReadyToMove', 'Moving');
+            WHERE RoutingState = 'Moving';
             """;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -298,9 +365,84 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         SELECT Id, Browser, BrowserDownloadId, OriginalFileName, CurrentFileName,
                InitiatingPageUrl, InitialUrl, FinalUrl, ReferrerUrl, SanitizedSource,
                RuleId, OriginalPath, FinalPath, SelectedRelativeFolder, Status,
-               ErrorCode, ErrorMessage, CreatedAt, CompletedAt
+               BrowserState, RoutingState, ErrorCode, ErrorMessage, CreatedAt, CompletedAt
         FROM DownloadJobs
         """;
+
+    private static async Task MigrateToCurrentVersionAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var columnCommand = connection.CreateCommand())
+        {
+            columnCommand.CommandText = "PRAGMA table_info(DownloadJobs);";
+            await using var reader = await columnCommand.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                columns.Add(reader.GetString(1));
+            }
+        }
+
+        if (!columns.Contains("BrowserState"))
+        {
+            await ExecuteAsync(
+                connection,
+                "ALTER TABLE DownloadJobs ADD COLUMN BrowserState TEXT NOT NULL DEFAULT 'InProgress';",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!columns.Contains("RoutingState"))
+        {
+            await ExecuteAsync(
+                connection,
+                "ALTER TABLE DownloadJobs ADD COLUMN RoutingState TEXT NOT NULL DEFAULT 'NotRequired';",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        await ExecuteAsync(
+            connection,
+            """
+            UPDATE DownloadJobs
+            SET BrowserState = CASE
+                    WHEN Status = 'Cancelled' THEN 'Cancelled'
+                    WHEN Status = 'Interrupted' THEN 'Interrupted'
+                    WHEN OriginalPath IS NOT NULL OR Status IN ('ReadyToMove', 'Moving', 'RetryPending', 'Completed', 'Failed') THEN 'Complete'
+                    ELSE 'InProgress'
+                END,
+                RoutingState = CASE
+                    WHEN Status = 'WaitingForSelection' THEN 'WaitingForSelection'
+                    WHEN Status = 'WaitingForDownload' AND SelectedRelativeFolder IS NOT NULL THEN 'SelectionReady'
+                    WHEN Status = 'ReadyToMove' AND SelectedRelativeFolder IS NOT NULL THEN 'SelectionReady'
+                    WHEN Status = 'Moving' THEN 'Moving'
+                    WHEN Status = 'RetryPending' THEN 'RetryPending'
+                    WHEN Status = 'Completed' THEN 'Completed'
+                    WHEN Status = 'Failed' OR Status = 'Interrupted' THEN 'Failed'
+                    WHEN Status = 'Cancelled' THEN 'NotRequired'
+                    ELSE 'NotRequired'
+                END
+            WHERE NOT EXISTS (SELECT 1 FROM MigrationHistory WHERE Version = 2);
+
+            INSERT OR IGNORE INTO MigrationHistory(Version, AppliedAt)
+            VALUES (2, CURRENT_TIMESTAMP);
+            """,
+            cancellationToken).ConfigureAwait(false);
+
+        if (CurrentSchemaVersion != 2)
+        {
+            throw new InvalidOperationException("Repository migration version is inconsistent.");
+        }
+    }
+
+    private static async Task ExecuteAsync(
+        SqliteConnection connection,
+        string sql,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     private SqliteConnection CreateConnection()
         => new(new SqliteConnectionStringBuilder
@@ -354,11 +496,12 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             GetNullableString(reader, 11),
             GetNullableString(reader, 12),
             GetNullableString(reader, 13),
-            Enum.Parse<DownloadJobStatus>(reader.GetString(14)),
-            GetNullableString(reader, 15),
-            GetNullableString(reader, 16),
-            Parse(reader.GetString(17)),
-            reader.IsDBNull(18) ? null : Parse(reader.GetString(18)));
+            Enum.Parse<BrowserTransferState>(reader.GetString(15)),
+            Enum.Parse<RoutingState>(reader.GetString(16)),
+            GetNullableString(reader, 17),
+            GetNullableString(reader, 18),
+            Parse(reader.GetString(19)),
+            reader.IsDBNull(20) ? null : Parse(reader.GetString(20)));
 
     private static string? GetNullableString(SqliteDataReader reader, int ordinal)
         => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
@@ -396,6 +539,8 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         command.Parameters.AddWithValue("$finalPath", Db(job.FinalPath));
         command.Parameters.AddWithValue("$selectedRelativeFolder", Db(job.SelectedRelativeFolder));
         command.Parameters.AddWithValue("$status", job.Status.ToString());
+        command.Parameters.AddWithValue("$browserState", job.BrowserState.ToString());
+        command.Parameters.AddWithValue("$routingState", job.RoutingState.ToString());
         command.Parameters.AddWithValue("$errorCode", Db(job.ErrorCode));
         command.Parameters.AddWithValue("$errorMessage", Db(job.ErrorMessage));
         command.Parameters.AddWithValue("$createdAt", Format(job.CreatedAt));
@@ -424,6 +569,14 @@ public sealed class DownloadRouterRepository(AppPaths paths)
     }
 
     private static object Db(string? value) => value is null ? DBNull.Value : value;
+
+    private static void AddIdParameters(SqliteCommand command, IReadOnlyList<Guid> ids)
+    {
+        for (var index = 0; index < ids.Count; index++)
+        {
+            command.Parameters.AddWithValue($"$id{index}", ids[index].ToString("D"));
+        }
+    }
 
     private static string Format(DateTimeOffset value) => value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
 

@@ -38,16 +38,53 @@ public sealed class ProtocolAndStateTests
     public void StateMachineRejectsMovingBeforeDownloadCompletion()
     {
         var stateMachine = new DownloadJobStateMachine();
-        Assert.False(stateMachine.CanTransition(DownloadJobStatus.WaitingForDownload, DownloadJobStatus.Moving));
+        Assert.False(stateMachine.CanTransition(RoutingState.WaitingForSelection, RoutingState.Moving));
         Assert.Throws<InvalidOperationException>(() =>
-            stateMachine.EnsureCanTransition(DownloadJobStatus.WaitingForDownload, DownloadJobStatus.Moving));
+            stateMachine.EnsureCanTransition(RoutingState.WaitingForSelection, RoutingState.Moving));
     }
 
     [Fact]
     public void CompletedAndCancelledJobsAreTerminal()
     {
         var stateMachine = new DownloadJobStateMachine();
-        Assert.False(stateMachine.CanTransition(DownloadJobStatus.Completed, DownloadJobStatus.RetryPending));
-        Assert.False(stateMachine.CanTransition(DownloadJobStatus.Cancelled, DownloadJobStatus.WaitingForDownload));
+        Assert.False(stateMachine.CanTransition(RoutingState.Completed, RoutingState.RetryPending));
+        Assert.False(stateMachine.CanTransition(BrowserTransferState.Cancelled, BrowserTransferState.InProgress));
     }
+
+    [Fact]
+    public void CancelledJobsAreExcludedFromPendingAndDashboardCounts()
+    {
+        var cancelled = CreateJob(BrowserTransferState.Cancelled, RoutingState.NotRequired);
+        var pending = CreateJob(BrowserTransferState.InProgress, RoutingState.WaitingForSelection);
+
+        var active = DownloadJobQueries.ActiveSelections([cancelled, pending]);
+        var counts = DownloadJobQueries.CountDashboard([cancelled, pending]);
+
+        Assert.Equal(pending.Id, Assert.Single(active).Id);
+        Assert.Equal(1, counts.WaitingForSelection);
+        Assert.Equal(1, counts.CancelledOrInterrupted);
+    }
+
+    [Fact]
+    public void SelectionPromptQueueIsFifoAndRejectsDuplicateJobs()
+    {
+        var queue = new SelectionPromptQueue();
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+
+        Assert.True(queue.Enqueue(first));
+        Assert.False(queue.Enqueue(first));
+        Assert.True(queue.Enqueue(second));
+        Assert.True(queue.TryDequeue(out var dequeuedFirst));
+        Assert.True(queue.TryDequeue(out var dequeuedSecond));
+        Assert.Equal(first, dequeuedFirst);
+        Assert.Equal(second, dequeuedSecond);
+        Assert.False(queue.TryDequeue(out _));
+    }
+
+    private static DownloadJob CreateJob(BrowserTransferState browserState, RoutingState routingState)
+        => new(
+            Guid.NewGuid(), BrowserKind.Whale, Guid.NewGuid().ToString("N"), "sample.bin", "sample.bin",
+            null, null, null, null, "https://example.com", Guid.NewGuid(), null, null, null,
+            browserState, routingState, null, null, DateTimeOffset.UtcNow, null);
 }

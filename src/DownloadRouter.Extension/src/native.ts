@@ -4,7 +4,9 @@ import {
   type AgentResponse,
 } from "./protocol.js";
 
-export function sendNative<TPayload>(request: AgentRequest<TPayload>): Promise<AgentResponse | null> {
+export function sendNative<TPayload, TData = unknown>(
+  request: AgentRequest<TPayload>,
+): Promise<AgentResponse<TData> | null> {
   return new Promise((resolve) => {
     chrome.runtime.sendNativeMessage(nativeHostName, request, (response: unknown) => {
       if (chrome.runtime.lastError) {
@@ -24,7 +26,7 @@ export function sendNative<TPayload>(request: AgentRequest<TPayload>): Promise<A
         reportNativeFailure(safeAgentErrorCode(response.errorCode));
       }
 
-      resolve(response);
+      resolve(response as AgentResponse<TData>);
     });
   });
 }

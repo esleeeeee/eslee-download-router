@@ -19,6 +19,7 @@ public sealed class AgentCommandHandler(
     PathBoundaryValidator boundaryValidator,
     DownloadJobStateMachine stateMachine,
     FileMoveService fileMoveService,
+    ISelectionUiLauncher selectionUiLauncher,
     AppPaths paths,
     ILogger<AgentCommandHandler> logger)
 {
@@ -54,7 +55,10 @@ public sealed class AgentCommandHandler(
                 "rules.list" => AgentResponse.Ok(request.RequestId, await repository.GetRulesAsync(cancellationToken).ConfigureAwait(false)),
                 "rules.upsert" => await HandleRuleUpsertAsync(request, cancellationToken).ConfigureAwait(false),
                 "jobs.list" => AgentResponse.Ok(request.RequestId, await repository.GetRecentJobsAsync(cancellationToken: cancellationToken).ConfigureAwait(false)),
+                "jobs.delete" => await HandleJobsDeleteAsync(request, cancellationToken).ConfigureAwait(false),
+                "downloads.active" => await HandleActiveDownloadsAsync(request, cancellationToken).ConfigureAwait(false),
                 "selection.complete" => await HandleSelectionCompletedAsync(request, cancellationToken).ConfigureAwait(false),
+                "selection.skip" => await HandleSelectionSkippedAsync(request, cancellationToken).ConfigureAwait(false),
                 "job.retry" => await HandleRetryAsync(request, cancellationToken).ConfigureAwait(false),
                 "diagnostics.status" => AgentResponse.Ok(request.RequestId, new
                 {
@@ -127,9 +131,9 @@ public sealed class AgentCommandHandler(
             return AgentResponse.Ok(request.RequestId, new { tracked = false, failOpen = true });
         }
 
-        var status = matched.Rule.StorageMode == StorageMode.SelectSubfolder
-            ? DownloadJobStatus.WaitingForSelection
-            : DownloadJobStatus.WaitingForDownload;
+        var routingState = matched.Rule.StorageMode == StorageMode.SelectSubfolder
+            ? RoutingState.WaitingForSelection
+            : RoutingState.NotRequired;
         var job = new DownloadJob(
             Guid.NewGuid(),
             browser,
@@ -145,13 +149,16 @@ public sealed class AgentCommandHandler(
             NormalizeOptionalSourcePath(payload.FilePath),
             null,
             null,
-            status,
+            BrowserTransferState.InProgress,
+            routingState,
             null,
             null,
             DateTimeOffset.UtcNow,
             null);
 
         await repository.CreateJobAsync(job, cancellationToken).ConfigureAwait(false);
+        var selectionUiRequested = matched.Rule.StorageMode == StorageMode.SelectSubfolder
+            && selectionUiLauncher.RequestSelectionUi();
         logger.LogInformation(
             "Rule {RuleId} matched download {DownloadId} using {SourceField}",
             matched.Rule.Id,
@@ -163,6 +170,7 @@ public sealed class AgentCommandHandler(
             jobId = job.Id,
             storageMode = matched.Rule.StorageMode.ToString(),
             requiresSelection = matched.Rule.StorageMode == StorageMode.SelectSubfolder,
+            selectionUiRequested,
         });
     }
 
@@ -187,59 +195,74 @@ public sealed class AgentCommandHandler(
         {
             var cancelled = string.Equals(payload.Error, "USER_CANCELED", StringComparison.OrdinalIgnoreCase)
                 || state == "cancelled";
-            var next = cancelled ? DownloadJobStatus.Cancelled : DownloadJobStatus.Interrupted;
-            stateMachine.EnsureCanTransition(job.Status, next);
+            var next = cancelled ? BrowserTransferState.Cancelled : BrowserTransferState.Interrupted;
+            if (job.BrowserState != BrowserTransferState.InProgress)
+            {
+                return AgentResponse.Ok(request.RequestId, JobState(job));
+            }
+
+            stateMachine.EnsureCanTransition(job.BrowserState, next);
+            var routing = cancelled ? RoutingState.NotRequired : RoutingState.Failed;
+            stateMachine.EnsureCanTransition(job.RoutingState, routing);
             job = job with
             {
-                Status = next,
-                ErrorCode = cancelled ? "download.cancelled" : "download.interrupted",
-                ErrorMessage = payload.Error,
+                BrowserState = next,
+                RoutingState = routing,
+                ErrorCode = cancelled ? "download.cancelled" : "download.interrupted." + NormalizeBrowserError(payload.Error),
+                ErrorMessage = cancelled
+                    ? "The user cancelled this download in the browser."
+                    : "The browser interrupted this download before completion.",
+                CompletedAt = DateTimeOffset.UtcNow,
             };
-            await repository.UpdateJobAsync(job, "download.interrupted", cancellationToken).ConfigureAwait(false);
-            return AgentResponse.Ok(request.RequestId, new { tracked = true, status = next.ToString() });
+            await repository.UpdateJobAsync(job, cancelled ? "download.cancelled" : "download.interrupted", cancellationToken).ConfigureAwait(false);
+            return AgentResponse.Ok(request.RequestId, JobState(job));
         }
 
         if (state != "complete")
         {
-            return AgentResponse.Ok(request.RequestId, new { tracked = true, status = job.Status.ToString() });
+            return AgentResponse.Ok(request.RequestId, JobState(job));
         }
 
+        if (job.BrowserState != BrowserTransferState.InProgress)
+        {
+            return AgentResponse.Ok(request.RequestId, JobState(job));
+        }
+
+        stateMachine.EnsureCanTransition(job.BrowserState, BrowserTransferState.Complete);
         var sourcePath = NormalizeOptionalSourcePath(payload.FilePath)
             ?? throw new ArgumentException("A completed download must include its final local path.");
         job = job with
         {
             OriginalPath = sourcePath,
             CurrentFileName = Path.GetFileName(sourcePath),
+            BrowserState = BrowserTransferState.Complete,
             ErrorCode = null,
             ErrorMessage = null,
         };
 
         var rule = await repository.GetRuleAsync(job.RuleId, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException("The matched rule no longer exists.");
-        if (rule.StorageMode == StorageMode.SelectSubfolder && job.SelectedRelativeFolder is null)
+        if (job.RoutingState == RoutingState.WaitingForSelection)
         {
-            if (job.Status != DownloadJobStatus.WaitingForSelection)
+            await repository.UpdateJobAsync(job, "download.completed-selection-pending", cancellationToken).ConfigureAwait(false);
+            return AgentResponse.Ok(request.RequestId, new
             {
-                stateMachine.EnsureCanTransition(job.Status, DownloadJobStatus.WaitingForSelection);
-            }
-
-            job = job with { Status = DownloadJobStatus.WaitingForSelection };
-            await repository.UpdateJobAsync(job, "selection.waiting", cancellationToken).ConfigureAwait(false);
-            return AgentResponse.Ok(request.RequestId, new { tracked = true, status = job.Status.ToString(), requiresSelection = true });
+                tracked = true,
+                status = job.Status.ToString(),
+                browserState = job.BrowserState.ToString(),
+                routingState = job.RoutingState.ToString(),
+                requiresSelection = true,
+            });
         }
 
-        if (job.Status != DownloadJobStatus.ReadyToMove)
-        {
-            stateMachine.EnsureCanTransition(job.Status, DownloadJobStatus.ReadyToMove);
-        }
-
-        job = job with { Status = DownloadJobStatus.ReadyToMove };
         await repository.UpdateJobAsync(job, "download.completed", cancellationToken).ConfigureAwait(false);
         var moved = await MoveJobAsync(job, rule, cancellationToken).ConfigureAwait(false);
         return AgentResponse.Ok(request.RequestId, new
         {
             tracked = true,
             status = moved.Status.ToString(),
+            browserState = moved.BrowserState.ToString(),
+            routingState = moved.RoutingState.ToString(),
             destinationPath = moved.FinalPath,
             errorCode = moved.ErrorCode,
         });
@@ -269,7 +292,7 @@ public sealed class AgentCommandHandler(
         foreach (var jobId in payload.JobIds.Distinct())
         {
             var job = await repository.GetJobAsync(jobId, cancellationToken).ConfigureAwait(false);
-            if (job is null || job.Status is DownloadJobStatus.Completed or DownloadJobStatus.Cancelled)
+            if (job is null || !job.IsSelectionPending)
             {
                 continue;
             }
@@ -279,28 +302,88 @@ public sealed class AgentCommandHandler(
             var root = pathTokenResolver.Resolve(rule.StorageRoot);
             _ = boundaryValidator.ValidateRelativeFolder(root, payload.RelativeFolder);
 
-            var next = job.OriginalPath is null
-                ? DownloadJobStatus.WaitingForDownload
-                : DownloadJobStatus.ReadyToMove;
-            stateMachine.EnsureCanTransition(job.Status, next);
+            stateMachine.EnsureCanTransition(job.RoutingState, RoutingState.SelectionReady);
             job = job with
             {
                 SelectedRelativeFolder = payload.RelativeFolder,
-                Status = next,
+                RoutingState = RoutingState.SelectionReady,
                 ErrorCode = null,
                 ErrorMessage = null,
             };
             await repository.UpdateJobAsync(job, "selection.completed", cancellationToken).ConfigureAwait(false);
 
-            if (job.OriginalPath is not null)
+            if (job.BrowserState == BrowserTransferState.Complete && job.OriginalPath is not null)
             {
                 job = await MoveJobAsync(job, rule, cancellationToken).ConfigureAwait(false);
             }
 
-            results.Add(new { jobId = job.Id, status = job.Status.ToString(), destinationPath = job.FinalPath });
+            results.Add(new
+            {
+                jobId = job.Id,
+                status = job.Status.ToString(),
+                browserState = job.BrowserState.ToString(),
+                routingState = job.RoutingState.ToString(),
+                destinationPath = job.FinalPath,
+            });
         }
 
         return AgentResponse.Ok(request.RequestId, results);
+    }
+
+    private async Task<AgentResponse> HandleSelectionSkippedAsync(
+        AgentCommand request,
+        CancellationToken cancellationToken)
+    {
+        var payload = Deserialize<SelectionSkippedPayload>(request.Payload);
+        var job = await repository.GetJobAsync(payload.JobId, cancellationToken).ConfigureAwait(false);
+        if (job is null)
+        {
+            return AgentResponse.Error(request.RequestId, "job.not-found", "The download job was not found.");
+        }
+
+        if (!job.IsSelectionPending)
+        {
+            return AgentResponse.Error(request.RequestId, "selection.not-pending", "This download is no longer waiting for a folder selection.");
+        }
+
+        stateMachine.EnsureCanTransition(job.RoutingState, RoutingState.Skipped);
+        job = job with
+        {
+            RoutingState = RoutingState.Skipped,
+            ErrorCode = null,
+            ErrorMessage = null,
+            CompletedAt = DateTimeOffset.UtcNow,
+        };
+        await repository.UpdateJobAsync(job, "selection.skipped", cancellationToken).ConfigureAwait(false);
+        return AgentResponse.Ok(request.RequestId, JobState(job));
+    }
+
+    private async Task<AgentResponse> HandleJobsDeleteAsync(
+        AgentCommand request,
+        CancellationToken cancellationToken)
+    {
+        var payload = Deserialize<JobsDeletePayload>(request.Payload);
+        if (payload.JobIds.Count is < 1 or > 1000)
+        {
+            return AgentResponse.Error(request.RequestId, "jobs.invalid-count", "Delete between 1 and 1000 history items.");
+        }
+
+        var deleted = await repository.DeleteJobsAsync(payload.JobIds, cancellationToken).ConfigureAwait(false);
+        return AgentResponse.Ok(request.RequestId, new { deleted, filesDeleted = 0 });
+    }
+
+    private async Task<AgentResponse> HandleActiveDownloadsAsync(
+        AgentCommand request,
+        CancellationToken cancellationToken)
+    {
+        var payload = Deserialize<ActiveDownloadsPayload>(request.Payload);
+        if (!TryParseBrowser(payload.Browser, out var browser))
+        {
+            return AgentResponse.Error(request.RequestId, "download.unknown-browser", "The browser is not supported.");
+        }
+
+        var downloads = await repository.GetActiveBrowserDownloadsAsync(browser, cancellationToken).ConfigureAwait(false);
+        return AgentResponse.Ok(request.RequestId, downloads);
     }
 
     private async Task<AgentResponse> HandleRetryAsync(AgentCommand request, CancellationToken cancellationToken)
@@ -318,12 +401,14 @@ public sealed class AgentCommandHandler(
             return AgentResponse.Error(request.RequestId, "file.source-missing", "The original download path is unknown.");
         }
 
-        stateMachine.EnsureCanTransition(job.Status, DownloadJobStatus.RetryPending);
-        job = job with { Status = DownloadJobStatus.RetryPending, ErrorCode = null, ErrorMessage = null };
+        if (job.BrowserState != BrowserTransferState.Complete)
+        {
+            return AgentResponse.Error(request.RequestId, "download.not-complete", "Only completed browser downloads can be retried.");
+        }
+
+        stateMachine.EnsureCanTransition(job.RoutingState, RoutingState.RetryPending);
+        job = job with { RoutingState = RoutingState.RetryPending, ErrorCode = null, ErrorMessage = null };
         await repository.UpdateJobAsync(job, "job.retry-requested", cancellationToken).ConfigureAwait(false);
-        stateMachine.EnsureCanTransition(job.Status, DownloadJobStatus.ReadyToMove);
-        job = job with { Status = DownloadJobStatus.ReadyToMove };
-        await repository.UpdateJobAsync(job, "job.retry-ready", cancellationToken).ConfigureAwait(false);
         var rule = await repository.GetRuleAsync(job.RuleId, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException("The matched rule no longer exists.");
         job = await MoveJobAsync(job, rule, cancellationToken).ConfigureAwait(false);
@@ -340,8 +425,13 @@ public sealed class AgentCommandHandler(
             throw new InvalidOperationException("Cannot move a job without a source path.");
         }
 
-        stateMachine.EnsureCanTransition(job.Status, DownloadJobStatus.Moving);
-        job = job with { Status = DownloadJobStatus.Moving };
+        if (job.BrowserState != BrowserTransferState.Complete)
+        {
+            throw new InvalidOperationException("Cannot move a download before the browser reports completion.");
+        }
+
+        stateMachine.EnsureCanTransition(job.RoutingState, RoutingState.Moving);
+        job = job with { RoutingState = RoutingState.Moving };
         await repository.UpdateJobAsync(job, "file.move-started", cancellationToken).ConfigureAwait(false);
 
         var root = pathTokenResolver.Resolve(rule.StorageRoot);
@@ -352,12 +442,12 @@ public sealed class AgentCommandHandler(
             browserReportedComplete: true,
             cancellationToken).ConfigureAwait(false);
         var next = result.Success
-            ? DownloadJobStatus.Completed
-            : result.CanRetry ? DownloadJobStatus.RetryPending : DownloadJobStatus.Failed;
-        stateMachine.EnsureCanTransition(job.Status, next);
+            ? RoutingState.Completed
+            : result.CanRetry ? RoutingState.RetryPending : RoutingState.Failed;
+        stateMachine.EnsureCanTransition(job.RoutingState, next);
         job = job with
         {
-            Status = next,
+            RoutingState = next,
             FinalPath = result.DestinationPath,
             ErrorCode = result.ErrorCode,
             ErrorMessage = result.ErrorMessage,
@@ -388,6 +478,51 @@ public sealed class AgentCommandHandler(
 
         return Path.GetFullPath(path);
     }
+
+    private static string NormalizeBrowserError(string? value)
+    {
+        var known = value?.Trim().ToUpperInvariant();
+        return known switch
+        {
+            "FILE_FAILED" => "file-failed",
+            "FILE_ACCESS_DENIED" => "file-access-denied",
+            "FILE_NO_SPACE" => "file-no-space",
+            "FILE_NAME_TOO_LONG" => "file-name-too-long",
+            "FILE_TOO_LARGE" => "file-too-large",
+            "FILE_VIRUS_INFECTED" => "file-virus-infected",
+            "FILE_TRANSIENT_ERROR" => "file-transient-error",
+            "FILE_BLOCKED" => "file-blocked",
+            "FILE_SECURITY_CHECK_FAILED" => "file-security-check-failed",
+            "FILE_TOO_SHORT" => "file-too-short",
+            "FILE_HASH_MISMATCH" => "file-hash-mismatch",
+            "NETWORK_FAILED" => "network-failed",
+            "NETWORK_TIMEOUT" => "network-timeout",
+            "NETWORK_DISCONNECTED" => "network-disconnected",
+            "NETWORK_SERVER_DOWN" => "network-server-down",
+            "NETWORK_INVALID_REQUEST" => "network-invalid-request",
+            "SERVER_FAILED" => "server-failed",
+            "SERVER_NO_RANGE" => "server-no-range",
+            "SERVER_BAD_CONTENT" => "server-bad-content",
+            "SERVER_UNAUTHORIZED" => "server-unauthorized",
+            "SERVER_CERT_PROBLEM" => "server-cert-problem",
+            "SERVER_FORBIDDEN" => "server-forbidden",
+            "SERVER_UNREACHABLE" => "server-unreachable",
+            "SERVER_CONTENT_LENGTH_MISMATCH" => "server-content-length-mismatch",
+            "SERVER_CROSS_ORIGIN_REDIRECT" => "server-cross-origin-redirect",
+            "USER_SHUTDOWN" => "user-shutdown",
+            "CRASH" => "crash",
+            _ => "unknown",
+        };
+    }
+
+    private static object JobState(DownloadJob job)
+        => new
+        {
+            tracked = true,
+            status = job.Status.ToString(),
+            browserState = job.BrowserState.ToString(),
+            routingState = job.RoutingState.ToString(),
+        };
 
     private sealed record JobRetryPayload(Guid JobId);
 }
