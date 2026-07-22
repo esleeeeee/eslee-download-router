@@ -181,7 +181,7 @@ public sealed partial class MainWindow
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(16),
             CornerRadius = new CornerRadius(8),
-            Background = Application.Current.Resources["CardBackgroundFillColorDefaultBrush"] as Brush,
+            Background = themeManager.GetThemeBrush("CardSurfaceBrush"),
             Child = panel,
         };
     }

@@ -45,6 +45,16 @@ public sealed class ThemeManager(AppThemePreference initialPreference)
         }
     }
 
+    public Brush? GetThemeBrush(string resourceKey)
+    {
+        var activeTheme = roots.Values.FirstOrDefault()?.ActualTheme == ElementTheme.Dark
+            ? "Dark"
+            : "Light";
+        return Application.Current.Resources.ThemeDictionaries[activeTheme] is ResourceDictionary dictionary
+            ? dictionary[resourceKey] as Brush
+            : null;
+    }
+
     private void Apply(Window window)
     {
         if (window.Content is FrameworkElement root)

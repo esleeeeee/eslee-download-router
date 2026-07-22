@@ -219,7 +219,7 @@ public sealed partial class MainWindow
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(16),
             CornerRadius = new CornerRadius(8),
-            Background = Application.Current.Resources["CardBackgroundFillColorDefaultBrush"] as Brush,
+            Background = themeManager.GetThemeBrush("CardSurfaceBrush"),
             Opacity = job.BrowserState == BrowserTransferState.Cancelled ? 0.55 : 1,
             Child = panel,
         };
@@ -268,16 +268,16 @@ public sealed partial class MainWindow
         await ShowHistoryAsync();
     }
 
-    private static Border CreateStatusBadge(DownloadJob job)
+    private Border CreateStatusBadge(DownloadJob job)
         => new()
         {
             HorizontalAlignment = HorizontalAlignment.Left,
             Padding = new Thickness(8, 4, 8, 4),
             CornerRadius = new CornerRadius(12),
-            Background = Application.Current.Resources[
+            Background = themeManager.GetThemeBrush(
                 job.BrowserState == BrowserTransferState.Interrupted || job.RoutingState == RoutingState.Failed
-                    ? "SystemFillColorCautionBackgroundBrush"
-                    : "SubtleFillColorSecondaryBrush"] as Brush,
+                    ? "WarningStatusSurfaceBrush"
+                    : "StatusSurfaceBrush"),
             Child = new TextBlock
             {
                 Text = DescribeStatus(job),

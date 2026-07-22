@@ -215,7 +215,7 @@ public sealed partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(16),
             CornerRadius = new CornerRadius(8),
-            Background = Application.Current.Resources["CardBackgroundFillColorDefaultBrush"] as Microsoft.UI.Xaml.Media.Brush,
+            Background = themeManager.GetThemeBrush("CardSurfaceBrush"),
             Child = panel,
         });
     }
