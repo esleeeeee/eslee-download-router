@@ -2,7 +2,7 @@
 
 Chromium 기반 브라우저에서 완료된 다운로드를 사이트 규칙에 따라 Windows 폴더로 분류하는 로컬 전용 애플리케이션입니다. 규칙이 없거나 로컬 구성 요소가 응답하지 않으면 브라우저의 원래 다운로드를 그대로 유지하는 fail-open 방식을 사용합니다.
 
-> 현재 상태: Phase 0과 Phase 1 기술 스파이크가 구현되었습니다. 자동 빌드·테스트와 로컬 IPC는 검증했지만 실제 브라우저의 확장 로드, Native Messaging, 다운로드 라우팅은 아직 수동 검증 전입니다. 자세한 내용은 [PROJECT_STATE.md](PROJECT_STATE.md)를 확인하세요.
+> 현재 상태: 핵심 라우팅, 계층형 폴더 선택, 트레이 상주, 로그인 자동 시작, 규칙/이력 관리와 사용자 단위 설치 흐름을 구현했습니다. Whale 에서 Automatic과 SelectSubfolder의 실제 C: → D: 이동을 검증했습니다. 자세한 결과와 남은 제약은 [PROJECT_STATE.md](PROJECT_STATE.md)를 확인하세요.
 
 ## 구성 요소
 
@@ -63,6 +63,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-extension.
 | Agent IPC 스모크 테스트 | `scripts\smoke-agent.ps1` |
 | 확장 패키지 생성 | `scripts\package-extension.ps1` |
 | self-contained 설치 페이로드 | `scripts\publish.ps1` |
+| 사용자 단위 설치 파일 | `scripts\build-installer.ps1` |
 | Native Host 상태 확인 | `scripts\register-native-host.ps1 -Action Status` |
 | 진단 | `scripts\diagnose.ps1` |
 
@@ -89,14 +90,22 @@ PowerShell 실행 정책이 로컬 스크립트를 막는 경우 예시처럼 `p
 - 직접 선택 경로는 지정 루트 내부로 제한하고 `..`, 심볼릭 링크, junction, reparse point 탈출을 거부합니다.
 - URL 자격 증명, query, fragment는 저장 전에 제거합니다.
 
+## 설치형 실행
+
+`scripts\build-installer.ps1`은 Release self-contained 페이로드와 Inno Setup 사용자 단위 설치 파일을 `artifacts\installer`에 만듭니다. 설치본은 App을 `--background`로 로그인 자동 시작하고, App이 단일 인스턴스 트레이 호스트로서 Agent 실행을 보장합니다. 기본 X 버튼 동작은 메인 창 숨기기이며 완전 종료는 트레이의 `종료` 또는 일반 설정의 명시적 종료 동작으로 수행합니다.
+
+설치/업그레이드 시 기존 프로세스는 정상 종료 신호를 받고, Whale·Edge·Chrome·Brave·Vivaldi·Opera의 HKCU Native Host가 설치 경로로 등록됩니다. 제거 시 자동 시작, 바로가기와 Native Host 등록만 제거하며 `%LOCALAPPDATA%\eslee\DownloadRouter`의 규칙·이력 DB는 보존합니다.
+
 설계와 위협 모델은 [ARCHITECTURE.md](ARCHITECTURE.md), [SECURITY.md](SECURITY.md)를 참고하세요.
 
 ## 현재 제한
 
 - Chromium downloads API가 다운로드 시작 탭 URL을 직접 제공하지 않으므로, 신뢰할 수 없는 활성 탭 추측은 하지 않습니다. 제공되는 referrer, 최초 URL, 최종 URL을 분리해 사용합니다.
-- 폴더 선택 대기 작업은 앱의 전용 화면에서 규칙별로 묶어 처리하지만, 자동 팝업·새 폴더 만들기·새로 고침은 후속 구현입니다.
-- 시작 시 실행 토글은 UI 골격만 있으며 실제 Windows 등록은 아직 연결하지 않았습니다.
-- 모든 브라우저 수동 검증 결과는 현재 `미검증`입니다.
+- 폴더 트리는 lazy loading과 선택 노드 새로 고침을 지원하지만 새 폴더 만들기는 제공하지 않습니다.
+- Windows 로그아웃/로그인 또는 재부팅 자체는 작업 환경을 중단하므로 수행하지 않았습니다. HKCU Run 등록과 `--background` 실행은 각각 확인했습니다.
+- UI는 QHD 125%에서 실제 검증했습니다. FHD/4K와 Windows 100%/150%는 Per-Monitor V2/DIP 구조 및 좁은·넓은 창 경계 테스트만 완료했고 물리 디스플레이 전환 검증은 남아 있습니다.
+- Edge·Chrome·Brave·Vivaldi·Opera의 실제 다운로드는 아직 수동 검증하지 않았습니다.
+- 설치 파일은 현재 코드 서명되지 않았습니다.
 
 ## 문서
 

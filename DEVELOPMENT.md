@@ -57,9 +57,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\manual-download-se
 
 # 설치 페이로드 준비
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\publish.ps1 -Configuration Release
+
+# 사용자 단위 Inno Setup 설치 파일
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-installer.ps1
 ```
 
-Inno Setup으로 `installer\DownloadRouter.iss`를 컴파일하기 전에 `artifacts\publish\app`을 검토하고 서명 설정을 결정합니다.
+`build-installer.ps1`은 publish 결과에 `App.xbf`, `MainWindow.xbf`, `DownloadRouter.App.pri`가 있는지 먼저 검사합니다. unpackaged WinUI 3 게시에서 이 세 파일이 빠지면 설치본이 `XamlParseException`으로 시작하지 못하므로 해당 검사를 제거하지 않습니다. 설치 파일은 아직 코드 서명되지 않았습니다.
+
+## 트레이, 자동 시작, 선택 창
+
+- App은 단일 인스턴스이며 `--background`에서 메인 창을 숨긴 채 트레이와 Agent만 준비합니다.
+- 로그인 자동 시작은 관리자 권한이 필요 없는 HKCU Run을 사용합니다. 값은 반드시 따옴표로 감싼 절대 App 경로와 `--background`여야 합니다.
+- 기본 X 동작은 메인 AppWindow 숨김입니다. `종료` 명령과 설치 업그레이드의 `--shutdown`만 완전 종료를 요청합니다.
+- 폴더 선택은 메인 창의 ContentDialog가 아니라 별도 Window입니다. 창 크기는 DIP를 실제 모니터 DPI로 변환한 뒤 작업 영역 안으로 제한합니다.
+- 트리는 전체 재귀 열거를 금지하고 확장한 노드의 직계 자식만 비동기로 읽습니다. UI와 Agent 양쪽에서 루트 경계를 검사합니다.
+- 이력의 경로 변경은 규칙을 수정하지 않고 Job의 상대 경로만 변경합니다. 이미 이동된 파일은 사용자 확인 뒤 기존 안전 이동 서비스를 다시 사용합니다.
+
+## 설치/제거 검증
+
+업그레이드 전 App의 `--shutdown` 완료를 기다리고 설치합니다. 설치 뒤에는 시작 메뉴, HKCU Run, 6개 브라우저 Native Host, 백그라운드 단일 인스턴스, X 후 프로세스 유지와 트레이 메뉴를 확인합니다. 제거 전후에는 사용자 DB의 행 수와 SHA-256을 비교합니다. 제거 스크립트는 `%LOCALAPPDATA%\eslee\DownloadRouter`를 삭제하면 안 됩니다.
 
 ## 기능 추가 순서
 

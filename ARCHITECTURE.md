@@ -21,7 +21,7 @@ chrome.downloads.onCreated/onChanged
 
 ### Extension
 
-Manifest V3 service worker이며 권한은 `downloads`, `nativeMessaging`뿐입니다. `onCreated`에서 referrer, 최초/최종 파일 URL을 별도 필드로 전달하고 `onChanged`에서 완료, 사용자 취소 또는 다른 중단 상태를 전송합니다. 시작 시 Agent가 가진 진행 중 ID만 `downloads.search`로 재확인해 놓친 종료 이벤트를 재전송합니다. 연결 오류는 다운로드를 취소하거나 변경하지 않습니다. 실패할 때만 원문 대신 `host-not-found`, `host-exited`, `agent.unavailable` 같은 제한된 분류 코드를 service worker 콘솔에 기록합니다.
+Manifest V3 service worker이며 권한은 `downloads`, `nativeMessaging`뿐입니다. `onCreated`에서 referrer, 최초/최종 파일 URL을 별도 필드로 전달하고, `onChanged`의 `filename` delta를 같은 Job의 메타데이터 갱신으로 전송합니다. 완료 시 `downloads.search({ id })`로 최종 파일명을 다시 확인합니다. `download`, `*.crdownload` 같은 임시 이름은 확정 이름으로 취급하지 않습니다. 시작 시 Agent가 가진 진행 중 ID만 재확인해 놓친 종료 이벤트를 재전송합니다. 연결 오류는 다운로드를 취소하거나 변경하지 않습니다. 실패할 때만 원문 대신 제한된 분류 코드를 기록합니다.
 
 Chromium downloads API에는 신뢰할 수 있는 시작 탭 URL 필드가 없습니다. 따라서 활성 탭을 다운로드 출처로 추측하지 않고 `initiatingPageUrl`은 근거가 있을 때만 사용합니다. 현재 확장은 referrer를 우선 근거로 전달합니다.
 
@@ -56,7 +56,9 @@ SQLite 마이그레이션은 `schema_migrations`, `rules`, `download_jobs`, `job
 
 ### WinUI 3 App
 
-Agent와 동일한 Core 라이브러리를 참조하지만 DB나 파일 이동 구현을 직접 호출하지 않고 Named Pipe 명령으로 통신합니다. 현재 대시보드, 규칙, 파일별 선택 대기, 상태 필터·삭제 이력, 브라우저 연결, 일반 설정, 진단, 정보 화면이 있습니다. App은 사용자 범위 mutex로 단일 인스턴스를 유지하고 1초 간격으로 Pending을 읽어 중복 없는 FIFO ContentDialog를 하나씩 표시합니다.
+Agent와 동일한 Core 라이브러리를 참조하지만 DB나 파일 이동 구현을 직접 호출하지 않고 Named Pipe 명령으로 통신합니다. App은 사용자 범위 mutex로 단일 인스턴스를 유지하는 트레이 호스트이며 `--background`에서는 메인 창을 표시하지 않습니다. 1초 간격으로 Pending을 읽고 중복 없는 FIFO `FolderSelectionWindow`를 하나씩 표시합니다. 선택 창은 메인 창과 독립적이어서 메인 창이 숨김·최소화 상태여도 활성화되며, 포커스 확보 실패 시 작업표시줄 점멸을 사용합니다.
+
+공통 `FolderTreePicker`는 루트 하나만 먼저 만들고 노드 확장 시 해당 단계의 자식만 비동기로 읽습니다. 로드된 노드를 중복 조회하지 않고, 접근 불가 항목은 노드 단위 오류로 제한하며 reparse point는 선택 경계에서 제외합니다. 팝업, 선택 대기, 이력 경로 변경이 같은 컴포넌트와 Agent 명령을 사용합니다. 규칙의 저장 루트는 경계가 아직 정해지지 않은 선택이므로 HWND로 초기화한 Windows `FolderPicker`를 사용합니다.
 
 앱은 unpackaged WinUI 3 프로세스를 manifest에서 Per-Monitor V2로 선언합니다. 크기와 여백은 장치 독립 픽셀(DIP)을 사용하고 루트에서 layout rounding을 적용합니다. 모든 화면은 하나의 `NavigationView -> vertical ScrollViewer -> stretch viewport -> MaxWidth 1100 form` 구조를 공유합니다. 실제 폼 폭은 `ViewportWidth - 좌우 Padding`과 1100 DIP 중 작은 값이며 가로 스크롤을 만들지 않습니다. Compact는 `16,32,16,24`, Wide는 `32,48,32,32` DIP 패딩을 사용합니다.
 
@@ -74,7 +76,7 @@ Interrupted                RetryPending
                            NotRequired
 ```
 
-두 축의 상태 전이는 `DownloadJobStateMachine`이 각각 검사합니다. 완료 전에 선택하면 `InProgress / SelectionReady`만 저장하고 파일을 이동하지 않습니다. `Complete / SelectionReady`가 된 뒤에만 Moving으로 전이합니다. 취소는 `Cancelled / NotRequired`, 다른 중단은 `Interrupted / Failed`이며 둘 다 Pending과 이동 대상에서 제외됩니다. 기존 단일 `Status` 열은 마이그레이션과 호환 표시용 파생 값으로 유지합니다.
+두 축의 상태 전이는 `DownloadJobStateMachine`이 각각 검사합니다. 완료 전에 선택하면 `InProgress / SelectionReady`만 저장하고 파일을 이동하지 않습니다. `Complete / SelectionReady`가 된 뒤에만 Moving으로 전이합니다. 사용자 취소는 BrowserTransferState만 `Cancelled`로 바꾸고 당시 RoutingState를 보존하되, 표시·Pending·이동 가능 여부는 항상 BrowserTransferState를 우선합니다. 다른 중단은 `Interrupted / Failed`입니다. 기존 단일 `Status` 열은 마이그레이션과 호환 표시용 파생 값으로 유지합니다.
 
 ## 저장 위치 선택 경계
 
@@ -86,14 +88,15 @@ Interrupted                RetryPending
 - 확장: `npm ci` 후 TypeScript compile, manifest 복사, ZIP 생성
 - Native Host: HKCU 브라우저별 registry adapter와 `%LOCALAPPDATA%` manifest
 - Installer: per-user, `PrivilegesRequired=lowest`
+- 자동 시작: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`에 설치 App의 정확한 따옴표 경로와 `--background`
+- X 버튼: 기본은 AppWindow 숨김, 트레이 `종료` 또는 `--shutdown`만 App/Agent 정상 종료
+- 제거: 설치 파일·자동 시작·Native Host만 제거하고 사용자 DB와 규칙은 보존
 
 설치 페이로드와 PC별 manifest는 커밋하지 않습니다.
 
 ## 후속 설계 항목
 
-- 트레이/Windows 알림과 세션을 넘는 “나중에 선택” 정책
-- 새 폴더 만들기와 새로 고침을 포함한 전용 트리 선택기
-- Windows 시작 시 실행 설정 저장 및 등록
+- 세션을 넘는 “나중에 선택” 알림 정책과 새 폴더 만들기
 - 중단된 작업의 시작 시 복구 워커
-- 브라우저 adapter의 실제 레지스트리/실행 경로 검증
-- 설치 서명과 업데이트 전략
+- Whale 이외 브라우저 adapter의 실제 레지스트리/실행 경로 검증
+- 설치 코드 서명과 업데이트 채널

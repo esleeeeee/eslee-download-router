@@ -12,6 +12,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-extension.
 
 압축 해제 로드 경로는 `src\DownloadRouter.Extension\dist`입니다. ZIP은 배포 검토용이며 개발자 모드 “압축 풀린 확장 로드”에는 폴더를 사용합니다.
 
+일반 사용자 설치 흐름을 검증할 때는 Inno Setup 6이 설치된 환경에서 다음을 실행합니다.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-installer.ps1
+```
+
+생성된 `artifacts\installer\eslee-download-router-setup.exe`는 사용자 단위로 App/Agent/Native Host/확장 dist를 설치하고 HKCU Native Host 및 선택한 자동 시작을 등록합니다. 설치본을 사용하는 경우 아래 개발 출력 등록 명령은 실행하지 않습니다.
+
 ## 2. Native Host 등록
 
 브라우저별로 하나씩 등록하고 상태를 확인합니다.
@@ -54,6 +62,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\unregister-native-
 ```
 
 브라우저 확장 관리 화면에서 개발자 확장을 제거합니다. 사용자 DB와 규칙은 자동 삭제하지 않습니다.
+
+Inno Setup 설치본 제거도 자동 시작, 바로가기와 설치 경로의 Native Host 등록만 해제합니다. `%LOCALAPPDATA%\eslee\DownloadRouter`의 SQLite DB와 규칙은 재설치를 위해 기본 보존됩니다.
 
 ## 문제 해결
 
