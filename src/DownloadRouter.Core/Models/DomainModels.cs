@@ -33,6 +33,12 @@ public enum StorageMode
     SelectSubfolder,
 }
 
+public enum WindowCloseBehavior
+{
+    MinimizeToTray,
+    ExitApplication,
+}
+
 public enum DownloadJobStatus
 {
     Detected,
@@ -186,7 +192,14 @@ public sealed record DownloadChangedPayload(
     string DownloadId,
     string State,
     string? FilePath,
-    string? Error);
+    string? Error,
+    string? FileName = null);
+
+public sealed record DownloadMetadataChangedPayload(
+    string Browser,
+    string DownloadId,
+    string? FilePath,
+    string? FileName);
 
 public sealed record SelectionCompletedPayload(
     IReadOnlyList<Guid> JobIds,
@@ -194,7 +207,14 @@ public sealed record SelectionCompletedPayload(
 
 public sealed record SelectionSkippedPayload(Guid JobId);
 
+public sealed record JobRouteChangePayload(
+    Guid JobId,
+    string RelativeFolder,
+    bool ConfirmCompletedMove = false);
+
 public sealed record JobsDeletePayload(IReadOnlyList<Guid> JobIds);
+
+public sealed record RuleDeletePayload(Guid RuleId);
 
 public sealed record ActiveDownloadsPayload(string Browser);
 
@@ -213,19 +233,25 @@ public static class ProtocolConstants
     public const int MaximumMessageBytes = 1024 * 1024;
     public const string AgentPipeName = "eslee.download-router.agent.v1";
     public const string AppMutexName = "Local\\eslee.DownloadRouter.App";
+    public const string AppActivationEventName = "Local\\eslee.DownloadRouter.App.Activate";
+    public const string AppShutdownEventName = "Local\\eslee.DownloadRouter.App.Shutdown";
+    public const string AgentShutdownEventName = "Local\\eslee.DownloadRouter.Agent.Shutdown";
 
     public static readonly ISet<string> AllowedCommands = new HashSet<string>(StringComparer.Ordinal)
     {
         "ping",
         "download.started",
+        "download.metadata",
         "download.changed",
         "rules.list",
         "rules.upsert",
+        "rules.delete",
         "jobs.list",
         "jobs.delete",
         "downloads.active",
         "selection.complete",
         "selection.skip",
+        "route.change",
         "job.retry",
         "diagnostics.status",
     };

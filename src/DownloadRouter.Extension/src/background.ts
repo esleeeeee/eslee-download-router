@@ -1,5 +1,6 @@
 import { detectBrowser } from "./browser.js";
 import { reportedDownloadState } from "./download-state.js";
+import { trustedDownloadFileName } from "./file-name.js";
 import { sendNative } from "./native.js";
 import { createRequest } from "./protocol.js";
 import { sourceMetadata } from "./source-attribution.js";
@@ -24,7 +25,7 @@ chrome.downloads.onCreated.addListener((item) => {
 
 chrome.downloads.onChanged.addListener((delta) => {
   const state = delta.state?.current;
-  if (state !== "complete" && state !== "interrupted") {
+  if (!delta.filename && state !== "complete" && state !== "interrupted") {
     return;
   }
 
@@ -34,7 +35,13 @@ chrome.downloads.onChanged.addListener((delta) => {
       return;
     }
 
-    reportChangedDownload(item, state, delta.error?.current ?? item.error ?? null);
+    if (delta.filename) {
+      reportDownloadMetadata(item);
+    }
+
+    if (state === "complete" || state === "interrupted") {
+      reportChangedDownload(item, state, delta.error?.current ?? item.error ?? null);
+    }
   });
 });
 
@@ -51,7 +58,19 @@ function reportChangedDownload(
       downloadId: item.id.toString(),
       state: reportedDownloadState(state, error),
       filePath: item.filename || null,
+      fileName: trustedDownloadFileName(item.filename),
       error,
+    }),
+  );
+}
+
+function reportDownloadMetadata(item: chrome.downloads.DownloadItem): void {
+  void sendNative(
+    createRequest("download.metadata", {
+      browser,
+      downloadId: item.id.toString(),
+      filePath: item.filename || null,
+      fileName: trustedDownloadFileName(item.filename),
     }),
   );
 }

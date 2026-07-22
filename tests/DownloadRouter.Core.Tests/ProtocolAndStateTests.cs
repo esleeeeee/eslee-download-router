@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using DownloadRouter.Core.Ipc;
 using DownloadRouter.Core.Jobs;
 using DownloadRouter.Core.Models;
+using DownloadRouter.Core.Paths;
 
 namespace DownloadRouter.Core.Tests;
 
@@ -95,6 +96,63 @@ public sealed class ProtocolAndStateTests
         Assert.True(queue.TryDequeue(out var queuedNext));
         Assert.Equal(current, refreshed);
         Assert.Equal(next, queuedNext);
+    }
+
+    [Fact]
+    public void TemporaryDownloadNamesUseThePendingLabelUntilTrustedMetadataArrives()
+    {
+        Assert.Null(DownloadPresentation.TrustedFileName("download"));
+        Assert.Null(DownloadPresentation.TrustedFileName("미확인 197533.crdownload"));
+        Assert.Null(DownloadPresentation.TrustedFileName("C:\\Downloads\\sample.partial"));
+        Assert.Equal("최종 이름.zip", DownloadPresentation.TrustedFileName("C:\\Downloads\\최종 이름.zip"));
+
+        var pending = CreateJob(BrowserTransferState.InProgress, RoutingState.WaitingForSelection) with
+        {
+            CurrentFileName = "download",
+        };
+        Assert.Equal(DownloadPresentation.PendingFileName, DownloadPresentation.DisplayFileName(pending));
+    }
+
+    [Theory]
+    [InlineData(RoutingState.WaitingForSelection)]
+    [InlineData(RoutingState.SelectionReady)]
+    [InlineData(RoutingState.Skipped)]
+    [InlineData(RoutingState.NotRequired)]
+    [InlineData(RoutingState.Failed)]
+    public void CancellationPresentationDependsOnlyOnBrowserState(RoutingState routingState)
+    {
+        var job = CreateJob(BrowserTransferState.Cancelled, routingState);
+
+        Assert.True(DownloadPresentation.IsCancelled(job));
+        Assert.False(DownloadPresentation.CanChangeRoute(job));
+        Assert.Empty(DownloadJobQueries.ActiveSelections([job]));
+    }
+
+    [Fact]
+    public async Task FolderTreeLoadsOnlyTheExpandedLevelAndRejectsRootEscape()
+    {
+        var root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "download-router-tree-tests", Guid.NewGuid().ToString("N"))).FullName;
+        try
+        {
+            var first = Directory.CreateDirectory(Path.Combine(root, "kr")).FullName;
+            Directory.CreateDirectory(Path.Combine(first, "모야지"));
+            Directory.CreateDirectory(Path.Combine(root, new string('긴', 110)));
+            var provider = new SafeFolderTreeProvider(new DownloadRouter.Core.Paths.PathBoundaryValidator());
+
+            var rootChildren = await provider.GetChildrenAsync(root, root, CancellationToken.None);
+            Assert.Contains(rootChildren.Entries, entry => entry.Name == "kr");
+            Assert.DoesNotContain(rootChildren.Entries, entry => entry.Name == "모야지");
+            Assert.Contains(rootChildren.Entries, entry => entry.Name.Length >= 100);
+
+            var nested = await provider.GetChildrenAsync(root, first, CancellationToken.None);
+            Assert.Equal("모야지", Assert.Single(nested.Entries).Name);
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+                provider.GetChildrenAsync(root, Path.GetDirectoryName(root)!, CancellationToken.None));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     private static DownloadJob CreateJob(BrowserTransferState browserState, RoutingState routingState)

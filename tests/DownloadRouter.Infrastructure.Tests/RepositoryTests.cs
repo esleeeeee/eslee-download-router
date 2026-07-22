@@ -91,6 +91,33 @@ public sealed class RepositoryTests : IDisposable
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT COUNT(*) FROM MigrationHistory WHERE Version = 2;";
         Assert.Equal(1L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
+        versionCommand.CommandText = "SELECT COUNT(*) FROM MigrationHistory WHERE Version = 3;";
+        Assert.Equal(1L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
+    }
+
+    [Fact]
+    public async Task SoftDeletingRulePreservesItsJobsAndAllowsNoFurtherMatching()
+    {
+        var paths = AppPaths.CreateDefault();
+        var repository = new DownloadRouterRepository(paths);
+        await repository.InitializeAsync(CancellationToken.None);
+        var now = DateTimeOffset.UtcNow;
+        var rule = new DownloadRule(
+            Guid.NewGuid(), "preserved history rule", true, RuleMatchType.ExactHost, "example.com",
+            RuleMatchTarget.FileUrl, root, StorageMode.SelectSubfolder, 0, 0, now, now);
+        await repository.UpsertRuleAsync(rule, CancellationToken.None);
+        var job = new DownloadJob(
+            Guid.NewGuid(), BrowserKind.Whale, "soft-delete-1", "sample.bin", "sample.bin",
+            null, null, null, null, "https://example.com", rule.Id, null, null, null,
+            BrowserTransferState.InProgress, RoutingState.WaitingForSelection,
+            null, null, now, null);
+        await repository.CreateJobAsync(job, CancellationToken.None);
+
+        Assert.True(await repository.DeleteRuleAsync(rule.Id, CancellationToken.None));
+
+        Assert.Empty(await repository.GetRulesAsync(CancellationToken.None));
+        Assert.NotNull(await repository.GetRuleAsync(rule.Id, CancellationToken.None));
+        Assert.NotNull(await repository.GetJobAsync(job.Id, CancellationToken.None));
     }
 
     public void Dispose()

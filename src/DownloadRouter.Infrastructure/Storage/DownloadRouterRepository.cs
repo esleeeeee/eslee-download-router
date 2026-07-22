@@ -6,7 +6,7 @@ namespace DownloadRouter.Infrastructure.Storage;
 
 public sealed class DownloadRouterRepository(AppPaths paths)
 {
-    private const int CurrentSchemaVersion = 2;
+    private const int CurrentSchemaVersion = 3;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -37,7 +37,8 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 Priority INTEGER NOT NULL,
                 ListOrder INTEGER NOT NULL,
                 CreatedAt TEXT NOT NULL,
-                UpdatedAt TEXT NOT NULL
+                UpdatedAt TEXT NOT NULL,
+                IsDeleted INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE INDEX IF NOT EXISTS IX_Rules_EnabledOrder
@@ -118,6 +119,7 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             SELECT Id, Name, IsEnabled, MatchType, MatchValue, MatchTarget,
                    StorageRoot, StorageMode, Priority, ListOrder, CreatedAt, UpdatedAt
             FROM Rules
+            WHERE IsDeleted = 0
             ORDER BY ListOrder, CreatedAt, Id;
             """;
 
@@ -155,10 +157,10 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         command.CommandText = """
             INSERT INTO Rules(
                 Id, Name, IsEnabled, MatchType, MatchValue, MatchTarget, StorageRoot,
-                StorageMode, Priority, ListOrder, CreatedAt, UpdatedAt)
+                StorageMode, Priority, ListOrder, CreatedAt, UpdatedAt, IsDeleted)
             VALUES(
                 $id, $name, $enabled, $matchType, $matchValue, $matchTarget, $storageRoot,
-                $storageMode, $priority, $listOrder, $createdAt, $updatedAt)
+                $storageMode, $priority, $listOrder, $createdAt, $updatedAt, 0)
             ON CONFLICT(Id) DO UPDATE SET
                 Name = excluded.Name,
                 IsEnabled = excluded.IsEnabled,
@@ -169,10 +171,33 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 StorageMode = excluded.StorageMode,
                 Priority = excluded.Priority,
                 ListOrder = excluded.ListOrder,
-                UpdatedAt = excluded.UpdatedAt;
+                UpdatedAt = excluded.UpdatedAt,
+                IsDeleted = 0;
             """;
         AddRuleParameters(command, rule);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<bool> DeleteRuleAsync(Guid ruleId, CancellationToken cancellationToken = default)
+    {
+        if (ruleId == Guid.Empty)
+        {
+            throw new ArgumentException("A non-empty rule ID is required.", nameof(ruleId));
+        }
+
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE Rules
+            SET IsDeleted = 1,
+                IsEnabled = 0,
+                UpdatedAt = $updatedAt
+            WHERE Id = $id AND IsDeleted = 0;
+            """;
+        command.Parameters.AddWithValue("$id", ruleId.ToString("D"));
+        command.Parameters.AddWithValue("$updatedAt", Format(DateTimeOffset.UtcNow));
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 1;
     }
 
     public async Task CreateJobAsync(DownloadJob job, CancellationToken cancellationToken = default)
@@ -373,9 +398,11 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         SqliteConnection connection,
         CancellationToken cancellationToken)
     {
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         await using (var columnCommand = connection.CreateCommand())
         {
+            columnCommand.Transaction = transaction;
             columnCommand.CommandText = "PRAGMA table_info(DownloadJobs);";
             await using var reader = await columnCommand.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -389,7 +416,8 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             await ExecuteAsync(
                 connection,
                 "ALTER TABLE DownloadJobs ADD COLUMN BrowserState TEXT NOT NULL DEFAULT 'InProgress';",
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                transaction).ConfigureAwait(false);
         }
 
         if (!columns.Contains("RoutingState"))
@@ -397,7 +425,8 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             await ExecuteAsync(
                 connection,
                 "ALTER TABLE DownloadJobs ADD COLUMN RoutingState TEXT NOT NULL DEFAULT 'NotRequired';",
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                transaction).ConfigureAwait(false);
         }
 
         await ExecuteAsync(
@@ -426,20 +455,55 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             INSERT OR IGNORE INTO MigrationHistory(Version, AppliedAt)
             VALUES (2, CURRENT_TIMESTAMP);
             """,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            transaction).ConfigureAwait(false);
 
-        if (CurrentSchemaVersion != 2)
+        var ruleColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var ruleColumnCommand = connection.CreateCommand())
+        {
+            ruleColumnCommand.Transaction = transaction;
+            ruleColumnCommand.CommandText = "PRAGMA table_info(Rules);";
+            await using var reader = await ruleColumnCommand.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                ruleColumns.Add(reader.GetString(1));
+            }
+        }
+
+        if (!ruleColumns.Contains("IsDeleted"))
+        {
+            await ExecuteAsync(
+                connection,
+                "ALTER TABLE Rules ADD COLUMN IsDeleted INTEGER NOT NULL DEFAULT 0;",
+                cancellationToken,
+                transaction).ConfigureAwait(false);
+        }
+
+        await ExecuteAsync(
+            connection,
+            """
+            INSERT OR IGNORE INTO MigrationHistory(Version, AppliedAt)
+            VALUES (3, CURRENT_TIMESTAMP);
+            """,
+            cancellationToken,
+            transaction).ConfigureAwait(false);
+
+        if (CurrentSchemaVersion != 3)
         {
             throw new InvalidOperationException("Repository migration version is inconsistent.");
         }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task ExecuteAsync(
         SqliteConnection connection,
         string sql,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        SqliteTransaction? transaction = null)
     {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = sql;
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }

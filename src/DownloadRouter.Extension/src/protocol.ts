@@ -4,6 +4,7 @@ export const nativeHostName = "com.eslee.download_router";
 export type AgentCommandName =
   | "ping"
   | "download.started"
+  | "download.metadata"
   | "download.changed"
   | "downloads.active";
 

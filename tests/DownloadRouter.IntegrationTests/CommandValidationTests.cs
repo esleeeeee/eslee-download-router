@@ -215,7 +215,7 @@ public sealed class CommandValidationTests : IDisposable
         Assert.True(response.Success, response.Message);
         var job = await repository.GetJobAsync(jobId, CancellationToken.None);
         Assert.Equal(BrowserTransferState.Cancelled, job!.BrowserState);
-        Assert.Equal(RoutingState.NotRequired, job.RoutingState);
+        Assert.Equal(RoutingState.WaitingForSelection, job.RoutingState);
         Assert.Equal("download.cancelled", job.ErrorCode);
         Assert.Equal("cancelled.txt", job.CurrentFileName);
         Assert.Empty(DownloadJobQueries.ActiveSelections(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None)));
@@ -271,17 +271,196 @@ public sealed class CommandValidationTests : IDisposable
         Assert.Equal("must remain", await File.ReadAllTextAsync(source, CancellationToken.None));
     }
 
-    private static async Task CreateRuleAsync(
+    [Fact]
+    public async Task TemporaryNameUpdatesTheSameJobWhenDownloadsApiReportsFinalMetadata()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartAsync(handler, "metadata-1", "download");
+        var initial = await repository.GetJobAsync(jobId, CancellationToken.None);
+        Assert.Equal(DownloadPresentation.PendingFileName, DownloadPresentation.DisplayFileName(initial!));
+
+        var temporary = await SendAsync(
+            handler,
+            "download.metadata",
+            new DownloadMetadataChangedPayload("Whale", "metadata-1", "C:\\Downloads\\미확인 197533.crdownload", null));
+        Assert.True(temporary.Success, temporary.Message);
+        Assert.Equal(DownloadPresentation.PendingFileName, DownloadPresentation.DisplayFileName((await repository.GetJobAsync(jobId, CancellationToken.None))!));
+
+        var finalMetadata = await SendAsync(
+            handler,
+            "download.metadata",
+            new DownloadMetadataChangedPayload("Whale", "metadata-1", "C:\\Downloads\\실제 이름.zip", "실제 이름.zip"));
+        Assert.True(finalMetadata.Success, finalMetadata.Message);
+        Assert.Equal("실제 이름.zip", (await repository.GetJobAsync(jobId, CancellationToken.None))!.CurrentFileName);
+
+        var duplicateStart = await SendAsync(
+            handler,
+            "download.started",
+            new DownloadStartedPayload(
+                "Whale", "metadata-1", "실제 이름.zip", null, "https://example.com/downloads",
+                "https://example.com/file", null, null));
+        Assert.True(duplicateStart.Success, duplicateStart.Message);
+        Assert.True(duplicateStart.Data!.Value.GetProperty("existing").GetBoolean());
+        Assert.Single(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task RouteCanChangeBeforeCompletionAndMovesImmediatelyAfterCompletion()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var incoming = Directory.CreateDirectory(Path.Combine(root, "incoming")).FullName;
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        Directory.CreateDirectory(Path.Combine(destination, "kr", "모야지"));
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartAsync(handler, "route-before-complete", "tree.bin");
+
+        var changed = await SendAsync(
+            handler,
+            "route.change",
+            new JobRouteChangePayload(jobId, Path.Combine("kr", "모야지")));
+        Assert.True(changed.Success, changed.Message);
+        var selected = await repository.GetJobAsync(jobId, CancellationToken.None);
+        Assert.Equal(BrowserTransferState.InProgress, selected!.BrowserState);
+        Assert.Equal(RoutingState.SelectionReady, selected.RoutingState);
+
+        var source = Path.Combine(incoming, "tree.bin");
+        await File.WriteAllTextAsync(source, "tree route", CancellationToken.None);
+        var completed = await SendAsync(
+            handler,
+            "download.changed",
+            new DownloadChangedPayload("Whale", "route-before-complete", "complete", source, null, "tree.bin"));
+        Assert.True(completed.Success, completed.Message);
+        Assert.True(File.Exists(Path.Combine(destination, "kr", "모야지", "tree.bin")));
+    }
+
+    [Fact]
+    public async Task CompletedFileRequiresConfirmationAndCanMoveAgainWithoutOverwrite()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var incoming = Directory.CreateDirectory(Path.Combine(root, "incoming")).FullName;
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        Directory.CreateDirectory(Path.Combine(destination, "other"));
+        await CreateRuleAsync(repository, destination, StorageMode.Automatic);
+        var jobId = await StartAsync(handler, "reroute-complete", "completed.txt");
+        var source = Path.Combine(incoming, "completed.txt");
+        await File.WriteAllTextAsync(source, "completed route", CancellationToken.None);
+        Assert.True((await SendAsync(
+            handler,
+            "download.changed",
+            new DownloadChangedPayload("Whale", "reroute-complete", "complete", source, null))).Success);
+
+        var confirmationRequired = await SendAsync(
+            handler,
+            "route.change",
+            new JobRouteChangePayload(jobId, "other"));
+        Assert.False(confirmationRequired.Success);
+        Assert.Equal("route.confirmation-required", confirmationRequired.ErrorCode);
+
+        var movedAgain = await SendAsync(
+            handler,
+            "route.change",
+            new JobRouteChangePayload(jobId, "other", ConfirmCompletedMove: true));
+        Assert.True(movedAgain.Success, movedAgain.Message);
+        Assert.True(File.Exists(Path.Combine(destination, "other", "completed.txt")));
+        Assert.Equal("completed route", await File.ReadAllTextAsync(Path.Combine(destination, "other", "completed.txt"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task RuleEditAndSoftDeletePreserveIdentityCreationTimeAndHistory()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        var rule = await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartAsync(handler, "rule-history", "history.bin");
+        var attemptedCreatedAt = rule.CreatedAt.AddDays(10);
+
+        var edited = await SendAsync(
+            handler,
+            "rules.upsert",
+            rule with { Name = "edited rule", IsEnabled = false, CreatedAt = attemptedCreatedAt });
+        Assert.True(edited.Success, edited.Message);
+        var restored = await repository.GetRuleAsync(rule.Id, CancellationToken.None);
+        Assert.Equal(rule.Id, restored!.Id);
+        Assert.Equal(rule.CreatedAt, restored.CreatedAt);
+        Assert.Equal("edited rule", restored.Name);
+        Assert.False(restored.IsEnabled);
+
+        var deleted = await SendAsync(handler, "rules.delete", new RuleDeletePayload(rule.Id));
+        Assert.True(deleted.Success, deleted.Message);
+        Assert.Empty(await repository.GetRulesAsync(CancellationToken.None));
+        Assert.NotNull(await repository.GetJobAsync(jobId, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task CancelledJobCannotChangeRouteRegardlessOfPreviousSelection()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        Directory.CreateDirectory(Path.Combine(destination, "A"));
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartAsync(handler, "cancel-route", "cancel.bin");
+        Assert.True((await SendAsync(
+            handler,
+            "selection.complete",
+            new SelectionCompletedPayload([jobId], "A"))).Success);
+        Assert.True((await SendAsync(
+            handler,
+            "download.changed",
+            new DownloadChangedPayload("Whale", "cancel-route", "cancelled", null, "USER_CANCELED"))).Success);
+
+        var response = await SendAsync(
+            handler,
+            "route.change",
+            new JobRouteChangePayload(jobId, string.Empty));
+
+        Assert.False(response.Success);
+        Assert.Equal("route.change-not-allowed", response.ErrorCode);
+        var cancelled = await repository.GetJobAsync(jobId, CancellationToken.None);
+        Assert.Equal(BrowserTransferState.Cancelled, cancelled!.BrowserState);
+        Assert.Equal(RoutingState.SelectionReady, cancelled.RoutingState);
+    }
+
+    [Fact]
+    public async Task SkippingSelectionKeepsTheCompletedFileInItsBrowserLocation()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var incoming = Directory.CreateDirectory(Path.Combine(root, "incoming")).FullName;
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartAsync(handler, "skip-route", "keep-here.txt");
+
+        var skipped = await SendAsync(handler, "selection.skip", new SelectionSkippedPayload(jobId));
+        Assert.True(skipped.Success, skipped.Message);
+
+        var source = Path.Combine(incoming, "keep-here.txt");
+        await File.WriteAllTextAsync(source, "do not move", CancellationToken.None);
+        var completed = await SendAsync(
+            handler,
+            "download.changed",
+            new DownloadChangedPayload("Whale", "skip-route", "complete", source, null, "keep-here.txt"));
+
+        Assert.True(completed.Success, completed.Message);
+        var job = await repository.GetJobAsync(jobId, CancellationToken.None);
+        Assert.Equal(BrowserTransferState.Complete, job!.BrowserState);
+        Assert.Equal(RoutingState.Skipped, job.RoutingState);
+        Assert.Null(job.FinalPath);
+        Assert.True(File.Exists(source));
+        Assert.Empty(Directory.EnumerateFiles(destination));
+    }
+
+    private static async Task<DownloadRule> CreateRuleAsync(
         DownloadRouterRepository repository,
         string destination,
         StorageMode storageMode)
     {
         var now = DateTimeOffset.UtcNow;
-        await repository.UpsertRuleAsync(
-            new DownloadRule(
-                Guid.NewGuid(), "selection rule", true, RuleMatchType.DomainAndSubdomains, "example.com",
-                RuleMatchTarget.InitiatingPage, destination, storageMode, 0, 0, now, now),
-            CancellationToken.None);
+        var rule = new DownloadRule(
+            Guid.NewGuid(), "selection rule", true, RuleMatchType.DomainAndSubdomains, "example.com",
+            RuleMatchTarget.InitiatingPage, destination, storageMode, 0, 0, now, now);
+        await repository.UpsertRuleAsync(rule, CancellationToken.None);
+        return rule;
     }
 
     private static async Task<Guid> StartAsync(

@@ -22,8 +22,8 @@ public sealed class DownloadJobStateMachine
             [RoutingState.Moving] = RoutingSet(RoutingState.Completed, RoutingState.RetryPending, RoutingState.Failed),
             [RoutingState.RetryPending] = RoutingSet(RoutingState.Moving, RoutingState.Failed, RoutingState.Skipped),
             [RoutingState.Failed] = RoutingSet(RoutingState.RetryPending),
-            [RoutingState.Completed] = RoutingSet(),
-            [RoutingState.Skipped] = RoutingSet(),
+            [RoutingState.Completed] = RoutingSet(RoutingState.Moving),
+            [RoutingState.Skipped] = RoutingSet(RoutingState.SelectionReady, RoutingState.Moving),
         };
 
     public bool CanTransition(BrowserTransferState current, BrowserTransferState next)
