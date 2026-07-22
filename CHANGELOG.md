@@ -19,7 +19,7 @@
 - 경로 토큰, 루트 경계와 reparse point 방어
 - 동일/교차 볼륨 안전 이동, 안정화 확인, SHA-256 검증, 중복 이름 보존
 - WinUI 대시보드, 규칙, 파일별 선택 대기, 상태 필터·삭제 이력, 브라우저, 진단 화면
-- 67개 .NET 테스트, 13개 TypeScript 테스트, Agent/Native Host 스모크 테스트
+- 68개 .NET 테스트, 13개 TypeScript 테스트, Agent/Native Host 스모크 테스트
 - per-user Native Host 등록 및 Inno Setup 설치 골격
 - Native Host 등록의 Windows PowerShell 5.1 회귀 테스트와 개인정보 로그 회귀 테스트
 - 매칭 규칙의 작업 생성·실제 파일 이동을 검증하는 Agent 통합 테스트
@@ -38,6 +38,7 @@
 - 취소 상태는 선택 여부와 관계없이 `Cancelled`가 되고 Waiting/SelectionReady 라우팅은 `NotRequired`로 종료
 - UI 상태 갱신 주기를 500ms로 줄여 취소 후 팝업·Pending·이력을 1초 이내 반영
 - 브라우저 기록에서 찾지 못한 진행 작업은 취소로 추측하지 않고 stale 진단 상태로 보존하며 자동 팝업에서 제외
+- service worker 시작 재조정은 Job 상태만 맞추고 생성/마지막 실시간 브라우저 이벤트 기반의 30분 팝업 연령은 유지
 
 - WinUI 앱을 Per-Monitor V2로 선언하고 공통 콘텐츠를 세로 ScrollViewer, stretch viewport, 1100 DIP 반응형 폼으로 재구성
 - 다운로드 이력이 규칙에 매칭된 작업만 표시함을 명시하고 데이터 변경 시 3초 간격으로 자동 갱신
@@ -50,9 +51,11 @@
 ### Fixed
 
 - 앱 시작 때 오래된 `WaitingForSelection` 전체를 FIFO에 재삽입해 20개 이상 팝업이 연속 표시되던 문제
+- service worker 시작 검색 결과가 오래된 Job의 마지막 브라우저 이벤트 시각을 현재로 덮어 다시 자동 팝업 대상으로 만들던 문제
 - Whale가 `state` delta 없이 `error.current=USER_CANCELED`만 보낼 때 Extension이 조기 반환해 취소가 누락되던 문제
 - `downloads.onErased`와 실제 사용자 취소를 혼동할 수 있는 시작 재조정 공백
 - 일반 설정의 테마 ComboBox가 저장·적용 로직에 연결되지 않아 화면이 바뀌지 않던 문제
+- 다크 테마에서 코드로 만든 카드와 기본 창 제목 표시줄이 라이트 리소스를 사용하던 대비 문제
 - 정보 화면에 실행 버전이 없고 설치 프로그램 버전만 별도 하드코딩되어 구성 요소가 불일치할 수 있던 문제
 
 - DPI awareness 누락으로 QHD 125%에서 앱 전체가 96 DPI 비트맵으로 확대되던 흐릿한 렌더링

@@ -28,7 +28,7 @@
 - 생성/마지막 브라우저 이벤트 기준 30분 자동 팝업 정책, 이전 세션 대기 표시, 현재 큐 `모두 나중에 선택`
 - 고정 DIP 전용 선택 창, lazy 계층형 FolderTreePicker, 단일 FIFO, 숨김/최소화 상태 직접 표시, 취소 시 자동 닫기
 - `onCreated`/`filename` delta/완료 검색을 통한 같은 Job 파일명 갱신과 임시 이름 차단
-- `USER_CANCELED` 즉시 전송, interrupted 오류 우선순위, onErased 비취소 처리와 service worker 시작 재조정
+- `USER_CANCELED` 즉시 전송, interrupted 오류 우선순위, onErased 비취소 처리와 팝업 연령을 갱신하지 않는 service worker 시작 재조정
 - 이력의 Job별 저장 위치 선택·변경, 완료 파일 명시적 재이동, 이동 안 함/나중에 선택
 - 취소선·상태 필터·개별/선택/취소 이력 삭제 UI와 실제 파일 비삭제 보장
 - 현재 필터 전체 선택/해제와 선택 수 표시
@@ -49,7 +49,7 @@
 | 항목 | 결과 |
 |---|---|
 | `.NET Debug build` | 성공, 경고 0, 오류 0 |
-| `.NET tests` | 67/67 통과(Core 41, Infrastructure 7, Integration 19) |
+| `.NET tests` | 68/68 통과(Core 41, Infrastructure 7, Integration 20) |
 | Extension ESLint/TypeScript build | 성공 |
 | Extension Node tests | 13/13 통과 |
 | Agent Named Pipe ping | 성공 |
@@ -72,14 +72,14 @@
 | Vivaldi | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
 | Opera | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
 
-Whale 에서 로컬 HTTP fixture로 Automatic과 SelectSubfolder를 실제 검증했습니다. Automatic은 C: 기본 다운로드 위치에서 D: 테스트 규칙 루트로 교차 볼륨 이동했고, SelectSubfolder는 테스트 루트에서 `kr → 모야지`만 확장·선택해 이동했습니다. 100자 이상 노드를 표시하고 복귀해도 선택 창 폭은 700px(125%의 560 DIP)로 동일했습니다. 메인 창 숨김/최소화 중에도 독립 선택 창이 직접 나타났습니다. 기존 A/B/C/D FIFO와 브라우저 취소 검증도 유지됩니다.
+Whale 에서 로컬 HTTP fixture로 Automatic과 SelectSubfolder를 실제 검증했습니다. Automatic은 C: 기본 다운로드 위치에서 D: 테스트 규칙 루트로 교차 볼륨 이동했고, SelectSubfolder는 테스트 루트에서 `kr → 모야지`만 확장·선택해 이동했습니다. 100자 이상 노드를 표시하고 복귀해도 선택 창 폭은 700px(125%의 560 DIP)로 동일했습니다. 메인 창 숨김/최소화 중에도 독립 선택 창이 직접 나타났습니다. 2026-07-23에는 아무 선택 없음/선택 완료/나중에 선택/이동 안 함 네 실제 Whale 취소가 모두 약 0.24초 안에 `Cancelled`로 반영되고 팝업·Pending·이동 0건과 이력 취소선을 확인했습니다.
 
 ## 알려진 문제와 제한
 
 - downloads API만으로 다운로드 시작 탭 URL을 신뢰성 있게 얻을 수 없어 활성 탭을 추측하지 않습니다. 현재 referrer와 파일 URL을 분리해 사용합니다.
 - App 실행 파일을 찾을 수 있으면 Agent가 선택 UI를 시작하고, 실행 중이면 1초 폴링과 독립 창으로 FIFO를 표시합니다. 설치 손상으로 App을 찾지 못해도 다운로드는 원래 위치에서 완료되고 Pending에 남습니다.
 - “나중에 선택”과 “모두 나중에 선택” 팝업 억제는 현재 App 세션 동안만 유지됩니다. 30분이 지난 작업은 대기 탭에서 수동 처리하며 트리의 새 폴더 생성은 미구현입니다.
-- Extension 시작 시 Agent의 진행 중 ID를 브라우저 다운로드 기록과 대조해 완료·취소·중단을 재전송합니다. 브라우저 기록에서 사라진 오래된 작업은 근거 없이 완료·삭제하지 않습니다.
+- Extension 시작 시 Agent의 진행 중 ID를 브라우저 다운로드 기록과 대조해 완료·취소·중단을 재전송합니다. 이 재조정은 실제 브라우저 이벤트 시각을 갱신하지 않으므로 오래된 Pending을 자동 팝업 대상으로 되살리지 않으며, 브라우저 기록에서 사라진 작업도 근거 없이 완료·삭제하지 않습니다.
 - Whale registry adapter는 이 PC에서 검증했습니다. Brave/Vivaldi/Opera adapter는 실제 PC 검증이 필요합니다.
 - 브라우저 자체 “다운로드 전에 저장 위치 확인” 설정 감지와 안내는 문서만 있고 UI 자동 감지는 미구현입니다.
 - QHD 125% 실제 실행과 좁은/넓은 창 시각·경계 검증은 완료했습니다. Windows 100%/150%, FHD/4K 실기기와 키보드/스크린리더 접근성 검증은 남아 있습니다.

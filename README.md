@@ -98,7 +98,7 @@ PowerShell 실행 정책이 로컬 스크립트를 막는 경우 예시처럼 `p
 
 `Directory.Build.props`의 `VersionPrefix`가 App, Agent, Native Host, 설치 프로그램의 단일 버전 원본입니다. 정보 화면은 실행 assembly의 informational version과 짧은 commit, 설치형/개발 빌드 구분을 표시합니다. 일반 설정의 시스템/라이트/다크 테마는 `%LOCALAPPDATA%\eslee\DownloadRouter\config.local.json`에 저장되어 열린 창, 새 선택 창, 트레이 복원과 백그라운드 시작에 동일하게 적용됩니다.
 
-SelectSubfolder 자동 팝업은 생성 또는 마지막 브라우저 이벤트가 30분 이내인 작업만 대상으로 합니다. 오래된 작업과 브라우저 기록을 찾을 수 없는 작업은 삭제하지 않고 대기 탭과 배지에 유지합니다. 선택 창의 `모두 나중에 선택`은 현재 App 세션의 기존 큐만 숨기며 이후 새 다운로드는 정상 표시합니다.
+SelectSubfolder 자동 팝업은 생성 또는 마지막 실시간 브라우저 이벤트가 30분 이내인 작업만 대상으로 합니다. Extension 시작 시 검색 기반 재조정은 이 연령을 갱신하지 않습니다. 오래된 작업과 브라우저 기록을 찾을 수 없는 작업은 삭제하지 않고 대기 탭과 배지에 유지합니다. 선택 창의 `모두 나중에 선택`은 현재 App 세션의 기존 큐만 숨기며 이후 새 다운로드는 정상 표시합니다.
 
 설계와 위협 모델은 [ARCHITECTURE.md](ARCHITECTURE.md), [SECURITY.md](SECURITY.md)를 참고하세요.
 
