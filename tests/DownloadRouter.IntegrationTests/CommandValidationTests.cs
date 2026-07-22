@@ -327,6 +327,33 @@ public sealed class CommandValidationTests : IDisposable
     }
 
     [Fact]
+    public async Task StartupReconciliationDoesNotMakeAnOldPendingJobAutoPromptEligibleAgain()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartAsync(handler, "old-reconciled", "old.bin");
+        var oldTime = DateTimeOffset.UtcNow.Subtract(TimeSpan.FromMinutes(31));
+        var original = await repository.GetJobAsync(jobId, CancellationToken.None);
+        await repository.UpdateJobAsync(
+            original! with { CreatedAt = oldTime, LastBrowserEventAt = oldTime },
+            "test-aged-pending",
+            CancellationToken.None);
+
+        var reconciled = await SendAsync(
+            handler,
+            "download.changed",
+            new DownloadChangedPayload(
+                "Whale", "old-reconciled", "in_progress", null, null, IsReconciliation: true));
+
+        Assert.True(reconciled.Success, reconciled.Message);
+        var job = await repository.GetJobAsync(jobId, CancellationToken.None);
+        Assert.Equal(oldTime, job!.LastBrowserEventAt);
+        Assert.Single(DownloadJobQueries.ActiveSelections([job]));
+        Assert.Empty(DownloadJobQueries.AutomaticSelections([job], DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
     public async Task DeletingHistoryDoesNotDeleteTheDownloadedFile()
     {
         var (handler, repository) = await CreateHandlerAsync();

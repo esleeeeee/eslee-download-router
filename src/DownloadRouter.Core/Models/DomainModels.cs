@@ -202,7 +202,8 @@ public sealed record DownloadChangedPayload(
     string State,
     string? FilePath,
     string? Error,
-    string? FileName = null);
+    string? FileName = null,
+    bool IsReconciliation = false);
 
 public sealed record DownloadMetadataChangedPayload(
     string Browser,

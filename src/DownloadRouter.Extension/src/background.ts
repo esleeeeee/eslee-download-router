@@ -94,6 +94,7 @@ function reportTerminal(
   command: AgentCommandName,
   state: "complete" | "interrupted" | "cancelled",
   error: string | null,
+  isReconciliation = false,
 ): void {
   if (!markTerminalReported(item.id, state)) {
     return;
@@ -107,6 +108,7 @@ function reportTerminal(
       filePath: item.filename || null,
       fileName: trustedDownloadFileName(item.filename),
       error,
+      isReconciliation,
     }),
   );
 }
@@ -144,7 +146,7 @@ function reportDownloadMetadata(item: chrome.downloads.DownloadItem): void {
 
 function reportReconciledState(item: chrome.downloads.DownloadItem): void {
   if (item.state === "complete") {
-    reportTerminal(item, "download.changed", "complete", null);
+    reportTerminal(item, "download.changed", "complete", null, true);
     return;
   }
 
@@ -155,6 +157,7 @@ function reportReconciledState(item: chrome.downloads.DownloadItem): void {
       isUserCancelled(error) ? "download.cancelled" : "download.interrupted",
       isUserCancelled(error) ? "cancelled" : "interrupted",
       error,
+      true,
     );
     return;
   }
@@ -166,6 +169,7 @@ function reportReconciledState(item: chrome.downloads.DownloadItem): void {
     filePath: null,
     fileName: null,
     error: null,
+    isReconciliation: true,
   }));
 }
 
@@ -177,6 +181,7 @@ function reportStale(downloadId: number): void {
     filePath: null,
     fileName: null,
     error: null,
+    isReconciliation: true,
   }));
 }
 

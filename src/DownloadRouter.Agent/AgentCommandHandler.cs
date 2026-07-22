@@ -259,7 +259,9 @@ public sealed class AgentCommandHandler(
             {
                 job = job with
                 {
-                    LastBrowserEventAt = DateTimeOffset.UtcNow,
+                    LastBrowserEventAt = payload.IsReconciliation
+                        ? job.LastBrowserEventAt
+                        : DateTimeOffset.UtcNow,
                     IsBrowserRecordStale = false,
                 };
                 await repository.UpdateJobAsync(job, "download.reconciled-in-progress", cancellationToken).ConfigureAwait(false);
@@ -307,7 +309,9 @@ public sealed class AgentCommandHandler(
                     ? "The user cancelled this download in the browser."
                     : "The browser interrupted this download before completion.",
                 CompletedAt = DateTimeOffset.UtcNow,
-                LastBrowserEventAt = DateTimeOffset.UtcNow,
+                LastBrowserEventAt = payload.IsReconciliation
+                    ? job.LastBrowserEventAt
+                    : DateTimeOffset.UtcNow,
                 IsBrowserRecordStale = false,
             };
             await repository.UpdateJobAsync(job, cancelled ? "download.cancelled" : "download.interrupted", cancellationToken).ConfigureAwait(false);
@@ -339,7 +343,9 @@ public sealed class AgentCommandHandler(
             BrowserState = BrowserTransferState.Complete,
             ErrorCode = null,
             ErrorMessage = null,
-            LastBrowserEventAt = DateTimeOffset.UtcNow,
+            LastBrowserEventAt = payload.IsReconciliation
+                ? job.LastBrowserEventAt
+                : DateTimeOffset.UtcNow,
             IsBrowserRecordStale = false,
         };
 
