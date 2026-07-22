@@ -10,7 +10,7 @@
             <AdaptiveTrigger MinWindowWidth="0" />
           </VisualState.StateTriggers>
           <VisualState.Setters>
-            <Setter Target="ContentViewport.Padding" Value="16,16,16,24" />
+            <Setter Target="ContentViewport.Padding" Value="16,32,16,24" />
           </VisualState.Setters>
         </VisualState>
         <VisualState x:Name="Wide">
@@ -18,7 +18,7 @@
             <AdaptiveTrigger MinWindowWidth="1200" />
           </VisualState.StateTriggers>
           <VisualState.Setters>
-            <Setter Target="ContentViewport.Padding" Value="32,24,32,32" />
+            <Setter Target="ContentViewport.Padding" Value="32,48,32,32" />
           </VisualState.Setters>
         </VisualState>
       </VisualStateGroup>
@@ -42,16 +42,21 @@
         <NavigationViewItem Content="정보" Tag="about" Icon="Help" />
       </NavigationView.MenuItems>
       <ScrollViewer
+          x:Name="ContentScrollViewer"
           HorizontalContentAlignment="Stretch"
           HorizontalScrollBarVisibility="Disabled"
           HorizontalScrollMode="Disabled"
+          SizeChanged="ContentScrollViewer_SizeChanged"
           VerticalScrollBarVisibility="Auto"
           VerticalScrollMode="Auto">
-        <Border x:Name="ContentViewport" HorizontalAlignment="Stretch">
+        <Border
+            x:Name="ContentViewport"
+            HorizontalAlignment="Stretch"
+            Padding="16,32,16,24">
           <StackPanel
               x:Name="ContentPanel"
               MaxWidth="1100"
-              HorizontalAlignment="Stretch"
+              HorizontalAlignment="Center"
               Spacing="16" />
         </Border>
       </ScrollViewer>
