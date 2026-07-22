@@ -13,6 +13,7 @@ public sealed partial class MainWindow
     private readonly HashSet<Guid> deferredSelectionPrompts = [];
     private ContentDialog? currentSelectionDialog;
     private Guid? currentSelectionJobId;
+    private string? currentSelectionSnapshot;
     private bool currentSelectionInvalidated;
     private bool liveUpdateInProgress;
     private bool selectionPromptInProgress;
@@ -99,6 +100,17 @@ public sealed partial class MainWindow
             currentSelectionInvalidated = true;
             currentSelectionDialog?.Hide();
         }
+        else if (currentSelectionJobId is Guid activeCurrent)
+        {
+            var currentJob = active.First(candidate => candidate.Id == activeCurrent);
+            var updatedSnapshot = CreateSelectionPromptSnapshot(currentJob, active.Count);
+            if (!string.Equals(currentSelectionSnapshot, updatedSnapshot, StringComparison.Ordinal))
+            {
+                currentSelectionInvalidated = true;
+                selectionPromptQueue.EnqueueFirst(activeCurrent);
+                currentSelectionDialog?.Hide();
+            }
+        }
 
         foreach (var job in active)
         {
@@ -131,6 +143,7 @@ public sealed partial class MainWindow
     {
         selectionPromptInProgress = true;
         currentSelectionJobId = job.Id;
+        currentSelectionSnapshot = CreateSelectionPromptSnapshot(job, otherPendingCount + 1);
         currentSelectionInvalidated = false;
         string? action = null;
         try
@@ -222,6 +235,7 @@ public sealed partial class MainWindow
         {
             currentSelectionDialog = null;
             currentSelectionJobId = null;
+            currentSelectionSnapshot = null;
             currentSelectionInvalidated = false;
             selectionPromptInProgress = false;
         }
@@ -267,6 +281,9 @@ public sealed partial class MainWindow
         _ = ShowWindow(windowHandle, 9);
         _ = SetForegroundWindow(windowHandle);
     }
+
+    private static string CreateSelectionPromptSnapshot(DownloadJob job, int activeCount)
+        => $"{job.Id:N}:{job.CurrentFileName}:{job.BrowserState}:{job.RoutingState}:{activeCount}";
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

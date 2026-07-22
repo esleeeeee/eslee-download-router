@@ -18,6 +18,24 @@ public sealed class SelectionPromptQueue
         return true;
     }
 
+    public bool EnqueueFirst(Guid jobId)
+    {
+        if (jobId == Guid.Empty || !queued.Add(jobId))
+        {
+            return false;
+        }
+
+        var remaining = queue.ToArray();
+        queue.Clear();
+        queue.Enqueue(jobId);
+        foreach (var id in remaining)
+        {
+            queue.Enqueue(id);
+        }
+
+        return true;
+    }
+
     public bool TryDequeue(out Guid jobId)
     {
         if (!queue.TryDequeue(out jobId))

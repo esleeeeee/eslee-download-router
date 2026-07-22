@@ -82,6 +82,21 @@ public sealed class ProtocolAndStateTests
         Assert.False(queue.TryDequeue(out _));
     }
 
+    [Fact]
+    public void SelectionPromptQueueCanRefreshTheCurrentJobWithoutBreakingFifo()
+    {
+        var queue = new SelectionPromptQueue();
+        var current = Guid.NewGuid();
+        var next = Guid.NewGuid();
+        queue.Enqueue(next);
+        queue.EnqueueFirst(current);
+
+        Assert.True(queue.TryDequeue(out var refreshed));
+        Assert.True(queue.TryDequeue(out var queuedNext));
+        Assert.Equal(current, refreshed);
+        Assert.Equal(next, queuedNext);
+    }
+
     private static DownloadJob CreateJob(BrowserTransferState browserState, RoutingState routingState)
         => new(
             Guid.NewGuid(), BrowserKind.Whale, Guid.NewGuid().ToString("N"), "sample.bin", "sample.bin",

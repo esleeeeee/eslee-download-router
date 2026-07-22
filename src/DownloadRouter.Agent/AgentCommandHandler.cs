@@ -204,10 +204,14 @@ public sealed class AgentCommandHandler(
             stateMachine.EnsureCanTransition(job.BrowserState, next);
             var routing = cancelled ? RoutingState.NotRequired : RoutingState.Failed;
             stateMachine.EnsureCanTransition(job.RoutingState, routing);
+            var reportedFileName = string.IsNullOrWhiteSpace(payload.FilePath)
+                ? job.CurrentFileName
+                : Path.GetFileName(NormalizeOptionalSourcePath(payload.FilePath));
             job = job with
             {
                 BrowserState = next,
                 RoutingState = routing,
+                CurrentFileName = reportedFileName,
                 ErrorCode = cancelled ? "download.cancelled" : "download.interrupted." + NormalizeBrowserError(payload.Error),
                 ErrorMessage = cancelled
                     ? "The user cancelled this download in the browser."

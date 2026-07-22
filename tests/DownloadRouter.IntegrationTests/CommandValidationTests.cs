@@ -217,6 +217,7 @@ public sealed class CommandValidationTests : IDisposable
         Assert.Equal(BrowserTransferState.Cancelled, job!.BrowserState);
         Assert.Equal(RoutingState.NotRequired, job.RoutingState);
         Assert.Equal("download.cancelled", job.ErrorCode);
+        Assert.Equal("cancelled.txt", job.CurrentFileName);
         Assert.Empty(DownloadJobQueries.ActiveSelections(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None)));
         Assert.Equal(0, DownloadJobQueries.CountDashboard([job]).WaitingForSelection);
         Assert.True(File.Exists(source));
