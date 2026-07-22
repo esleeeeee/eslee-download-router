@@ -18,4 +18,14 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" />
   </ItemGroup>
+  <Target Name="CopyUnpackagedWinUIResourcesToPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <UnpackagedWinUIResource Include="$(TargetDir)*.xbf" />
+      <UnpackagedWinUIResource Include="$(TargetDir)$(AssemblyName).pri" />
+    </ItemGroup>
+    <Copy
+      SourceFiles="@(UnpackagedWinUIResource)"
+      DestinationFolder="$(PublishDir)"
+      SkipUnchangedFiles="true" />
+  </Target>
 </Project>

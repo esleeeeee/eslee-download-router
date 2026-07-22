@@ -18,6 +18,11 @@ New-Item -ItemType Directory -Path $stagingRoot -Force | Out-Null
 
 & $dotnet publish (Join-Path $root 'src\DownloadRouter.App\DownloadRouter.App.csproj') --configuration $Configuration --runtime win-x64 --self-contained true --output $publishRoot --nologo
 if ($LASTEXITCODE -ne 0) { throw 'Settings app publish failed.' }
+foreach ($resource in @('App.xbf', 'MainWindow.xbf', 'DownloadRouter.App.pri')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $publishRoot $resource) -PathType Leaf)) {
+        throw "Required unpackaged WinUI resource was not published: $resource"
+    }
+}
 
 foreach ($project in @('DownloadRouter.Agent', 'DownloadRouter.NativeHost')) {
     $projectOutput = Join-Path $stagingRoot $project
@@ -44,7 +49,9 @@ New-Item -ItemType Directory -Path $scriptOutput -Force | Out-Null
 Copy-Item -Path (Join-Path $root 'src\DownloadRouter.Extension\dist\*') -Destination $extensionOutput -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $root 'scripts\common.ps1') -Destination $scriptOutput
 Copy-Item -LiteralPath (Join-Path $root 'scripts\register-native-host.ps1') -Destination $scriptOutput
+Copy-Item -LiteralPath (Join-Path $root 'scripts\native-host-registration.ps1') -Destination $scriptOutput
 Copy-Item -LiteralPath (Join-Path $root 'scripts\unregister-native-host.ps1') -Destination $scriptOutput
+Copy-Item -LiteralPath (Join-Path $root 'scripts\unregister-startup.ps1') -Destination $scriptOutput
 
 Write-Host "Self-contained installer payload: $publishRoot"
 Write-Host 'Build installer\DownloadRouter.iss with Inno Setup after reviewing signing settings.'
