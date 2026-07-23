@@ -6,10 +6,12 @@
 
 ### Added
 
+- 선택창 전면 표시 전후의 MainWindow/FolderSelectionWindow HWND, visible, iconic, owner, foreground와 native 호출 결과를 남기는 경로·URL 비포함 진단
+- 숨김/최소화 MainWindow, iconic 선택창 복원, foreground fallback, FIFO 취소 제거를 검증하는 Core 회귀 테스트
 - 30분 자동 팝업 정책, 이전 세션 대기 작업 안내와 선택 창의 `모두 나중에 선택` 큐 일괄 숨김
 - Extension `download.cancelled`/`download.interrupted`, 시작 시 complete/interrupted/in_progress/stale 재조정과 정제된 연결 진단
 - 전역 `ThemeManager`, System/Light/Dark 사용자 설정 저장과 열린/새 Window 즉시 적용
-- 정보 화면 제품명·0.3.0 버전·commit·설치형/개발 빌드 표시, 데이터 폴더/GitHub 열기
+- 정보 화면 제품명·0.3.1 버전·commit·설치형/개발 빌드 표시, 데이터 폴더/GitHub 열기
 - `Directory.Build.props` 단일 버전 원본과 App/Agent/Native Host/Installer 일치 검증
 
 - .NET 10/WinUI 3 모노레포와 재현 가능한 bootstrap/build/test/publish 스크립트
@@ -19,7 +21,7 @@
 - 경로 토큰, 루트 경계와 reparse point 방어
 - 동일/교차 볼륨 안전 이동, 안정화 확인, SHA-256 검증, 중복 이름 보존
 - WinUI 대시보드, 규칙, 파일별 선택 대기, 상태 필터·삭제 이력, 브라우저, 진단 화면
-- 68개 .NET 테스트, 13개 TypeScript 테스트, Agent/Native Host 스모크 테스트
+- 73개 .NET 테스트, 13개 TypeScript 테스트, Agent/Native Host 스모크 테스트
 - per-user Native Host 등록 및 Inno Setup 설치 골격
 - Native Host 등록의 Windows PowerShell 5.1 회귀 테스트와 개인정보 로그 회귀 테스트
 - 매칭 규칙의 작업 생성·실제 파일 이동을 검증하는 Agent 통합 테스트
@@ -50,6 +52,8 @@
 
 ### Fixed
 
+- MainWindow가 최소화된 상태에서 선택창이 foreground를 얻지 못하고 작업표시줄 강조로만 끝나던 문제
+- foreground 제한 시 바로 Flash fallback으로 종료하던 순서를 선택창 HWND의 normal 표시, 활성화, topmost, 입력 스레드 연결 재시도로 보강
 - 앱 시작 때 오래된 `WaitingForSelection` 전체를 FIFO에 재삽입해 20개 이상 팝업이 연속 표시되던 문제
 - service worker 시작 검색 결과가 오래된 Job의 마지막 브라우저 이벤트 시각을 현재로 덮어 다시 자동 팝업 대상으로 만들던 문제
 - Whale가 `state` delta 없이 `error.current=USER_CANCELED`만 보낼 때 Extension이 조기 반환해 취소가 누락되던 문제

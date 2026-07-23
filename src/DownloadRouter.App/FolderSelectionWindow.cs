@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using DownloadRouter.Core.Jobs;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -19,7 +21,10 @@ public sealed record FolderSelectionResult(
     FolderSelectionAction Action,
     string RelativeFolder);
 
-public sealed class FolderSelectionWindow(ThemeManager themeManager)
+public sealed class FolderSelectionWindow(
+    ThemeManager themeManager,
+    nint mainWindowHandle,
+    Action<string>? diagnosticWriter = null)
 {
     private const int DefaultWidthDip = 560;
     private const int DefaultHeightDip = 760;
@@ -33,6 +38,8 @@ public sealed class FolderSelectionWindow(ThemeManager themeManager)
     };
     private readonly TaskCompletionSource<FolderSelectionResult> completion = new(
         TaskCreationOptions.RunContinuationsAsynchronously);
+    private DispatcherQueueTimer? foregroundRetryTimer;
+    private int foregroundRetryCount;
     private bool completed;
 
     public void UpdateDescription(string description)
@@ -50,14 +57,22 @@ public sealed class FolderSelectionWindow(ThemeManager themeManager)
         window.Title = "다운로드 저장 위치 선택";
         window.Content = CreateContent(description, allowLater, allowSkip, allowLaterAll);
         themeManager.RegisterWindow(window);
-        window.Closed += (_, _) => CompleteWithoutClosing(FolderSelectionAction.Closed);
+        window.Closed += (_, _) =>
+        {
+            diagnosticWriter?.Invoke("selection-window closed-event");
+            CompleteWithoutClosing(FolderSelectionAction.Closed);
+        };
         await picker.InitializeAsync(storageRoot, selectedRelativeFolder, cancellationToken);
         window.Activate();
         SizeAndCenterWindow();
-        BringToForeground();
+        ShowAndActivateSelectionWindow("initial");
+        StartForegroundRetries();
 
         using var registration = cancellationToken.Register(() =>
-            window.DispatcherQueue.TryEnqueue(() => Complete(FolderSelectionAction.Closed)));
+        {
+            diagnosticWriter?.Invoke("selection-window cancellation-requested");
+            window.DispatcherQueue.TryEnqueue(() => Complete(FolderSelectionAction.Closed));
+        });
         return await completion.Task;
     }
 
@@ -167,6 +182,9 @@ public sealed class FolderSelectionWindow(ThemeManager themeManager)
         }
 
         completed = true;
+        foregroundRetryTimer?.Stop();
+        foregroundRetryTimer = null;
+        diagnosticWriter?.Invoke($"selection-window completion action={action}");
         completion.TrySetResult(new FolderSelectionResult(action, picker.SelectedRelativeFolder));
         return true;
     }
@@ -190,19 +208,169 @@ public sealed class FolderSelectionWindow(ThemeManager themeManager)
         {
             presenter.IsResizable = false;
             presenter.IsMaximizable = false;
+            presenter.IsAlwaysOnTop = true;
         }
     }
 
-    private void BringToForeground()
+    private void StartForegroundRetries()
+    {
+        foregroundRetryTimer = window.DispatcherQueue.CreateTimer();
+        foregroundRetryTimer.Interval = TimeSpan.FromMilliseconds(250);
+        foregroundRetryTimer.IsRepeating = true;
+        foregroundRetryTimer.Tick += (_, _) =>
+        {
+            if (completed || foregroundRetryCount >= 4)
+            {
+                foregroundRetryTimer?.Stop();
+                foregroundRetryTimer = null;
+                return;
+            }
+
+            foregroundRetryCount++;
+            var handle = WinRT.Interop.WindowNative.GetWindowHandle(window);
+            if (!IsWindowVisible(handle)
+                || IsIconic(handle)
+                || GetForegroundWindow() != handle)
+            {
+                ShowAndActivateSelectionWindow($"retry-{foregroundRetryCount}");
+            }
+        };
+        foregroundRetryTimer.Start();
+    }
+
+    private void ShowAndActivateSelectionWindow(string phase)
     {
         var handle = WinRT.Interop.WindowNative.GetWindowHandle(window);
-        _ = ShowWindow(handle, 5);
-        if (!SetForegroundWindow(handle))
+        var operations = new NativeSelectionWindowActivationOperations(window);
+        var result = new SelectionWindowActivationCoordinator(operations)
+            .Activate(mainWindowHandle, handle);
+        diagnosticWriter?.Invoke(FormatActivationDiagnostic(phase, result));
+    }
+
+    private static string FormatActivationDiagnostic(
+        string phase,
+        SelectionWindowActivationResult result)
+        => $"selection-window activation phase={phase} "
+            + $"main-before={FormatState(result.MainBefore)} "
+            + $"selection-before={FormatState(result.SelectionBefore)} "
+            + $"selection-after-show={FormatState(result.SelectionAfterShow)} "
+            + $"show-normal={result.ShowNormalSucceeded} "
+            + $"bring-to-top={result.BringToTopSucceeded} "
+            + $"set-foreground={result.DirectForegroundSucceeded} "
+            + $"attached-input={result.AttachedForegroundSucceeded} "
+            + $"raised={result.RaisedForegroundSucceeded} "
+            + $"flash-fallback={result.FlashFallbackUsed} "
+            + $"main-after={FormatState(result.MainAfter)} "
+            + $"selection-after={FormatState(result.SelectionAfter)}";
+
+    private static string FormatState(NativeWindowState state)
+        => $"[hwnd=0x{state.Handle:X},visible={state.IsVisible},iconic={state.IsIconic},"
+            + $"owner=0x{state.OwnerHandle:X},foreground=0x{state.ForegroundHandle:X}]";
+
+    private sealed class NativeSelectionWindowActivationOperations(
+        Window xamlWindow) : ISelectionWindowActivationOperations
+    {
+        private const int ShowNormal = 1;
+        private const uint GetWindowOwner = 4;
+        private const uint SwpNoSize = 0x0001;
+        private const uint SwpNoMove = 0x0002;
+        private const uint SwpNoActivate = 0x0010;
+        private const uint SwpShowWindow = 0x0040;
+        private static readonly nint HwndTopmost = new(-1);
+
+        public NativeWindowState Capture(nint windowHandle)
+        {
+            var foreground = GetForegroundWindow();
+            return windowHandle == 0
+                ? new NativeWindowState(0, false, false, 0, foreground)
+                : new NativeWindowState(
+                    windowHandle,
+                    IsWindowVisible(windowHandle),
+                    IsIconic(windowHandle),
+                    GetWindow(windowHandle, GetWindowOwner),
+                    foreground);
+        }
+
+        public bool ShowSelectionNormal(nint selectionWindowHandle)
+        {
+            _ = ShowWindow(selectionWindowHandle, ShowNormal);
+            return IsWindowVisible(selectionWindowHandle) && !IsIconic(selectionWindowHandle);
+        }
+
+        public void ActivateSelection()
+            => xamlWindow.Activate();
+
+        public bool BringSelectionToTop(nint selectionWindowHandle)
+            => BringWindowToTop(selectionWindowHandle);
+
+        public bool TrySetSelectionForeground(nint selectionWindowHandle)
+        {
+            _ = SetForegroundWindow(selectionWindowHandle);
+            return GetForegroundWindow() == selectionWindowHandle;
+        }
+
+        public bool TryAttachInputAndActivate(nint selectionWindowHandle)
+        {
+            var foregroundWindowHandle = GetForegroundWindow();
+            if (foregroundWindowHandle == selectionWindowHandle)
+            {
+                return true;
+            }
+
+            if (foregroundWindowHandle == 0)
+            {
+                return false;
+            }
+
+            var selectionThread = GetWindowThreadProcessId(selectionWindowHandle, out _);
+            var foregroundThread = GetWindowThreadProcessId(foregroundWindowHandle, out _);
+            if (selectionThread == 0 || foregroundThread == 0)
+            {
+                return false;
+            }
+
+            var attached = selectionThread == foregroundThread
+                || AttachThreadInput(selectionThread, foregroundThread, true);
+            if (!attached)
+            {
+                return false;
+            }
+
+            try
+            {
+                _ = ShowWindow(selectionWindowHandle, ShowNormal);
+                _ = BringWindowToTop(selectionWindowHandle);
+                _ = SetActiveWindow(selectionWindowHandle);
+                _ = SetFocus(selectionWindowHandle);
+                _ = SetForegroundWindow(selectionWindowHandle);
+                xamlWindow.Activate();
+                return GetForegroundWindow() == selectionWindowHandle;
+            }
+            finally
+            {
+                if (selectionThread != foregroundThread)
+                {
+                    _ = AttachThreadInput(selectionThread, foregroundThread, false);
+                }
+            }
+        }
+
+        public bool RaiseSelectionAboveOtherWindows(nint selectionWindowHandle)
+        {
+            var flags = SwpNoMove | SwpNoSize | SwpNoActivate | SwpShowWindow;
+            var raised = SetWindowPos(selectionWindowHandle, HwndTopmost, 0, 0, 0, 0, flags);
+            xamlWindow.Activate();
+            _ = BringWindowToTop(selectionWindowHandle);
+            _ = SetForegroundWindow(selectionWindowHandle);
+            return raised && GetForegroundWindow() == selectionWindowHandle;
+        }
+
+        public void FlashSelection(nint selectionWindowHandle)
         {
             var flash = new FlashWindowInfo
             {
                 Size = (uint)Marshal.SizeOf<FlashWindowInfo>(),
-                Window = handle,
+                Window = selectionWindowHandle,
                 Flags = 3,
                 Count = 3,
                 Timeout = 0,
@@ -226,11 +394,53 @@ public sealed class FolderSelectionWindow(ThemeManager themeManager)
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetForegroundWindow(nint windowHandle);
+    private static extern bool IsWindowVisible(nint windowHandle);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(nint windowHandle);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool ShowWindow(nint windowHandle, int command);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool BringWindowToTop(nint windowHandle);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(nint windowHandle);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern nint GetWindow(nint windowHandle, uint command);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(nint windowHandle, out uint processId);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
+
+    [DllImport("user32.dll")]
+    private static extern nint SetActiveWindow(nint windowHandle);
+
+    [DllImport("user32.dll")]
+    private static extern nint SetFocus(nint windowHandle);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(
+        nint windowHandle,
+        nint insertAfter,
+        int x,
+        int y,
+        int width,
+        int height,
+        uint flags);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

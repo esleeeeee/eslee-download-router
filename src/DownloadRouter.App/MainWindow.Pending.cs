@@ -88,7 +88,7 @@ public sealed partial class MainWindow
                 return;
             }
 
-            var result = await new FolderSelectionWindow(themeManager).ShowAsync(
+            var result = await CreateFolderSelectionWindow().ShowAsync(
                 root,
                 selectedRelativeFolder: null,
                 $"{selectedJobs.Count}개 파일에 같은 하위 폴더를 적용합니다. 체크하지 않은 파일은 변경하지 않습니다.",
@@ -143,7 +143,7 @@ public sealed partial class MainWindow
         var apply = new Button { Content = "이 파일의 저장 위치 선택/변경", HorizontalAlignment = HorizontalAlignment.Stretch };
         apply.Click += async (_, _) =>
         {
-            var result = await new FolderSelectionWindow(themeManager).ShowAsync(
+            var result = await CreateFolderSelectionWindow().ShowAsync(
                 root,
                 job.SelectedRelativeFolder,
                 $"파일: {DownloadPresentation.DisplayFileName(job)}\n현재 선택: {DisplayFolder(job.SelectedRelativeFolder)}",

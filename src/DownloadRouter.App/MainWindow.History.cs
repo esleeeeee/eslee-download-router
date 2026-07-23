@@ -236,7 +236,7 @@ public sealed partial class MainWindow
             return;
         }
 
-        var result = await new FolderSelectionWindow(themeManager).ShowAsync(
+        var result = await CreateFolderSelectionWindow().ShowAsync(
             root,
             job.SelectedRelativeFolder,
             $"파일: {DownloadPresentation.DisplayFileName(job)}\n현재 상태: {DescribeStatus(job)}\n저장 루트: {root}",

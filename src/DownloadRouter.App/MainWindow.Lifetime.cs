@@ -103,6 +103,18 @@ public sealed partial class MainWindow
     }
 
     private static void WriteAppDiagnostic(string message)
+        => WriteDiagnostic("app-startup.log", message);
+
+    private static void WriteWindowActivationDiagnostic(string message)
+        => WriteDiagnostic("window-activation.log", message);
+
+    private FolderSelectionWindow CreateFolderSelectionWindow()
+        => new(
+            themeManager,
+            WinRT.Interop.WindowNative.GetWindowHandle(this),
+            WriteWindowActivationDiagnostic);
+
+    private static void WriteDiagnostic(string fileName, string message)
     {
         try
         {
@@ -113,7 +125,7 @@ public sealed partial class MainWindow
                 "logs");
             Directory.CreateDirectory(directory);
             File.AppendAllText(
-                Path.Combine(directory, "app-startup.log"),
+                Path.Combine(directory, fileName),
                 $"{DateTimeOffset.UtcNow:O} {message}{Environment.NewLine}");
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)

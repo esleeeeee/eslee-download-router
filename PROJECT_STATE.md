@@ -26,7 +26,7 @@
 - 브라우저 전송 상태와 라우팅 상태를 분리한 작업 모델과 v1 → v2 SQLite 마이그레이션
 - 파일별 SelectSubfolder 카드, 명시적으로 체크한 항목만 일괄 적용, 건너뛰기와 세션 단위 나중에 선택
 - 생성/마지막 브라우저 이벤트 기준 30분 자동 팝업 정책, 이전 세션 대기 표시, 현재 큐 `모두 나중에 선택`
-- 고정 DIP 전용 선택 창, lazy 계층형 FolderTreePicker, 단일 FIFO, 숨김/최소화 상태 직접 표시, 취소 시 자동 닫기
+- 고정 DIP 전용 선택 창, lazy 계층형 FolderTreePicker, 단일 FIFO, 숨김/최소화 상태의 선택창 HWND 직접 활성화, 취소 시 자동 닫기
 - `onCreated`/`filename` delta/완료 검색을 통한 같은 Job 파일명 갱신과 임시 이름 차단
 - `USER_CANCELED` 즉시 전송, interrupted 오류 우선순위, onErased 비취소 처리와 팝업 연령을 갱신하지 않는 service worker 시작 재조정
 - 이력의 Job별 저장 위치 선택·변경, 완료 파일 명시적 재이동, 이동 안 함/나중에 선택
@@ -41,15 +41,15 @@
 - 실패할 때만 분류 코드를 남기는 Extension Native Messaging 진단 로그
 - Per-Monitor V2 WinUI 렌더링, 뷰포트 실폭 제한, 32/48 DIP 공통 상단 여백, 1초 상태 변경 감지
 - 저장된 System/Light/Dark를 열린 모든 Window와 이후 생성 Window에 적용하는 공통 ThemeManager
-- assembly informational version을 표시하는 정보 화면과 `Directory.Build.props` 기반 App/Agent/Native Host/Installer 단일 0.3.0 버전
-- self-contained win-x64 publish와 설치/업그레이드/제거가 검증된 per-user Inno Setup 0.3.0
+- assembly informational version을 표시하는 정보 화면과 `Directory.Build.props` 기반 App/Agent/Native Host/Installer 단일 0.3.1 버전
+- self-contained win-x64 publish와 설치/업그레이드/제거가 검증된 per-user Inno Setup 0.3.1
 
 ## 빌드와 테스트
 
 | 항목 | 결과 |
 |---|---|
 | `.NET Debug build` | 성공, 경고 0, 오류 0 |
-| `.NET tests` | 68/68 통과(Core 41, Infrastructure 7, Integration 20) |
+| `.NET tests` | 73/73 통과(Core 46, Infrastructure 7, Integration 20) |
 | Extension ESLint/TypeScript build | 성공 |
 | Extension Node tests | 13/13 통과 |
 | Agent Named Pipe ping | 성공 |
@@ -72,7 +72,7 @@
 | Vivaldi | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
 | Opera | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
 
-Whale 에서 로컬 HTTP fixture로 Automatic과 SelectSubfolder를 실제 검증했습니다. Automatic은 C: 기본 다운로드 위치에서 D: 테스트 규칙 루트로 교차 볼륨 이동했고, SelectSubfolder는 테스트 루트에서 `kr → 모야지`만 확장·선택해 이동했습니다. 100자 이상 노드를 표시하고 복귀해도 선택 창 폭은 700px(125%의 560 DIP)로 동일했습니다. 메인 창 숨김/최소화 중에도 독립 선택 창이 직접 나타났습니다. 2026-07-23에는 아무 선택 없음/선택 완료/나중에 선택/이동 안 함 네 실제 Whale 취소가 모두 약 0.24초 안에 `Cancelled`로 반영되고 팝업·Pending·이동 0건과 이력 취소선을 확인했습니다.
+Whale 에서 로컬 HTTP fixture로 Automatic과 SelectSubfolder를 실제 검증했습니다. Automatic은 C: 기본 다운로드 위치에서 D: 테스트 규칙 루트로 교차 볼륨 이동했고, SelectSubfolder는 테스트 루트에서 `kr → 모야지`만 확장·선택해 이동했습니다. 100자 이상 노드를 표시하고 복귀해도 선택 창 폭은 700px(125%의 560 DIP)로 동일했습니다. 0.3.0 사용자 검증에서 트레이 숨김은 통과했지만 최소화 상태는 선택창이 Whale 뒤에 남는 회귀가 확인됐고, 0.3.1에서 선택창 HWND 전용 foreground/입력 스레드 재시도와 topmost 정책으로 수정했습니다. 2026-07-23에는 아무 선택 없음/선택 완료/나중에 선택/이동 안 함 네 실제 Whale 취소가 모두 약 0.24초 안에 `Cancelled`로 반영되고 팝업·Pending·이동 0건과 이력 취소선을 확인했습니다.
 
 ## 알려진 문제와 제한
 

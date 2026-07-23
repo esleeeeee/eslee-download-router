@@ -37,7 +37,7 @@ Edge에서 `edge://extensions`를 열고 개발자 모드를 켠 뒤 “압축 �
 - Agent Named Pipe ping 성공
 - Native Host self-test 성공
 - App/Agent/Native Host self-contained Release publish 성공
-- QHD 125% Per-Monitor V2, 900×850 수평 넘침 0, 파일별 SelectSubfolder, 30분 팝업 정책, 전역 테마와 0.3.0 버전 체계 검증
+- QHD 125% Per-Monitor V2, 900×850 수평 넘침 0, 파일별 SelectSubfolder, 최소화 상태 전면 활성화, 30분 팝업 정책, 전역 테마와 0.3.1 버전 체계 검증
 
 Whale Automatic 규칙, 다른 Chromium 브라우저, installer, 100%/150% 및 FHD/4K 시각 검증은 아직 정상 기준에 포함되지 않습니다.
 

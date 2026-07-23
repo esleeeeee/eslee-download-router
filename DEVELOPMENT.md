@@ -72,6 +72,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-installer.ps
 - 로그인 자동 시작은 관리자 권한이 필요 없는 HKCU Run을 사용합니다. 값은 반드시 따옴표로 감싼 절대 App 경로와 `--background`여야 합니다.
 - 기본 X 동작은 메인 AppWindow 숨김입니다. `종료` 명령과 설치 업그레이드의 `--shutdown`만 완전 종료를 요청합니다.
 - 폴더 선택은 메인 창의 ContentDialog가 아니라 별도 Window입니다. 창 크기는 DIP를 실제 모니터 DPI로 변환한 뒤 작업 영역 안으로 제한합니다.
+- 선택창은 MainWindow owner를 설정하지 않는 독립 HWND입니다. 최소화 회귀를 막기 위해 MainWindow가 아니라 선택창 HWND에만 normal 표시/activate/foreground를 적용하고, foreground 제한 시 입력 스레드 연결 재시도 뒤에만 Flash fallback을 사용합니다.
+- 선택창 전면 표시 코드를 바꿀 때는 MainWindow hidden/minimized, selection iconic, 팝업 종료 뒤 MainWindow 상태, FIFO 중복과 취소 제거 회귀 테스트를 함께 실행합니다.
 - 트리는 전체 재귀 열거를 금지하고 확장한 노드의 직계 자식만 비동기로 읽습니다. UI와 Agent 양쪽에서 루트 경계를 검사합니다.
 - 이력의 경로 변경은 규칙을 수정하지 않고 Job의 상대 경로만 변경합니다. 이미 이동된 파일은 사용자 확인 뒤 기존 안전 이동 서비스를 다시 사용합니다.
 - 자동 팝업은 `SelectionPromptPolicy.AutoPromptWindow`(30분)를 통과한 Job만 사용합니다. 대기 탭과 InfoBadge는 모든 실제 Pending을 사용하므로 두 목록을 다시 합치지 마세요.

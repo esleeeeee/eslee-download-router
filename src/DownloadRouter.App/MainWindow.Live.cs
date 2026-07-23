@@ -105,6 +105,8 @@ public sealed partial class MainWindow
         var activeIds = active.Select(static job => job.Id).ToHashSet();
         if (currentSelectionJobId is Guid current && !activeIds.Contains(current))
         {
+            WriteWindowActivationDiagnostic(
+                $"selection-window invalidated current-job={current:N} active-count={active.Count}");
             currentSelectionInvalidated = true;
             currentSelectionCancellation?.Cancel();
         }
@@ -182,7 +184,7 @@ public sealed partial class MainWindow
         {
             var root = pathResolver.Resolve(rule.StorageRoot);
             currentSelectionCancellation = new CancellationTokenSource();
-            currentSelectionWindow = new FolderSelectionWindow(themeManager);
+            currentSelectionWindow = CreateFolderSelectionWindow();
             var result = await currentSelectionWindow.ShowAsync(
                 root,
                 job.SelectedRelativeFolder,

@@ -119,6 +119,23 @@ public sealed class ProtocolAndStateTests
     }
 
     [Fact]
+    public void CancelledSelectionIsRemovedWithoutBreakingFifoOrCreatingDuplicates()
+    {
+        var queue = new SelectionPromptQueue();
+        var cancelled = Guid.NewGuid();
+        var next = Guid.NewGuid();
+        Assert.True(queue.Enqueue(cancelled));
+        Assert.True(queue.Enqueue(next));
+        Assert.False(queue.Enqueue(next));
+
+        Assert.True(queue.Remove(cancelled));
+        Assert.False(queue.Remove(cancelled));
+        Assert.True(queue.TryDequeue(out var remaining));
+        Assert.Equal(next, remaining);
+        Assert.False(queue.TryDequeue(out _));
+    }
+
+    [Fact]
     public void AutomaticSelectionPolicyKeepsOldAndStaleJobsInPendingWithoutPopup()
     {
         var now = DateTimeOffset.UtcNow;
@@ -273,6 +290,94 @@ public sealed class ProtocolAndStateTests
     }
 
     [Fact]
+    public void HiddenMainWindowShowsAndActivatesOnlyTheIndependentSelectionWindow()
+    {
+        var operations = new FakeSelectionWindowActivationOperations(
+            mainVisible: false,
+            mainIconic: false,
+            selectionVisible: false,
+            selectionIconic: false)
+        {
+            DirectForegroundSucceeds = true,
+        };
+
+        var result = new SelectionWindowActivationCoordinator(operations)
+            .Activate(operations.MainWindowHandle, operations.SelectionWindowHandle);
+
+        Assert.True(result.SelectionAfter.IsVisible);
+        Assert.False(result.SelectionAfter.IsIconic);
+        Assert.True(result.SelectionAfter.IsForeground);
+        Assert.False(result.MainAfter.IsVisible);
+        Assert.False(result.MainAfter.IsIconic);
+        Assert.All(operations.MutatedWindowHandles, handle =>
+            Assert.Equal(operations.SelectionWindowHandle, handle));
+    }
+
+    [Fact]
+    public void MinimizedMainWindowRemainsMinimizedWhenAttachedInputActivatesSelection()
+    {
+        var operations = new FakeSelectionWindowActivationOperations(
+            mainVisible: true,
+            mainIconic: true,
+            selectionVisible: false,
+            selectionIconic: false)
+        {
+            AttachedForegroundSucceeds = true,
+        };
+
+        var result = new SelectionWindowActivationCoordinator(operations)
+            .Activate(operations.MainWindowHandle, operations.SelectionWindowHandle);
+
+        Assert.False(result.DirectForegroundSucceeded);
+        Assert.True(result.AttachedForegroundSucceeded);
+        Assert.True(result.SelectionAfter.IsForeground);
+        Assert.True(result.MainAfter.IsVisible);
+        Assert.True(result.MainAfter.IsIconic);
+        Assert.All(operations.MutatedWindowHandles, handle =>
+            Assert.Equal(operations.SelectionWindowHandle, handle));
+    }
+
+    [Fact]
+    public void IconicSelectionWindowIsShownNormalBeforeForegroundActivation()
+    {
+        var operations = new FakeSelectionWindowActivationOperations(
+            mainVisible: true,
+            mainIconic: true,
+            selectionVisible: true,
+            selectionIconic: true)
+        {
+            DirectForegroundSucceeds = true,
+        };
+
+        var result = new SelectionWindowActivationCoordinator(operations)
+            .Activate(operations.MainWindowHandle, operations.SelectionWindowHandle);
+
+        Assert.True(result.SelectionBefore.IsIconic);
+        Assert.True(result.ShowNormalSucceeded);
+        Assert.True(result.SelectionAfterShow.IsVisible);
+        Assert.False(result.SelectionAfterShow.IsIconic);
+    }
+
+    [Fact]
+    public void TaskbarFlashIsUsedOnlyAfterAllForegroundAttemptsFail()
+    {
+        var operations = new FakeSelectionWindowActivationOperations(
+            mainVisible: true,
+            mainIconic: true,
+            selectionVisible: false,
+            selectionIconic: false);
+
+        var result = new SelectionWindowActivationCoordinator(operations)
+            .Activate(operations.MainWindowHandle, operations.SelectionWindowHandle);
+
+        Assert.False(result.DirectForegroundSucceeded);
+        Assert.False(result.AttachedForegroundSucceeded);
+        Assert.False(result.RaisedForegroundSucceeded);
+        Assert.True(result.FlashFallbackUsed);
+        Assert.True(operations.FlashUsed);
+    }
+
+    [Fact]
     public async Task FolderTreeLoadsOnlyTheExpandedLevelAndRejectsRootEscape()
     {
         var root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "download-router-tree-tests", Guid.NewGuid().ToString("N"))).FullName;
@@ -304,4 +409,113 @@ public sealed class ProtocolAndStateTests
             Guid.NewGuid(), BrowserKind.Whale, Guid.NewGuid().ToString("N"), "sample.bin", "sample.bin",
             null, null, null, null, "https://example.com", Guid.NewGuid(), null, null, null,
             browserState, routingState, null, null, DateTimeOffset.UtcNow, null);
+
+    private sealed class FakeSelectionWindowActivationOperations :
+        ISelectionWindowActivationOperations
+    {
+        public nint MainWindowHandle { get; } = new(101);
+        public nint SelectionWindowHandle { get; } = new(202);
+        public bool DirectForegroundSucceeds { get; init; }
+        public bool AttachedForegroundSucceeds { get; init; }
+        public bool RaisedForegroundSucceeds { get; init; }
+        public bool FlashUsed { get; private set; }
+        public List<nint> MutatedWindowHandles { get; } = [];
+
+        private bool mainVisible;
+        private bool mainIconic;
+        private bool selectionVisible;
+        private bool selectionIconic;
+        private nint foregroundHandle = new(303);
+
+        public FakeSelectionWindowActivationOperations(
+            bool mainVisible,
+            bool mainIconic,
+            bool selectionVisible,
+            bool selectionIconic)
+        {
+            this.mainVisible = mainVisible;
+            this.mainIconic = mainIconic;
+            this.selectionVisible = selectionVisible;
+            this.selectionIconic = selectionIconic;
+        }
+
+        public NativeWindowState Capture(nint windowHandle)
+            => windowHandle == MainWindowHandle
+                ? new NativeWindowState(
+                    MainWindowHandle,
+                    mainVisible,
+                    mainIconic,
+                    0,
+                    foregroundHandle)
+                : new NativeWindowState(
+                    SelectionWindowHandle,
+                    selectionVisible,
+                    selectionIconic,
+                    0,
+                    foregroundHandle);
+
+        public bool ShowSelectionNormal(nint selectionWindowHandle)
+        {
+            TrackSelectionMutation(selectionWindowHandle);
+            selectionVisible = true;
+            selectionIconic = false;
+            return true;
+        }
+
+        public void ActivateSelection()
+        {
+            MutatedWindowHandles.Add(SelectionWindowHandle);
+        }
+
+        public bool BringSelectionToTop(nint selectionWindowHandle)
+        {
+            TrackSelectionMutation(selectionWindowHandle);
+            return true;
+        }
+
+        public bool TrySetSelectionForeground(nint selectionWindowHandle)
+        {
+            TrackSelectionMutation(selectionWindowHandle);
+            if (DirectForegroundSucceeds)
+            {
+                foregroundHandle = selectionWindowHandle;
+            }
+
+            return DirectForegroundSucceeds;
+        }
+
+        public bool TryAttachInputAndActivate(nint selectionWindowHandle)
+        {
+            TrackSelectionMutation(selectionWindowHandle);
+            if (AttachedForegroundSucceeds)
+            {
+                foregroundHandle = selectionWindowHandle;
+            }
+
+            return AttachedForegroundSucceeds;
+        }
+
+        public bool RaiseSelectionAboveOtherWindows(nint selectionWindowHandle)
+        {
+            TrackSelectionMutation(selectionWindowHandle);
+            if (RaisedForegroundSucceeds)
+            {
+                foregroundHandle = selectionWindowHandle;
+            }
+
+            return RaisedForegroundSucceeds;
+        }
+
+        public void FlashSelection(nint selectionWindowHandle)
+        {
+            TrackSelectionMutation(selectionWindowHandle);
+            FlashUsed = true;
+        }
+
+        private void TrackSelectionMutation(nint windowHandle)
+        {
+            Assert.Equal(SelectionWindowHandle, windowHandle);
+            MutatedWindowHandles.Add(windowHandle);
+        }
+    }
 }

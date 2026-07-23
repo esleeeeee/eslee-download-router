@@ -56,7 +56,9 @@ SQLite 마이그레이션은 `schema_migrations`, `rules`, `download_jobs`, `job
 
 ### WinUI 3 App
 
-Agent와 동일한 Core 라이브러리를 참조하지만 DB나 파일 이동 구현을 직접 호출하지 않고 Named Pipe 명령으로 통신합니다. App은 사용자 범위 mutex로 단일 인스턴스를 유지하는 트레이 호스트이며 `--background`에서는 메인 창을 표시하지 않습니다. 500ms 간격으로 Pending을 읽되 자동 팝업 정책을 통과한 항목만 중복 없는 FIFO `FolderSelectionWindow`로 표시합니다. 선택 창은 메인 창과 독립적이어서 메인 창이 숨김·최소화 상태여도 활성화되며, 포커스 확보 실패 시 작업표시줄 점멸을 사용합니다.
+Agent와 동일한 Core 라이브러리를 참조하지만 DB나 파일 이동 구현을 직접 호출하지 않고 Named Pipe 명령으로 통신합니다. App은 사용자 범위 mutex로 단일 인스턴스를 유지하는 트레이 호스트이며 `--background`에서는 메인 창을 표시하지 않습니다. 500ms 간격으로 Pending을 읽되 자동 팝업 정책을 통과한 항목만 중복 없는 FIFO `FolderSelectionWindow`로 표시합니다. 선택창은 owner 없는 독립 top-level HWND입니다. 표시 때 선택창 HWND만 `SW_SHOWNORMAL`, XAML activate, topmost/bring-to-top, foreground 순으로 처리하고, Windows foreground 제한이 직접 호출을 거부하면 현재 foreground thread와 입력 큐를 잠시 연결해 선택창을 다시 활성화합니다. MainWindow에는 restore를 호출하지 않으며 FlashWindowEx는 모든 활성화 시도가 실패했을 때만 사용합니다.
+
+선택창 전면 진단은 MainWindow와 선택창의 HWND, visible, iconic, owner, foreground 및 Show/Bring/SetForeground 결과만 기록합니다. 다운로드 URL, query, token, 전체 로컬 경로는 기록하지 않습니다.
 
 공통 `FolderTreePicker`는 루트 하나만 먼저 만들고 노드 확장 시 해당 단계의 자식만 비동기로 읽습니다. 로드된 노드를 중복 조회하지 않고, 접근 불가 항목은 노드 단위 오류로 제한하며 reparse point는 선택 경계에서 제외합니다. 팝업, 선택 대기, 이력 경로 변경이 같은 컴포넌트와 Agent 명령을 사용합니다. 규칙의 저장 루트는 경계가 아직 정해지지 않은 선택이므로 HWND로 초기화한 Windows `FolderPicker`를 사용합니다.
 
