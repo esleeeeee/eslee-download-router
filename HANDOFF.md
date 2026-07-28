@@ -1,13 +1,13 @@
 # 다른 PC 인수인계
 
-이 문서와 `PROJECT_STATE.md`를 먼저 읽으면 회사 PC의 빌드 산출물, DB, 사용자 경로 없이 개발을 이어갈 수 있습니다.
+정식 배포 기준은 GitHub의 `main`과 [v1.0.0 Release](https://github.com/esleeeeee/eslee-Download-Router/releases/tag/v1.0.0)입니다. 회사 PC의 빌드 산출물, 사용자 DB, 브라우저 프로필이나 개인 경로 없이 개발을 이어갈 수 있습니다.
 
 ## 기준점
 
 - 저장소: `https://github.com/esleeeeee/eslee-Download-Router.git`
-- 이어서 사용할 브랜치: `feature/initial-spike`(기준 통합 브랜치는 `develop`)
-- 구현 기준 커밋: `9975c47bd0ac64e26fa651dcd8162aac068f73d8` (`feat: bootstrap download router spike`)
-- 원격 상태: `main`, `develop`, `feature/initial-spike` 게시 및 GitHub 플러그인 검증 완료
+- 기본 브랜치: `main`
+- 제품 버전: `1.0.0`
+- 최종 개발 PR: [#1](https://github.com/esleeeeee/eslee-Download-Router/pull/1)
 - .NET SDK: `10.0.302`
 - Node.js: 24 이상
 - npm: 11 이상
@@ -18,54 +18,57 @@
 ```powershell
 git clone https://github.com/esleeeeee/eslee-Download-Router.git
 cd eslee-Download-Router
-git switch feature/initial-spike
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Configuration Release -PublishNativeHost
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\register-native-host.ps1 -Action Register -Browser Edge
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-dev.ps1 -SkipBuild
 ```
 
-Edge에서 `edge://extensions`를 열고 개발자 모드를 켠 뒤 “압축 풀린 확장 로드”에서 `src\DownloadRouter.Extension\dist`를 선택합니다. 다른 브라우저 주소와 절차는 `docs/MANUAL_EXTENSION_INSTALL.md`를 따릅니다.
+일반 사용자 설치 검증은 GitHub Release의 `eslee-download-router-setup.exe`를 사용합니다. 개발 출력으로 검증할 때만 `scripts\register-native-host.ps1`과 `scripts\run-dev.ps1`을 사용하세요.
 
-## 현재 정상 기준
+## 정식 정상 기준
 
-- Debug solution build 성공, 경고 0/오류 0
-- .NET tests 27/27 통과
-- Extension lint/build와 Node tests 4/4 통과
-- Agent Named Pipe ping 성공
-- Native Host self-test 성공
-- App/Agent/Native Host self-contained Release publish 성공
-- 공식 `feature/initial-spike@9975c47` 클린 클론 bootstrap/build/test 성공
+- Debug와 Release build 성공, 경고 0, 오류 0
+- .NET tests 81/81 이상
+- Extension tests 13/13 이상
+- npm audit high 이상 취약점 0건
+- Agent Named Pipe와 Native Host framed ping 성공
+- App, Agent와 Native Host win-x64 self-contained publish 성공
+- App, Agent, Native Host와 Installer 제품 버전 1.0.0 일치
+- QHD 125% Per-Monitor V2, 공통 반응형 폭, 전역 테마와 독립 FolderSelectionWindow
+- Whale  Automatic, SelectSubfolder, 취소, FIFO와 영구 `Skipped`
+- 기존 설치 위 업그레이드에서 DB, 규칙, 이력, Pending, 설정, 테마와 자동 시작 보존
+- 고정 Extension ID `gilicenlclaemgiijcjjejilikbooggj`와 Native Messaging identity 유지
 
-브라우저 수동 검증, installer, UI 시각 검증은 아직 정상 기준에 포함되지 않습니다.
+## 개발자 모드 확장
 
-## 가장 먼저 할 작업
+Release 설치본은 `%LOCALAPPDATA%\Programs\eslee\DownloadRouter\extension`에 Extension을 설치합니다. Whale의 `whale://extensions`에서 개발자 모드를 켜고 이 폴더를 압축 해제된 확장으로 로드합니다. Native Messaging 등록은 Installer가 처리하므로 사용자가 레지스트리를 직접 수정하지 않습니다.
 
-Edge에서 실제 확장 -> Native Host -> Agent ping과 다운로드 이벤트를 확인하세요. 성공/실패 로그를 `docs/BROWSER_COMPATIBILITY.md`에 기록하고, 실패하면 `scripts\diagnose.ps1`과 Native Host `-Action Status` 결과부터 확인합니다.
-
-그 다음 자동 규칙, 미매칭 fail-open, 직접 선택 묶음, 중복 이름, 취소/중단 순서로 검증합니다.
+개발 clone에서는 `src\DownloadRouter.Extension\dist`를 로드합니다. 자세한 브라우저별 주소와 절차는 [docs/MANUAL_EXTENSION_INSTALL.md](docs/MANUAL_EXTENSION_INSTALL.md)를 따릅니다.
 
 ## PC별로 다시 지정할 항목
 
-- 규칙의 저장 루트 또는 `{Downloads}`, `{Documents}` 같은 토큰 경로
+- 규칙의 저장 root 또는 `{Downloads}`, `{Documents}` 같은 토큰 경로
 - 브라우저별 개발자 모드 확장 로드
-- Native Host HKCU 등록
-- 필요 시 기업 정책 허용 여부
+- 회사 정책의 Native Messaging과 개발자 모드 허용 여부
 
-회사 PC의 사용자명, 절대 저장 경로, DB, 로그, 브라우저 프로필, 인증정보는 저장소에 없으며 가져올 필요가 없습니다.
+사용자명, 절대 저장 경로, DB, 로그, 브라우저 프로필과 인증정보는 저장소에 포함하지 않습니다.
 
-## 작업 종료 절차
+## 변경 작업 절차
 
-1. build, test, 가능한 브라우저 시나리오 실행
-2. `PROJECT_STATE.md`, 이 문서, `CHANGELOG.md`, 브라우저 표 갱신
-3. `git diff --check`, `git diff`, `git status` 검토
-4. 의미 있는 커밋 후 공식 origin으로 push
-5. GitHub에서 원격 브랜치 커밋 확인
-6. Notion의 전체이력 요약과 프로젝트 상세 이력 갱신
-7. 로컬에만 남은 필수 파일이 없는지 확인
+1. `main` 최신 상태에서 별도 기능 브랜치를 만듭니다.
+2. Core, Infrastructure, Agent, App 또는 Extension 순서로 필요한 최소 범위만 변경합니다.
+3. Debug와 Release build, 전체 테스트와 관련 실제 브라우저 시나리오를 수행합니다.
+4. `PROJECT_STATE.md`, `CHANGELOG.md`, `TESTING.md`와 브라우저 기록을 갱신합니다.
+5. `git diff --check`, `git diff`, `git status`를 검토합니다.
+6. PR과 GitHub Actions가 성공한 뒤 main에 병합합니다.
+7. 제품 버전을 바꾸는 경우 최종 main commit에서 Installer를 다시 생성하고 Release asset과 SHA-256을 검증합니다.
 
-## 로컬 설정 잔존 여부
+## 로컬 전용 항목
 
-현재 필수 구현 파일은 모두 저장소 안에 있습니다. 테스트·게시 산출물, `node_modules`, LocalAppData DB/로그와 Native Host manifest는 의도적으로 제외됩니다.
+다음 항목은 의도적으로 Git에서 제외합니다.
+
+- `artifacts` 빌드, 테스트와 Installer 산출물
+- `node_modules`
+- `%LOCALAPPDATA%\eslee\DownloadRouter` 사용자 DB, 설정, 로그와 Native Host manifest
+- 실제 다운로드 fixture와 브라우저 프로필

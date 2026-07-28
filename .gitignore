@@ -8,6 +8,7 @@ TestResults/
 
 # Node
 node_modules/
+build-tests/
 *.tsbuildinfo
 
 # Local application data

@@ -33,6 +33,19 @@ public enum StorageMode
     SelectSubfolder,
 }
 
+public enum WindowCloseBehavior
+{
+    MinimizeToTray,
+    ExitApplication,
+}
+
+public enum AppThemePreference
+{
+    System,
+    Light,
+    Dark,
+}
+
 public enum DownloadJobStatus
 {
     Detected,
@@ -45,6 +58,27 @@ public enum DownloadJobStatus
     Failed,
     Cancelled,
     Interrupted,
+    Skipped,
+}
+
+public enum BrowserTransferState
+{
+    InProgress,
+    Complete,
+    Cancelled,
+    Interrupted,
+}
+
+public enum RoutingState
+{
+    WaitingForSelection,
+    SelectionReady,
+    Moving,
+    RetryPending,
+    Completed,
+    Skipped,
+    Failed,
+    NotRequired,
 }
 
 public sealed record DownloadRule(
@@ -92,11 +126,44 @@ public sealed record DownloadJob(
     string? OriginalPath,
     string? FinalPath,
     string? SelectedRelativeFolder,
-    DownloadJobStatus Status,
+    BrowserTransferState BrowserState,
+    RoutingState RoutingState,
     string? ErrorCode,
     string? ErrorMessage,
     DateTimeOffset CreatedAt,
-    DateTimeOffset? CompletedAt);
+    DateTimeOffset? CompletedAt,
+    DateTimeOffset? LastBrowserEventAt = null,
+    bool IsBrowserRecordStale = false)
+{
+    public DownloadJobStatus Status
+        => BrowserState switch
+        {
+            BrowserTransferState.Cancelled => DownloadJobStatus.Cancelled,
+            BrowserTransferState.Interrupted => DownloadJobStatus.Interrupted,
+            _ => RoutingState switch
+            {
+                RoutingState.WaitingForSelection => DownloadJobStatus.WaitingForSelection,
+                RoutingState.SelectionReady when BrowserState == BrowserTransferState.InProgress => DownloadJobStatus.WaitingForDownload,
+                RoutingState.SelectionReady => DownloadJobStatus.ReadyToMove,
+                RoutingState.Moving => DownloadJobStatus.Moving,
+                RoutingState.RetryPending => DownloadJobStatus.RetryPending,
+                RoutingState.Completed => DownloadJobStatus.Completed,
+                RoutingState.Skipped => DownloadJobStatus.Skipped,
+                RoutingState.Failed => DownloadJobStatus.Failed,
+                RoutingState.NotRequired when BrowserState == BrowserTransferState.InProgress => DownloadJobStatus.WaitingForDownload,
+                RoutingState.NotRequired => DownloadJobStatus.ReadyToMove,
+                _ => DownloadJobStatus.Detected,
+            },
+        };
+
+    public bool IsSelectionPending
+        => BrowserState is BrowserTransferState.InProgress or BrowserTransferState.Complete
+            && RoutingState == RoutingState.WaitingForSelection;
+
+    public bool IsTerminal
+        => BrowserState is BrowserTransferState.Cancelled or BrowserTransferState.Interrupted
+            || RoutingState is RoutingState.Completed or RoutingState.Skipped or RoutingState.Failed;
+}
 
 public sealed record AgentCommand(
     int Version,
@@ -134,27 +201,72 @@ public sealed record DownloadChangedPayload(
     string DownloadId,
     string State,
     string? FilePath,
-    string? Error);
+    string? Error,
+    string? FileName = null,
+    bool IsReconciliation = false);
+
+public sealed record DownloadMetadataChangedPayload(
+    string Browser,
+    string DownloadId,
+    string? FilePath,
+    string? FileName);
 
 public sealed record SelectionCompletedPayload(
     IReadOnlyList<Guid> JobIds,
     string RelativeFolder);
+
+public sealed record SelectionSkippedPayload(Guid JobId);
+
+public sealed record SelectionsSkippedPayload(IReadOnlyList<Guid> JobIds);
+
+public sealed record JobRouteChangePayload(
+    Guid JobId,
+    string RelativeFolder,
+    bool ConfirmCompletedMove = false);
+
+public sealed record JobsDeletePayload(IReadOnlyList<Guid> JobIds);
+
+public sealed record RuleDeletePayload(Guid RuleId);
+
+public sealed record ActiveDownloadsPayload(string Browser);
+
+public sealed record ActiveBrowserDownload(Guid JobId, string DownloadId);
+
+public sealed record DashboardCounts(
+    int DownloadsInProgress,
+    int WaitingForSelection,
+    int RecentlyCompleted,
+    int CancelledOrInterrupted,
+    int RetryOrFailed);
 
 public static class ProtocolConstants
 {
     public const int CurrentVersion = 1;
     public const int MaximumMessageBytes = 1024 * 1024;
     public const string AgentPipeName = "eslee.download-router.agent.v1";
+    public const string AppMutexName = "Local\\eslee.DownloadRouter.App";
+    public const string AppActivationEventName = "Local\\eslee.DownloadRouter.App.Activate";
+    public const string AppShutdownEventName = "Local\\eslee.DownloadRouter.App.Shutdown";
+    public const string AgentShutdownEventName = "Local\\eslee.DownloadRouter.Agent.Shutdown";
 
     public static readonly ISet<string> AllowedCommands = new HashSet<string>(StringComparer.Ordinal)
     {
         "ping",
         "download.started",
+        "download.metadata",
         "download.changed",
+        "download.cancelled",
+        "download.interrupted",
         "rules.list",
         "rules.upsert",
+        "rules.delete",
         "jobs.list",
+        "jobs.delete",
+        "downloads.active",
         "selection.complete",
+        "selection.skip",
+        "selection.skip-many",
+        "route.change",
         "job.retry",
         "diagnostics.status",
     };

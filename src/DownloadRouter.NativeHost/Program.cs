@@ -113,8 +113,8 @@ static bool TryStartAgent()
         Process.Start(new ProcessStartInfo
         {
             FileName = Path.GetFullPath(candidate),
-            UseShellExecute = false,
-            CreateNoWindow = true,
+            UseShellExecute = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
             WorkingDirectory = Path.GetDirectoryName(Path.GetFullPath(candidate))!,
         });
         return true;
