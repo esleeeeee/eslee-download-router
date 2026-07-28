@@ -41,6 +41,7 @@ public sealed class TrayIconHost : IDisposable
     private readonly string windowClassName = $"eslee.DownloadRouter.Tray.{Environment.ProcessId}";
     private nint windowHandle;
     private nint menuHandle;
+    private nint trayIconHandle;
     private bool disposed;
 
     public TrayIconHost(
@@ -79,6 +80,12 @@ public sealed class TrayIconHost : IDisposable
         disposed = true;
         var data = CreateIconData(0);
         _ = ShellNotifyIcon(NimDelete, ref data);
+        if (trayIconHandle != 0)
+        {
+            _ = DestroyIcon(trayIconHandle);
+            trayIconHandle = 0;
+        }
+
         Instances.TryRemove(windowHandle, out _);
         if (menuHandle != 0)
         {
@@ -136,12 +143,32 @@ public sealed class TrayIconHost : IDisposable
 
     private void AddIcon()
     {
+        var executablePath = Environment.ProcessPath
+            ?? throw new InvalidOperationException("The application executable path is unavailable.");
+        if (ExtractIconEx(executablePath, 0, out var largeIcon, out var smallIcon, 1) == 0)
+        {
+            throw new InvalidOperationException("The application icon could not be extracted.");
+        }
+
+        trayIconHandle = smallIcon != 0 ? smallIcon : largeIcon;
+        if (trayIconHandle == 0)
+        {
+            throw new InvalidOperationException("The application icon resource was empty.");
+        }
+
+        if (smallIcon != 0 && largeIcon != 0)
+        {
+            _ = DestroyIcon(largeIcon);
+        }
+
         var data = CreateIconData(NifMessage | NifIcon | NifTip);
         data.CallbackMessage = TrayMessage;
-        data.Icon = LoadIcon(0, new nint(32512));
+        data.Icon = trayIconHandle;
         data.Tip = "eslee Download Router";
         if (!ShellNotifyIcon(NimAdd, ref data))
         {
+            _ = DestroyIcon(trayIconHandle);
+            trayIconHandle = 0;
             throw new InvalidOperationException("The system tray icon could not be created.");
         }
 
@@ -323,9 +350,18 @@ public sealed class TrayIconHost : IDisposable
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetForegroundWindow(nint window);
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern nint LoadIcon(nint instance, nint iconName);
-
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     private static extern nint GetModuleHandle(string? moduleName);
+
+    [DllImport("shell32.dll", EntryPoint = "ExtractIconExW", CharSet = CharSet.Unicode)]
+    private static extern uint ExtractIconEx(
+        string file,
+        int iconIndex,
+        out nint largeIcon,
+        out nint smallIcon,
+        uint iconCount);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DestroyIcon(nint icon);
 }

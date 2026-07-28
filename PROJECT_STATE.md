@@ -4,7 +4,7 @@
 
 ## 요약
 
-- 현재 단계: Phase 0 완료, Phase 1 기술 스파이크 완료, 핵심 기능 개발 중
+- 현재 단계: 0.3.3 최종 branding·설치 검증 완료, PR #1 Ready for review 준비
 - 공식 저장소: https://github.com/esleeeeee/eslee-Download-Router
 - 게시 브랜치: `main`, `develop`, `feature/initial-spike` — 세 브랜치 모두 공식 원격에 생성 완료
 - 작업 브랜치: `feature/initial-spike`, 기존 Draft PR #1에서 후속 변경 추적
@@ -42,15 +42,16 @@
 - 실패할 때만 분류 코드를 남기는 Extension Native Messaging 진단 로그
 - Per-Monitor V2 WinUI 렌더링, 뷰포트 실폭 제한, 32/48 DIP 공통 상단 여백, 1초 상태 변경 감지
 - 저장된 System/Light/Dark를 열린 모든 Window와 이후 생성 Window에 적용하는 공통 ThemeManager
-- assembly informational version을 표시하는 정보 화면과 `Directory.Build.props` 기반 App/Agent/Native Host/Installer 단일 0.3.2 버전
-- self-contained win-x64 publish와 설치/업그레이드가 검증된 per-user Inno Setup 0.3.2
+- assembly informational version을 표시하는 정보 화면과 `Directory.Build.props` 기반 App/Agent/Native Host/Installer 단일 0.3.3 버전
+- eslee 로고, 폴더, cyan 다운로드/분기 경로와 gold node를 사용한 전용 master PNG, 9-size ICO, Extension PNG와 App/트레이/Installer 공통 branding
+- self-contained win-x64 publish와 설치/업그레이드가 검증된 per-user Inno Setup 0.3.3
 
 ## 빌드와 테스트
 
 | 항목 | 결과 |
 |---|---|
 | `.NET Debug build` | 성공, 경고 0, 오류 0 |
-| `.NET tests` | 80/80 통과(Core 47, Infrastructure 8, Integration 25) |
+| `.NET tests` | 81/81 통과(Core 48, Infrastructure 8, Integration 25) |
 | Extension ESLint/TypeScript build | 성공 |
 | Extension Node tests | 13/13 통과 |
 | Agent Named Pipe ping | 성공 |
@@ -60,7 +61,7 @@
 | WinUI QHD 125% | 수정 전 DPI Unaware/96 → 수정 후 Per-Monitor V2/120 확인 |
 | WinUI 반응형 폭 | 900px 창에서 우측 넘침 0, 2400px 창에서 1100 DIP 폼 중앙 정렬 확인 |
 | clean clone | 공식 `feature/initial-spike@9975c47`에서 bootstrap/build/test 성공 |
-| Installer compile/install/upgrade/uninstall | 0.3.2 compile·기존 설치 위 upgrade 성공. 사용자 규칙 3, 이력 49, Pending 28, terminal 21과 설정 SHA-256 보존 |
+| Installer compile/install/upgrade/uninstall | 0.3.3 compile·기존 설치 위 upgrade 성공. 사용자 DB·규칙·이력·설정과 자동 시작 보존 |
 
 ## 브라우저 검증
 
@@ -75,7 +76,7 @@
 
 Whale 에서 로컬 HTTP fixture로 Automatic과 SelectSubfolder를 실제 검증했습니다. Automatic은 C: 기본 다운로드 위치에서 D: 테스트 규칙 루트로 교차 볼륨 이동했고, SelectSubfolder는 테스트 루트에서 `kr → 모야지`만 확장·선택해 이동했습니다. 100자 이상 노드를 표시하고 복귀해도 선택 창 폭은 700px(125%의 560 DIP)로 동일했습니다. 0.3.0 사용자 검증에서 트레이 숨김은 통과했지만 최소화 상태는 선택창이 Whale 뒤에 남는 회귀가 확인됐고, 0.3.1에서 선택창 HWND 전용 foreground/입력 스레드 재시도와 topmost 정책으로 수정했습니다. 2026-07-23에는 아무 선택 없음/선택 완료/나중에 선택/이동 안 함 네 실제 Whale 취소가 모두 약 0.24초 안에 `Cancelled`로 반영되고 팝업·Pending·이동 0건과 이력 취소선을 확인했습니다.
 
-2026-07-28에는 설치된 0.3.2 App·Agent·Native Host와 별도 Whale 프로필로 개별 `이번 파일은 이동하지 않기`, 2건 `모두 선택 안 함`, Whale 완전 종료·재실행, App/Agent 재시작을 검증했습니다. 처리 Job은 모두 `Complete / Skipped`, terminal로 유지되고 재팝업은 0건이었습니다. 실제 미결정 신규 Job은 `Complete / WaitingForSelection`과 팝업을 유지했습니다. Whale 다운로드 기록 UI에서 취소한 Job은 Agent 수신 후 17ms에 선택창이 닫히고 `Cancelled / NotRequired`로 분리됐습니다. 사용자가 설치한 환경에서의 직접 재검증은 아직 남아 있으므로 해결 완료로 확정하지 않습니다.
+2026-07-28에는 설치된 App·Agent·Native Host와 별도 Whale 프로필로 개별 `이번 파일은 이동하지 않기`, 2건 `모두 선택 안 함`, Whale 완전 종료·재실행, App/Agent 재시작을 검증했습니다. 처리 Job은 모두 `Complete / Skipped`, terminal로 유지되고 재팝업은 0건이었습니다. 실제 미결정 신규 Job은 `Complete / WaitingForSelection`과 팝업을 유지했습니다. Whale 다운로드 기록 UI에서 취소한 Job은 Agent 수신 후 17ms에 선택창이 닫히고 `Cancelled / NotRequired`로 분리됐습니다. 이후 사용자가 자신의 실제 Whale 프로필에서도 Whale 완전 종료·재실행 뒤 처리한 선택 팝업이 재등장하지 않음을 직접 확인했습니다.
 
 ## 알려진 문제와 제한
 
@@ -88,7 +89,7 @@ Whale 에서 로컬 HTTP fixture로 Automatic과 SelectSubfolder를 실제 검�
 - 브라우저 자체 “다운로드 전에 저장 위치 확인” 설정 감지와 안내는 문서만 있고 UI 자동 감지는 미구현입니다.
 - QHD 125% 실제 실행과 좁은/넓은 창 시각·경계 검증은 완료했습니다. Windows 100%/150%, FHD/4K 실기기와 키보드/스크린리더 접근성 검증은 남아 있습니다.
 - 전역 테마의 매핑·저장·fallback은 자동 검증했습니다. 실제 QHD 125%의 다크/라이트 전환, 선택 창, 트레이 복원, 재실행 검증 결과는 아래 최신 설치본 검증 기록을 기준으로 하며 100%/150% 실기기 전환은 남아 있습니다.
-- HKCU 자동 시작 명령과 백그라운드 실행은 확인했지만 실제 로그아웃/로그인 또는 재부팅은 수행하지 않았습니다.
+- 사용자가 실제 Windows 재부팅과 로그인 후 eslee Download Router 자동 시작 및 재부팅 이후 정상 동작을 직접 확인했습니다.
 - 설치 파일은 코드 서명되지 않았습니다.
 
 ## 보류된 결정

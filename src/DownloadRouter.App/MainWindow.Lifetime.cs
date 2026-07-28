@@ -21,6 +21,7 @@ public sealed partial class MainWindow
         var handle = WinRT.Interop.WindowNative.GetWindowHandle(this);
         var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(handle);
         appWindow = AppWindow.GetFromWindowId(windowId);
+        ProductBranding.ApplyWindowIcon(appWindow);
         appWindow.Closing += AppWindow_Closing;
         trayIcon = new TrayIconHost(
             DispatcherQueue,

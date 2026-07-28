@@ -2,7 +2,7 @@
 
 Chromium 기반 브라우저에서 완료된 다운로드를 사이트 규칙에 따라 Windows 폴더로 분류하는 로컬 전용 애플리케이션입니다. 규칙이 없거나 로컬 구성 요소가 응답하지 않으면 브라우저의 원래 다운로드를 그대로 유지하는 fail-open 방식을 사용합니다.
 
-> 현재 상태: 핵심 라우팅, 계층형 폴더 선택, 트레이 상주, 로그인 자동 시작, 규칙/이력 관리와 사용자 단위 설치 흐름을 구현했습니다. 30분 자동 팝업 정책, 영구 개별/일괄 이동 안 함, Whale 취소 재조정, 최소화 상태 선택창 전면 활성화, 전역 System/Light/Dark 테마와 단일 0.3.2 제품 버전 체계를 포함합니다. 자세한 결과와 남은 제약은 [PROJECT_STATE.md](PROJECT_STATE.md)를 확인하세요.
+> 현재 상태: 핵심 라우팅, 계층형 폴더 선택, 트레이 상주, 로그인 자동 시작, 규칙/이력 관리와 사용자 단위 설치 흐름을 구현했습니다. 30분 자동 팝업 정책, 영구 개별/일괄 이동 안 함, Whale 취소 재조정, 최소화 상태 선택창 전면 활성화, 전역 System/Light/Dark 테마와 eslee 전용 branding을 적용한 단일 0.3.3 제품 버전 체계를 포함합니다. 자세한 결과와 남은 제약은 [PROJECT_STATE.md](PROJECT_STATE.md)를 확인하세요.
 
 ## 구성 요소
 
@@ -77,6 +77,7 @@ PowerShell 실행 정책이 로컬 스크립트를 막는 경우 예시처럼 `p
 - `src/DownloadRouter.NativeHost`: 최소 권한 Native Messaging 브리지
 - `src/DownloadRouter.App`: WinUI 3 설정 및 대기 작업 UI
 - `src/DownloadRouter.Extension`: TypeScript Manifest V3 확장
+- `assets/branding`: 제품 master PNG와 multi-resolution Windows ICO
 - `tests`: .NET 단위·기능·통합 테스트
 - `installer`: 사용자 단위 Inno Setup 정의
 - `scripts`: 복원, 빌드, 테스트, 게시, 등록, 진단 자동화
@@ -106,7 +107,7 @@ SelectSubfolder 자동 팝업은 생성 또는 마지막 실시간 브라우저 
 
 - Chromium downloads API가 다운로드 시작 탭 URL을 직접 제공하지 않으므로, 신뢰할 수 없는 활성 탭 추측은 하지 않습니다. 제공되는 referrer, 최초 URL, 최종 URL을 분리해 사용합니다.
 - 폴더 트리는 lazy loading과 선택 노드 새로 고침을 지원하지만 새 폴더 만들기는 제공하지 않습니다.
-- Windows 로그아웃/로그인 또는 재부팅 자체는 작업 환경을 중단하므로 수행하지 않았습니다. HKCU Run 등록과 `--background` 실행은 각각 확인했습니다.
+- 실제 Windows 재부팅과 로그인 후 자동 시작 및 정상 동작은 사용자 환경에서 확인했습니다.
 - `System` 테마는 WinUI의 `ElementTheme.Default`를 사용합니다. Windows 앱 테마 실시간 변경은 WinUI 알림에 따르며, 최소한 다음 창 생성과 App 재시작 시에는 현재 시스템 값을 반영합니다.
 - UI는 QHD 125%에서 실제 검증했습니다. FHD/4K와 Windows 100%/150%는 Per-Monitor V2/DIP 구조 및 좁은·넓은 창 경계 테스트만 완료했고 물리 디스플레이 전환 검증은 남아 있습니다.
 - Edge·Chrome·Brave·Vivaldi·Opera의 실제 다운로드는 아직 수동 검증하지 않았습니다.

@@ -7,6 +7,7 @@ using DownloadRouter.Core.Settings;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Diagnostics;
+using System.Text.Json;
 using System.Xml.Linq;
 
 namespace DownloadRouter.Core.Tests;
@@ -258,6 +259,71 @@ public sealed class ProtocolAndStateTests
         Assert.DoesNotContain("#define AppVersion \"", installerSource, StringComparison.Ordinal);
         Assert.Contains("Directory.Build.props", installerBuild, StringComparison.Ordinal);
         Assert.Contains("/DAppVersion=", installerBuild, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BrandingAssetsAreValidAndWiredToEveryUserVisibleSurface()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var iconPath = Path.Combine(repositoryRoot, "assets", "branding", "eslee-download-router.ico");
+        var appProject = File.ReadAllText(
+            Path.Combine(repositoryRoot, "src", "DownloadRouter.App", "DownloadRouter.App.csproj"));
+        var installerSource = File.ReadAllText(
+            Path.Combine(repositoryRoot, "installer", "DownloadRouter.iss"));
+        var mainWindowLifetime = File.ReadAllText(
+            Path.Combine(repositoryRoot, "src", "DownloadRouter.App", "MainWindow.Lifetime.cs"));
+        var selectionWindow = File.ReadAllText(
+            Path.Combine(repositoryRoot, "src", "DownloadRouter.App", "FolderSelectionWindow.cs"));
+        var productBranding = File.ReadAllText(
+            Path.Combine(repositoryRoot, "src", "DownloadRouter.App", "ProductBranding.cs"));
+        var extensionRoot = Path.Combine(repositoryRoot, "src", "DownloadRouter.Extension");
+        using var manifest = JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(extensionRoot, "manifest.json")));
+
+        Assert.Contains(
+            @"<ApplicationIcon>..\..\assets\branding\eslee-download-router.ico</ApplicationIcon>",
+            appProject,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            @"SetupIconFile=..\assets\branding\eslee-download-router.ico",
+            installerSource,
+            StringComparison.Ordinal);
+        Assert.Contains("ProductBranding.ApplyWindowIcon(appWindow)", mainWindowLifetime, StringComparison.Ordinal);
+        Assert.Contains("ProductBranding.ApplyWindowIcon(appWindow)", selectionWindow, StringComparison.Ordinal);
+        Assert.Contains("ApplicationIconResourceId = 32512", productBranding, StringComparison.Ordinal);
+
+        var expectedExtensionSizes = new[] { 16, 32, 48, 128 };
+        var icons = manifest.RootElement.GetProperty("icons");
+        foreach (var size in expectedExtensionSizes)
+        {
+            var relativePath = icons.GetProperty(size.ToString()).GetString();
+            Assert.Equal($"icons/icon-{size}.png", relativePath);
+            Assert.True(File.Exists(Path.Combine(extensionRoot, relativePath!)));
+        }
+
+        using var stream = File.OpenRead(iconPath);
+        using var reader = new BinaryReader(stream);
+        Assert.Equal(0, reader.ReadUInt16());
+        Assert.Equal(1, reader.ReadUInt16());
+        var count = reader.ReadUInt16();
+        Assert.Equal(9, count);
+
+        var actualSizes = new List<int>();
+        for (var index = 0; index < count; index++)
+        {
+            var width = reader.ReadByte();
+            var height = reader.ReadByte();
+            _ = reader.ReadByte();
+            _ = reader.ReadByte();
+            Assert.Equal(1, reader.ReadUInt16());
+            Assert.Equal(32, reader.ReadUInt16());
+            Assert.True(reader.ReadUInt32() > 0);
+            Assert.True(reader.ReadUInt32() > 0);
+            actualSizes.Add(width == 0 ? 256 : width);
+            Assert.Equal(width, height);
+        }
+
+        Assert.Equal(new[] { 16, 20, 24, 32, 40, 48, 64, 128, 256 }, actualSizes);
     }
 
     private static string FindRepositoryRoot()

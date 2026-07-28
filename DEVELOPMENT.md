@@ -66,6 +66,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-installer.ps
 
 제품 버전은 `Directory.Build.props`의 `VersionPrefix` 한 곳에서만 변경합니다. build/publish는 가능한 경우 Git HEAD를 `SourceRevisionId`로 전달하고 정보 화면은 informational version을 읽습니다. `build-installer.ps1`은 App/Agent/Native Host ProductVersion이 VersionPrefix와 일치하지 않으면 Inno Setup 실행 전에 실패합니다. `DownloadRouter.iss`에 버전을 직접 하드코딩하지 마세요.
 
+## 브랜딩 자산
+
+- master 원본은 `assets/branding/eslee-download-router.png`이며 생성된 `eslee-download-router.ico`와 함께 소스 관리합니다.
+- `scripts/generate-branding-assets.ps1`은 master PNG를 변경하지 않고 16/20/24/32/40/48/64/128/256px ICO와 Extension 16/32/48/128px PNG를 재생성합니다.
+- App EXE는 `ApplicationIcon`, MainWindow/FolderSelectionWindow는 embedded group icon ID, Installer는 `SetupIconFile`을 통해 같은 ICO를 사용합니다. 트레이는 현재 App EXE의 small icon을 추출하며 HICON lifetime을 직접 관리합니다.
+- Extension `key`와 고정 ID `gilicenlclaemgiijcjjejilikbooggj`는 branding 변경과 무관하게 유지합니다. `manifest.json`의 별도 확장 버전은 제품 assembly 버전과 자동 동기화하지 않습니다.
+- 아이콘을 갱신한 뒤에는 App/Installer embedded resource, Start Menu shortcut target, 실행 창·작업표시줄·트레이, Extension `dist/icons`를 실제 산출물에서 확인합니다.
+
 ## 트레이, 자동 시작, 선택 창
 
 - App은 단일 인스턴스이며 `--background`에서 메인 창을 숨긴 채 트레이와 Agent만 준비합니다.

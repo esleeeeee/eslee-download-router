@@ -6,13 +6,15 @@
 
 ### Added
 
+- 1024px master PNG에서 재현 가능하게 생성하는 9-size Windows ICO와 Chromium 16/32/48/128px 아이콘
+- App/창/작업표시줄/트레이, Inno Setup/바로가기/제거 항목, Whale Extension에 통일된 eslee Download Router 전용 branding
 - 선택창 전면 표시 전후의 MainWindow/FolderSelectionWindow HWND, visible, iconic, owner, foreground와 native 호출 결과를 남기는 경로·URL 비포함 진단
 - 숨김/최소화 MainWindow, iconic 선택창 복원, foreground fallback, FIFO 취소 제거를 검증하는 Core 회귀 테스트
 - 30분 자동 팝업 정책, 이전 세션 대기 작업 안내와 선택 창의 영구 `모두 선택 안 함`
 - 현재 FIFO의 1~1000개 Job을 한 SQLite transaction에서 terminal `Skipped`로 저장하는 `selection.skip-many`와 규칙별 stale Pending 정리 UI
 - Extension `download.cancelled`/`download.interrupted`, 시작 시 complete/interrupted/in_progress/stale 재조정과 정제된 연결 진단
 - 전역 `ThemeManager`, System/Light/Dark 사용자 설정 저장과 열린/새 Window 즉시 적용
-- 정보 화면 제품명·0.3.2 버전·commit·설치형/개발 빌드 표시, 데이터 폴더/GitHub 열기
+- 정보 화면 제품명·0.3.3 버전·commit·설치형/개발 빌드 표시, 데이터 폴더/GitHub 열기
 - `Directory.Build.props` 단일 버전 원본과 App/Agent/Native Host/Installer 일치 검증
 
 - .NET 10/WinUI 3 모노레포와 재현 가능한 bootstrap/build/test/publish 스크립트
@@ -38,6 +40,8 @@
 
 ### Changed
 
+- App/Agent/Native Host/Installer 단일 제품 버전을 최종 branding 배포판 0.3.3으로 갱신
+- 트레이가 Windows 기본 아이콘 대신 App EXE의 embedded small icon을 추출해 사용하고 종료 시 HICON을 해제
 - 취소 상태는 선택 여부와 관계없이 `Cancelled`가 되고 Waiting/SelectionReady 라우팅은 `NotRequired`로 종료
 - UI 상태 갱신 주기를 500ms로 줄여 취소 후 팝업·Pending·이력을 1초 이내 반영
 - 브라우저 기록에서 찾지 못한 진행 작업은 취소로 추측하지 않고 stale 진단 상태로 보존하며 자동 팝업에서 제외

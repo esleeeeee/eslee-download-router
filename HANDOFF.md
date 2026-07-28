@@ -32,14 +32,14 @@ Edge에서 `edge://extensions`를 열고 개발자 모드를 켠 뒤 “압축 �
 ## 현재 정상 기준
 
 - Debug solution build 성공, 경고 0/오류 0
-- .NET tests 80/80 통과(Core 47, Infrastructure 8, Integration 25)
+- .NET tests 81/81 통과(Core 48, Infrastructure 8, Integration 25)
 - Extension lint/build와 Node tests 13/13 통과
 - Agent Named Pipe ping 성공
 - Native Host self-test 성공
 - App/Agent/Native Host self-contained Release publish 성공
-- QHD 125% Per-Monitor V2, 900×850 수평 넘침 0, 파일별 SelectSubfolder, 최소화 상태 전면 활성화, 30분 팝업 정책, 영구 개별/일괄 이동 안 함, 전역 테마와 0.3.2 버전 체계 검증
+- QHD 125% Per-Monitor V2, 900×850 수평 넘침 0, 파일별 SelectSubfolder, 최소화 상태 전면 활성화, 30분 팝업 정책, 영구 개별/일괄 이동 안 함, 전역 테마와 전용 branding을 포함한 0.3.3 버전 체계 검증
 
-Whale  격리 프로필에서 개별 `Skipped`, 2건 `selection.skip-many`, Whale/App/Agent 재시작 후 팝업 0, 실제 미결정 Pending 팝업, 브라우저 UI 취소 후 17ms 내 선택창 닫힘을 설치본으로 확인했습니다. 기존 사용자 DB의 stale Pending 28건은 과거 `모두 나중에 선택`에 대한 행별 영속 증거가 없어 자동 변환하지 않았습니다. 대기 탭의 규칙별 확인 버튼으로만 안전하게 정리합니다. 사용자 직접 0.3.2 재검증 전에는 최종 해결로 확정하지 않습니다.
+Whale  격리 프로필에서 개별 `Skipped`, 2건 `selection.skip-many`, Whale/App/Agent 재시작 후 팝업 0, 실제 미결정 Pending 팝업, 브라우저 UI 취소 후 17ms 내 선택창 닫힘을 설치본으로 확인했습니다. 기존 사용자 DB의 stale Pending 28건은 과거 `모두 나중에 선택`에 대한 행별 영속 증거가 없어 자동 변환하지 않았습니다. 대기 탭의 규칙별 확인 버튼으로만 안전하게 정리합니다. 사용자는 실제 Whale 프로필 재시작과 Windows 재부팅 후 자동 시작·정상 동작도 직접 확인했습니다.
 
 Whale Automatic 규칙, 다른 Chromium 브라우저, installer, 100%/150% 및 FHD/4K 시각 검증은 아직 정상 기준에 포함되지 않습니다.
 

@@ -20,6 +20,7 @@ OutputDir=..\artifacts\installer
 OutputBaseFilename=eslee-download-router-setup
 Compression=lzma2
 SolidCompression=yes
+SetupIconFile=..\assets\branding\eslee-download-router.ico
 UninstallDisplayIcon={app}\DownloadRouter.App.exe
 DisableProgramGroupPage=yes
 WizardStyle=modern

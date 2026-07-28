@@ -194,6 +194,7 @@ public sealed class FolderSelectionWindow(
         var handle = WinRT.Interop.WindowNative.GetWindowHandle(window);
         var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(handle);
         var appWindow = AppWindow.GetFromWindowId(windowId);
+        ProductBranding.ApplyWindowIcon(appWindow);
         var dpi = Math.Max(96u, GetDpiForWindow(handle));
         var scale = dpi / 96d;
         var displayArea = DisplayArea.GetFromWindowId(windowId, DisplayAreaFallback.Primary);
