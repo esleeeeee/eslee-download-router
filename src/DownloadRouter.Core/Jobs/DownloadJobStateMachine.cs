@@ -4,32 +4,53 @@ namespace DownloadRouter.Core.Jobs;
 
 public sealed class DownloadJobStateMachine
 {
-    private static readonly IReadOnlyDictionary<DownloadJobStatus, ISet<DownloadJobStatus>> AllowedTransitions
-        = new Dictionary<DownloadJobStatus, ISet<DownloadJobStatus>>
+    private static readonly IReadOnlyDictionary<BrowserTransferState, ISet<BrowserTransferState>> AllowedBrowserTransitions
+        = new Dictionary<BrowserTransferState, ISet<BrowserTransferState>>
         {
-            [DownloadJobStatus.Detected] = Set(DownloadJobStatus.WaitingForDownload, DownloadJobStatus.WaitingForSelection, DownloadJobStatus.Cancelled, DownloadJobStatus.Failed),
-            [DownloadJobStatus.WaitingForDownload] = Set(DownloadJobStatus.ReadyToMove, DownloadJobStatus.WaitingForSelection, DownloadJobStatus.Cancelled, DownloadJobStatus.Interrupted, DownloadJobStatus.Failed),
-            [DownloadJobStatus.WaitingForSelection] = Set(DownloadJobStatus.WaitingForDownload, DownloadJobStatus.ReadyToMove, DownloadJobStatus.Cancelled, DownloadJobStatus.Interrupted, DownloadJobStatus.Failed),
-            [DownloadJobStatus.ReadyToMove] = Set(DownloadJobStatus.Moving, DownloadJobStatus.Cancelled, DownloadJobStatus.Failed),
-            [DownloadJobStatus.Moving] = Set(DownloadJobStatus.Completed, DownloadJobStatus.RetryPending, DownloadJobStatus.Failed),
-            [DownloadJobStatus.RetryPending] = Set(DownloadJobStatus.ReadyToMove, DownloadJobStatus.Moving, DownloadJobStatus.Failed),
-            [DownloadJobStatus.Interrupted] = Set(DownloadJobStatus.WaitingForDownload, DownloadJobStatus.WaitingForSelection, DownloadJobStatus.ReadyToMove, DownloadJobStatus.Failed),
-            [DownloadJobStatus.Failed] = Set(DownloadJobStatus.RetryPending),
-            [DownloadJobStatus.Completed] = Set(),
-            [DownloadJobStatus.Cancelled] = Set(),
+            [BrowserTransferState.InProgress] = BrowserSet(BrowserTransferState.Complete, BrowserTransferState.Cancelled, BrowserTransferState.Interrupted),
+            [BrowserTransferState.Complete] = BrowserSet(),
+            [BrowserTransferState.Cancelled] = BrowserSet(),
+            [BrowserTransferState.Interrupted] = BrowserSet(),
         };
 
-    public bool CanTransition(DownloadJobStatus current, DownloadJobStatus next)
-        => current == next || (AllowedTransitions.TryGetValue(current, out var allowed) && allowed.Contains(next));
+    private static readonly IReadOnlyDictionary<RoutingState, ISet<RoutingState>> AllowedRoutingTransitions
+        = new Dictionary<RoutingState, ISet<RoutingState>>
+        {
+            [RoutingState.WaitingForSelection] = RoutingSet(RoutingState.SelectionReady, RoutingState.Skipped, RoutingState.Failed, RoutingState.NotRequired),
+            [RoutingState.SelectionReady] = RoutingSet(RoutingState.Moving, RoutingState.Skipped, RoutingState.Failed, RoutingState.NotRequired),
+            [RoutingState.NotRequired] = RoutingSet(RoutingState.Moving, RoutingState.Failed, RoutingState.Skipped),
+            [RoutingState.Moving] = RoutingSet(RoutingState.Completed, RoutingState.RetryPending, RoutingState.Failed),
+            [RoutingState.RetryPending] = RoutingSet(RoutingState.Moving, RoutingState.Failed, RoutingState.Skipped),
+            [RoutingState.Failed] = RoutingSet(RoutingState.RetryPending),
+            [RoutingState.Completed] = RoutingSet(RoutingState.Moving),
+            [RoutingState.Skipped] = RoutingSet(RoutingState.SelectionReady, RoutingState.Moving),
+        };
 
-    public void EnsureCanTransition(DownloadJobStatus current, DownloadJobStatus next)
+    public bool CanTransition(BrowserTransferState current, BrowserTransferState next)
+        => current == next || (AllowedBrowserTransitions.TryGetValue(current, out var allowed) && allowed.Contains(next));
+
+    public bool CanTransition(RoutingState current, RoutingState next)
+        => current == next || (AllowedRoutingTransitions.TryGetValue(current, out var allowed) && allowed.Contains(next));
+
+    public void EnsureCanTransition(BrowserTransferState current, BrowserTransferState next)
     {
         if (!CanTransition(current, next))
         {
-            throw new InvalidOperationException($"Invalid download job transition: {current} -> {next}.");
+            throw new InvalidOperationException($"Invalid browser transfer transition: {current} -> {next}.");
         }
     }
 
-    private static ISet<DownloadJobStatus> Set(params DownloadJobStatus[] values)
-        => new HashSet<DownloadJobStatus>(values);
+    public void EnsureCanTransition(RoutingState current, RoutingState next)
+    {
+        if (!CanTransition(current, next))
+        {
+            throw new InvalidOperationException($"Invalid routing transition: {current} -> {next}.");
+        }
+    }
+
+    private static ISet<BrowserTransferState> BrowserSet(params BrowserTransferState[] values)
+        => new HashSet<BrowserTransferState>(values);
+
+    private static ISet<RoutingState> RoutingSet(params RoutingState[] values)
+        => new HashSet<RoutingState>(values);
 }

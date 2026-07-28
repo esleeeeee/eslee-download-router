@@ -1,5 +1,6 @@
 using DownloadRouter.Agent;
 using DownloadRouter.Core.Jobs;
+using DownloadRouter.Core.Models;
 using DownloadRouter.Core.Paths;
 using DownloadRouter.Core.Privacy;
 using DownloadRouter.Core.Rules;
@@ -38,6 +39,7 @@ builder.Services.AddSingleton<IKnownPathProvider, WindowsKnownPathProvider>();
 builder.Services.AddSingleton<PathTokenResolver>();
 builder.Services.AddSingleton<PathBoundaryValidator>();
 builder.Services.AddSingleton<FileMoveService>();
+builder.Services.AddSingleton<ISelectionUiLauncher, SelectionUiLauncher>();
 builder.Services.AddSingleton<AgentCommandHandler>();
 builder.Services.AddHostedService<AgentPipeServer>();
 
@@ -45,5 +47,22 @@ using var host = builder.Build();
 var repository = host.Services.GetRequiredService<DownloadRouterRepository>();
 await repository.InitializeAsync().ConfigureAwait(false);
 await repository.RecoverInProgressJobsAsync().ConfigureAwait(false);
-await host.RunAsync().ConfigureAwait(false);
+using var shutdownEvent = new EventWaitHandle(
+    initialState: false,
+    EventResetMode.AutoReset,
+    ProtocolConstants.AgentShutdownEventName);
+var shutdownRegistration = ThreadPool.RegisterWaitForSingleObject(
+    shutdownEvent,
+    (_, _) => _ = host.StopAsync(),
+    null,
+    Timeout.Infinite,
+    executeOnlyOnce: true);
+try
+{
+    await host.RunAsync().ConfigureAwait(false);
+}
+finally
+{
+    shutdownRegistration.Unregister(null);
+}
 return 0;

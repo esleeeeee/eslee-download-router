@@ -4,6 +4,26 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <Application.Resources>
     <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Default">
+          <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F3F3F3" />
+          <SolidColorBrush x:Key="CardSurfaceBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="StatusSurfaceBrush" Color="#EAEAEA" />
+          <SolidColorBrush x:Key="WarningStatusSurfaceBrush" Color="#FFF4CE" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F3F3F3" />
+          <SolidColorBrush x:Key="CardSurfaceBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="StatusSurfaceBrush" Color="#EAEAEA" />
+          <SolidColorBrush x:Key="WarningStatusSurfaceBrush" Color="#FFF4CE" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#202020" />
+          <SolidColorBrush x:Key="CardSurfaceBrush" Color="#2B2B2B" />
+          <SolidColorBrush x:Key="StatusSurfaceBrush" Color="#383838" />
+          <SolidColorBrush x:Key="WarningStatusSurfaceBrush" Color="#4A3B19" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
       <ResourceDictionary.MergedDictionaries>
         <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
       </ResourceDictionary.MergedDictionaries>

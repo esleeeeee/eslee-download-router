@@ -9,6 +9,8 @@ $root = Get-RepositoryRoot
 $dotnet = Assert-DotNetVersion
 $nodeTools = Assert-NodeTools
 
+& (Join-Path $PSScriptRoot 'test-native-host-registration.ps1')
+
 & $dotnet test (Join-Path $root 'DownloadRouter.slnx') --configuration $Configuration --no-build --no-restore --nologo
 if ($LASTEXITCODE -ne 0) { throw '.NET tests failed.' }
 

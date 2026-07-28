@@ -48,6 +48,10 @@ declare namespace chrome {
       addListener(callback: (downloadDelta: DownloadDelta) => void): void;
     };
 
+    const onErased: {
+      addListener(callback: (downloadId: number) => void): void;
+    };
+
     function search(query: { id?: number }, callback: (results: DownloadItem[]) => void): void;
   }
 }

@@ -1,102 +1,97 @@
 # 프로젝트 상태
 
-기준일: 2026-07-21 (Asia/Seoul)
+기준일: 2026-07-28 (Asia/Seoul)
 
 ## 요약
 
-- 현재 단계: Phase 0 완료, Phase 1 기술 스파이크 완료, 핵심 기능 개발 중
+- 현재 단계: 정식 버전 1.0.0 개발 및 배포 완료
 - 공식 저장소: https://github.com/esleeeeee/eslee-Download-Router
-- 게시 브랜치: `main`, `develop`, `feature/initial-spike` — 세 브랜치 모두 공식 원격에 생성 완료
-- 구현 기준 커밋: `9975c47bd0ac64e26fa651dcd8162aac068f73d8` (`feat: bootstrap download router spike`)
-- 원격 검증: GitHub 플러그인에서 공개 저장소, 세 브랜치, 위 커밋을 직접 확인
+- 기본 브랜치: `main`
+- 최종 개발 PR: [#1 Fix pending prompts, Whale cancellation, version, and themes](https://github.com/esleeeeee/eslee-Download-Router/pull/1)
+- 정식 Release: [eslee Download Router v1.0.0](https://github.com/esleeeeee/eslee-Download-Router/releases/tag/v1.0.0)
+- 지원 운영체제: Windows 11 x64
+- 실제 검증 브라우저: Naver Whale 
+
+## 정식 버전 구성
+
+- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.0.0` 제품 버전을 사용합니다.
+- assembly informational version에는 빌드한 Git commit metadata가 포함됩니다.
+- Extension manifest 버전은 기존 정책에 따라 제품 assembly와 독립 관리합니다.
+- 고정 Extension ID `gilicenlclaemgiijcjjejilikbooggj`와 Native Messaging identity를 유지합니다.
+- 설치 프로그램은 현재 사용자 단위이며 App, Agent, Native Host와 Extension 파일을 함께 설치합니다.
+- eslee 로고, 폴더, cyan 다운로드와 분기 경로, gold node를 사용한 master PNG와 9-size ICO를 App, Window, taskbar, 트레이, Installer, shortcut, 제거 항목과 Extension에 공통 적용합니다.
 
 ## 구현 완료
 
-- 역할별 .NET/TypeScript 모노레포와 고정 SDK·패키지·잠금 파일
-- Extension -> Native Host -> current-user Named Pipe -> Agent 프로토콜
-- Native Host 입력 크기/JSON/버전/request ID/명령 allowlist/origin 검증
-- Agent 단일 인스턴스, 자동 시작 경로, 다중 pipe 연결 처리
-- SQLite 마이그레이션과 규칙·작업·이벤트·설정·브라우저 연결 테이블
-- 도메인+하위 도메인, 정확한 호스트, URL 포함 규칙
-- 시작 페이지/파일 URL/둘 중 하나 매칭과 IDN 처리
-- 규칙 미매칭 및 IPC 실패 fail-open
-- 경로 토큰과 루트 경계/reparse point 검증
-- 다운로드 완료 파일 안정화와 동일 볼륨 move
-- 교차 볼륨 copy -> 크기/SHA-256 검증 -> rename -> 원본 삭제
-- 중복 파일 번호 보존과 재시도 상태
-- 규칙별 선택 대기 작업 묶음 처리 API와 App 화면
-- WinUI 3 필수 내비게이션 화면 골격과 Agent 진단
-- 브라우저 설치/관리 주소 adapter와 HKCU Native Host 등록 스크립트
-- self-contained win-x64 publish와 per-user Inno Setup 골격
+- Chromium Manifest V3 Extension에서 Native Messaging Host, current-user Named Pipe, 단일 Agent로 이어지는 로컬 프로토콜
+- 도메인과 하위 도메인, 정확한 호스트, URL 포함 사이트 규칙
+- Automatic 완료 파일 이동과 SelectSubfolder 파일별 선택
+- root 경계 안에서만 탐색하는 lazy-loading FolderTreePicker
+- 브라우저 완료 전 선택, 실제 최종 파일명 갱신과 단일 FIFO
+- 다운로드 이력, 경로 변경, 완료 파일 재이동과 실제 파일 비삭제 이력 정리
+- Pending InfoBadge, 30분 자동 팝업 정책과 이전 세션 대기 안내
+- 개별 `selection.skip`과 일괄 `selection.skip-many`의 영구 terminal `Skipped`
+- Whale, Agent, App과 Native Messaging 재연결 뒤 terminal Job 비회귀
+- `USER_CANCELED`, 기타 interrupted와 브라우저 기록 삭제의 분리
+- MainWindow 최소화 또는 트레이 숨김 상태에서 독립 FolderSelectionWindow 활성화
+- X 버튼 트레이 숨김, HKCU Windows 로그인 자동 시작과 명시적 종료
+- System, Light, Dark 전역 테마와 실행 assembly 버전 정보 화면
+- Per-Monitor V2, DIP 기반 반응형 공통 레이아웃과 QHD 125% 검증
+- 규칙 미매칭과 구성 요소 장애에서 브라우저 다운로드를 유지하는 fail-open
+- 동일 볼륨 move, 교차 볼륨 copy, 크기와 SHA-256 검증, 확정 뒤 원본 삭제
+- 기존 대상 덮어쓰기 금지와 중복 이름 보존
+- 사용자 DB, 규칙, 이력과 설정을 지우지 않는 설치, 업그레이드와 제거 정책
 
-## 빌드와 테스트
+## 최종 검증 기준
 
 | 항목 | 결과 |
 |---|---|
-| `.NET Debug build` | 성공, 경고 0, 오류 0 |
-| `.NET tests` | 27/27 통과(Core 21, Infrastructure 4, Integration 2) |
-| Extension ESLint/TypeScript build | 성공 |
-| Extension Node tests | 4/4 통과 |
-| Agent Named Pipe ping | 성공 |
-| Native Host self-test | 성공 |
-| Release win-x64 self-contained publish | App/Agent/Native Host 성공 |
-| clean clone | 공식 `feature/initial-spike@9975c47`에서 bootstrap/build/test 성공 |
-| Installer compile/install/uninstall | 미검증 |
+| .NET Debug build | 성공, 경고 0, 오류 0 |
+| .NET tests | 81/81 통과, Core 48, Infrastructure 8, Integration 25 |
+| Extension | ESLint, TypeScript, dist build 성공, Node tests 13/13 |
+| npm audit | 취약점 0건 |
+| Release publish | App, Agent, Native Host win-x64 self-contained 성공 |
+| Installer | Inno Setup compile과 기존 설치 위 1.0.0 업그레이드 성공 |
+| 사용자 데이터 | SQLite, 규칙, 이력, Pending, 설정과 테마 보존 |
+| 자동 시작 | 기존 HKCU Run 값 보존, 사용자 실제 Windows 재부팅 검증 성공 |
+| Native Messaging | 6개 Chromium 등록 보존, 설치 Native Host와 Agent ping 성공 |
+| 브랜딩 | App, Window, taskbar, 트레이, Installer, shortcut, 제거 항목과 Extension 확인 |
+| CI | feature PR과 main의 최종 GitHub Actions 성공 |
 
-## 브라우저 검증
+## 실제 사용자 검증
 
-| 브라우저 | 설치 탐지 | 확장 로드 | 다운로드 이벤트 | Native Messaging | 자동 저장 | 직접 선택 |
-|---|---|---|---|---|---|---|
-| Whale | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
-| Edge | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
-| Chrome | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
-| Brave | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
-| Vivaldi | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
-| Opera | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 | 미검증 |
+- Whale 실제 사용자 프로필에서 브라우저 완전 종료와 재실행
+- 이미 처리한 SelectSubfolder 팝업 재등장 0건
+- 실제 Windows 재부팅
+- 로그인 후 eslee Download Router 자동 시작
+- 재부팅 이후 정상 동작
 
-실제 브라우저에서 수행하지 않은 결과를 성공으로 표시하지 않았습니다.
+별도 격리 Whale 프로필에서는 Automatic 교차 볼륨 이동, SelectSubfolder 계층형 선택, 긴 폴더명, 네 취소 흐름, 개별과 일괄 `Skipped`, FIFO, 최소화 상태 선택창과 재연결 상태 보존을 검증했습니다.
 
-## 알려진 문제와 제한
+## 배포
 
-- downloads API만으로 다운로드 시작 탭 URL을 신뢰성 있게 얻을 수 없어 활성 탭을 추측하지 않습니다. 현재 referrer와 파일 URL을 분리해 사용합니다.
-- 직접 선택은 App의 대기 화면에서 규칙별 묶음으로 처리합니다. Agent의 자동 창 활성화/트레이 알림, 새 폴더 생성, 새로 고침은 미구현입니다.
-- 시작 시 실행 UI는 실제 Windows 등록과 연결되지 않았습니다.
-- Agent 시작 시 미완료 이동 복구 워커는 미구현입니다. DB에는 작업 상태가 유지됩니다.
-- 브라우저별 Native Messaging registry adapter, 특히 Whale/Opera는 실제 PC 검증이 필요합니다.
-- 브라우저 자체 “다운로드 전에 저장 위치 확인” 설정 감지와 안내는 문서만 있고 UI 자동 감지는 미구현입니다.
-- 앱 UI의 실제 실행/시각·접근성 검증과 installer 동작 검증이 필요합니다.
+- 설치 파일: GitHub v1.0.0 Release의 `eslee-download-router-setup.exe`
+- 설치 범위: 현재 사용자
+- 기본 경로: `%LOCALAPPDATA%\Programs\eslee\DownloadRouter`
+- 사용자 데이터: `%LOCALAPPDATA%\eslee\DownloadRouter`
+- Extension 로드 경로: 설치 폴더의 `extension`
+- 제거 시 사용자 데이터는 보존합니다.
 
-## 보류된 결정
+## 알려진 제한
 
-- 배포 코드 서명 인증서와 업데이트 채널
-- 안정 배포 확장 ID/스토어 배포 방식
-- 로그 보존 기간과 사용자 삭제 UI
-- Agent 선택 알림을 App activation, tray, 별도 picker 중 어떤 방식으로 구현할지
+- Installer는 코드 서명되지 않았습니다.
+- Chromium Web Store 배포와 확장 자동 설치는 제공하지 않습니다.
+- Edge, Chrome, Brave, Vivaldi와 Opera 실제 다운로드는 검증하지 않았습니다.
+- FHD, 4K, Windows 100%, 150% 물리 디스플레이는 직접 검증하지 않았습니다.
+- FolderTreePicker에서 새 폴더 만들기는 제공하지 않습니다.
+- 개별 `나중에 선택`은 현재 App 세션 동안만 자동 팝업을 숨깁니다.
+- 다운로드 시작 탭 URL은 Chromium API가 신뢰할 수 있는 필드로 제공하지 않으므로 활성 탭을 추측하지 않습니다.
 
-## 다음 작업
+## 유지보수 기준
 
-1. Edge에서 개발자 모드 확장 로드와 Native Messaging 왕복을 실제 검증
-2. Edge 자동 저장과 규칙 미매칭 fail-open 실다운로드 검증
-3. 규칙별 전용 폴더 트리 picker에 새 폴더/새로 고침 추가 및 Agent 알림 연결
-4. Whale registry adapter와 다운로드/Native Messaging 검증
-5. Chrome 동일 시나리오 검증
-6. Agent 시작 시 미완료 작업 복구와 시작 시 실행 옵션 구현
-7. Inno Setup 설치/제거와 앱 UI 검증
-
-## 실행 명령
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-agent.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-dev.ps1 -SkipBuild
-```
-
-## 로컬 전용 설정
-
-- 사용자 DB, 로그, 진단: `%LOCALAPPDATA%\eslee\DownloadRouter`
-- Native Host PC별 manifest: 위 경로의 `native-host` 하위
-- 실제 저장 루트는 PC마다 규칙에서 다시 확인
-- 확장 로드 경로: clone 내부 `src\DownloadRouter.Extension\dist`
-- 필수 소스나 설정이 현재 개발 PC에만 남아 있지 않도록 모든 재현 정보는 저장소에 기록
+- 안정 기준은 `main`과 최신 GitHub Release입니다.
+- 기능 변경은 별도 브랜치와 PR에서 진행합니다.
+- `Directory.Build.props` 외의 파일에 제품 버전을 하드코딩하지 않습니다.
+- Extension key, 고정 ID와 Native Messaging identity를 변경하지 않습니다.
+- 사용자 DB 스키마와 terminal 상태 전이는 migration과 회귀 테스트 없이 수정하지 않습니다.
+- 실제 검증하지 않은 브라우저와 디스플레이 환경을 지원 완료로 기록하지 않습니다.

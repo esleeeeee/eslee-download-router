@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using DownloadRouter.Core.Models;
 using Microsoft.Extensions.Logging;
 
@@ -44,6 +45,13 @@ public sealed class JsonLineFileLoggerProvider(string logsDirectory) : ILoggerPr
 
     private sealed class JsonLineFileLogger(string category, Action<string> writer) : ILogger
     {
+        private static readonly Regex HttpUrlPattern = new(
+            "https?://[^\\s\\\"']+",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+        private static readonly Regex WindowsPathPattern = new(
+            "(?<![A-Za-z0-9])(?:[A-Za-z]:[\\\\/]|\\\\\\\\)[^\\r\\n\\\"']+",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
         public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Information;
@@ -68,14 +76,15 @@ public sealed class JsonLineFileLoggerProvider(string logsDirectory) : ILoggerPr
                 category,
                 eventId = eventId.Id,
                 message,
-                exception = exception is null ? null : Redact(exception.GetType().Name + ": " + exception.Message),
+                exception = exception?.GetType().Name,
             };
             writer(JsonSerializer.Serialize(payload, ProtocolJson.Options));
         }
 
         private static string Redact(string value)
         {
-            var result = value;
+            var result = HttpUrlPattern.Replace(value, "[URL_REDACTED]");
+            result = WindowsPathPattern.Replace(result, "[PATH_REDACTED]");
             foreach (var marker in new[] { "Authorization:", "Bearer ", "token=", "sig=", "signature=" })
             {
                 var index = result.IndexOf(marker, StringComparison.OrdinalIgnoreCase);

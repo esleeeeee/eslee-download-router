@@ -9,6 +9,7 @@ param(
 )
 
 . (Join-Path $PSScriptRoot 'common.ps1')
+. (Join-Path $PSScriptRoot 'native-host-registration.ps1')
 $root = Get-RepositoryRoot
 $hostName = 'com.eslee.download_router'
 $developmentExtensionId = 'gilicenlclaemgiijcjjejilikbooggj'
@@ -50,7 +51,9 @@ if ($Action -eq 'Unregister') {
     return
 }
 
-if (-not [IO.Path]::IsPathFullyQualified($HostPath)) { throw 'HostPath must be an absolute path.' }
+if (-not (Test-WindowsAbsolutePath $HostPath)) {
+    throw 'HostPath must be an absolute path.'
+}
 $HostPath = [IO.Path]::GetFullPath($HostPath)
 if (-not (Test-Path -LiteralPath $HostPath -PathType Leaf)) {
     throw "Native Host executable not found: $HostPath`nRun .\scripts\build.ps1 -Configuration Release -PublishNativeHost first."
@@ -62,10 +65,7 @@ if ([IO.Path]::GetFileName($HostPath) -ne 'DownloadRouter.NativeHost.exe') {
 if (-not (Test-Path -LiteralPath $manifestDirectory)) {
     New-Item -ItemType Directory -Path $manifestDirectory | Out-Null
 }
-$allowedOrigins = @($developmentExtensionId) + $AdditionalExtensionId |
-    Where-Object { $_ -match '^[a-p]{32}$' } |
-    Select-Object -Unique |
-    ForEach-Object { "chrome-extension://$_/" }
+$allowedOrigins = Get-NativeHostAllowedOrigins $developmentExtensionId $AdditionalExtensionId
 $manifest = [ordered]@{
     name = $hostName
     description = 'eslee Download Router Native Messaging Host'
@@ -73,12 +73,13 @@ $manifest = [ordered]@{
     type = 'stdio'
     allowed_origins = @($allowedOrigins)
 }
-$manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+$manifestJson = $manifest | ConvertTo-Json -Depth 4
+Write-Utf8WithoutBom $manifestPath ($manifestJson + [Environment]::NewLine)
 
 foreach ($name in $selected) {
     $key = Get-RegistryKey $name
     if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
-    (Get-Item -Path $key).SetValue('', $manifestPath, [Microsoft.Win32.RegistryValueKind]::String)
+    Set-Item -LiteralPath $key -Value $manifestPath
     Write-Host "Registered $name -> $manifestPath"
 }
 
