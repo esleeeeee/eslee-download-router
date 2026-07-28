@@ -58,6 +58,19 @@ public sealed class ProtocolAndStateTests
     }
 
     [Fact]
+    public void SkippedByUserIsTerminalAndCannotReturnToPending()
+    {
+        var stateMachine = new DownloadJobStateMachine();
+        var skipped = CreateJob(BrowserTransferState.Complete, RoutingState.Skipped);
+
+        Assert.True(skipped.IsTerminal);
+        Assert.False(skipped.IsSelectionPending);
+        Assert.False(stateMachine.CanTransition(RoutingState.Skipped, RoutingState.WaitingForSelection));
+        Assert.Empty(DownloadJobQueries.ActiveSelections([skipped]));
+        Assert.Empty(DownloadJobQueries.AutomaticSelections([skipped], DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
     public void CancelledJobsAreExcludedFromPendingAndDashboardCounts()
     {
         var cancelled = CreateJob(BrowserTransferState.Cancelled, RoutingState.NotRequired);

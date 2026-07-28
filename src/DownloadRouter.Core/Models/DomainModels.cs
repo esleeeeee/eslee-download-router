@@ -217,6 +217,8 @@ public sealed record SelectionCompletedPayload(
 
 public sealed record SelectionSkippedPayload(Guid JobId);
 
+public sealed record SelectionsSkippedPayload(IReadOnlyList<Guid> JobIds);
+
 public sealed record JobRouteChangePayload(
     Guid JobId,
     string RelativeFolder,
@@ -263,6 +265,7 @@ public static class ProtocolConstants
         "downloads.active",
         "selection.complete",
         "selection.skip",
+        "selection.skip-many",
         "route.change",
         "job.retry",
         "diagnostics.status",

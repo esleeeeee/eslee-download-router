@@ -12,7 +12,7 @@ public enum FolderSelectionAction
 {
     Apply,
     Later,
-    LaterAll,
+    SkipAll,
     Skip,
     Closed,
 }
@@ -52,10 +52,10 @@ public sealed class FolderSelectionWindow(
         bool allowLater,
         bool allowSkip,
         CancellationToken cancellationToken = default,
-        bool allowLaterAll = false)
+        bool allowSkipAll = false)
     {
         window.Title = "다운로드 저장 위치 선택";
-        window.Content = CreateContent(description, allowLater, allowSkip, allowLaterAll);
+        window.Content = CreateContent(description, allowLater, allowSkip, allowSkipAll);
         themeManager.RegisterWindow(window);
         window.Closed += (_, _) =>
         {
@@ -76,7 +76,7 @@ public sealed class FolderSelectionWindow(
         return await completion.Task;
     }
 
-    private UIElement CreateContent(string description, bool allowLater, bool allowSkip, bool allowLaterAll)
+    private UIElement CreateContent(string description, bool allowLater, bool allowSkip, bool allowSkipAll)
     {
         var root = new Grid
         {
@@ -132,15 +132,15 @@ public sealed class FolderSelectionWindow(
             buttons.Children.Add(later);
         }
 
-        if (allowLaterAll)
+        if (allowSkipAll)
         {
-            var laterAll = new Button
+            var skipAll = new Button
             {
-                Content = "모두 나중에 선택",
+                Content = "모두 선택 안 함",
                 HorizontalAlignment = HorizontalAlignment.Stretch,
             };
-            laterAll.Click += (_, _) => Complete(FolderSelectionAction.LaterAll);
-            buttons.Children.Add(laterAll);
+            skipAll.Click += (_, _) => Complete(FolderSelectionAction.SkipAll);
+            buttons.Children.Add(skipAll);
         }
 
         if (allowSkip)

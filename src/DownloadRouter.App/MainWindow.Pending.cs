@@ -102,6 +102,25 @@ public sealed partial class MainWindow
             await ApplySelectionAsync(selectedJobs.ToArray(), result.RelativeFolder);
         };
         ContentPanel.Children.Add(applySelected);
+
+        var skipAll = new Button
+        {
+            Content = "이 규칙의 대기 파일 모두 이동하지 않기",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        skipAll.Click += async (_, _) =>
+        {
+            var confirmed = await ShowConfirmationAsync(
+                "대기 파일 모두 이동하지 않기",
+                $"{jobs.Count}개 작업을 영구적으로 처리 완료합니다. Download Router는 파일을 이동하거나 삭제하지 않습니다.");
+            if (!confirmed)
+            {
+                return;
+            }
+
+            await SkipSelectionsAsync(jobs.Select(static job => job.Id).ToArray());
+        };
+        ContentPanel.Children.Add(skipAll);
         ContentPanel.Children.Add(new Border { Height = 1, Opacity = 0.35, Margin = new Thickness(0, 8, 0, 8) });
     }
 
@@ -224,6 +243,25 @@ public sealed partial class MainWindow
         }
 
         deferredSelectionPrompts.Remove(jobId);
+        await ShowPendingAsync();
+    }
+
+    private async Task SkipSelectionsAsync(IReadOnlyList<Guid> jobIds)
+    {
+        var response = await agent.SendAsync(
+            "selection.skip-many",
+            new SelectionsSkippedPayload(jobIds));
+        if (!response.Success)
+        {
+            await ShowMessageAsync(response.Message ?? "대기 파일 일괄 건너뛰기 적용에 실패했습니다.");
+            return;
+        }
+
+        foreach (var jobId in jobIds)
+        {
+            deferredSelectionPrompts.Remove(jobId);
+        }
+
         await ShowPendingAsync();
     }
 

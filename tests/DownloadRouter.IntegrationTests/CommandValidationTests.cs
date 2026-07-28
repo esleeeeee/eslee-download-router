@@ -354,6 +354,203 @@ public sealed class CommandValidationTests : IDisposable
     }
 
     [Fact]
+    public async Task SkippedSelectionSurvivesAgentRestartWithoutBeingReenqueued()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartAsync(handler, "skip-restart", "keep-original.bin");
+
+        var skipped = await SendAsync(handler, "selection.skip", new SelectionSkippedPayload(jobId));
+        Assert.True(skipped.Success, skipped.Message);
+
+        var (_, restartedRepository) = await CreateHandlerAsync();
+        await restartedRepository.RecoverInProgressJobsAsync(CancellationToken.None);
+        var restored = await restartedRepository.GetJobAsync(jobId, CancellationToken.None);
+
+        Assert.NotNull(restored);
+        Assert.Equal(RoutingState.Skipped, restored.RoutingState);
+        Assert.True(restored.IsTerminal);
+        Assert.Empty(DownloadJobQueries.ActiveSelections([restored]));
+        Assert.Empty(DownloadJobQueries.AutomaticSelections([restored], DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public async Task NativeMessagingReconciliationCannotReopenSkippedSelection()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartAsync(handler, "skip-native-reconnect", "keep-original.bin");
+        Assert.True((await SendAsync(
+            handler,
+            "selection.skip",
+            new SelectionSkippedPayload(jobId))).Success);
+
+        var active = await SendAsync(handler, "downloads.active", new ActiveDownloadsPayload("Whale"));
+        Assert.True(active.Success, active.Message);
+        Assert.Equal("skip-native-reconnect", Assert.Single(
+            JsonSerializer.Deserialize<List<ActiveBrowserDownload>>(
+                active.Data!.Value,
+                ProtocolJson.Options)!).DownloadId);
+
+        var reconciled = await SendAsync(
+            handler,
+            "download.changed",
+            new DownloadChangedPayload(
+                "Whale",
+                "skip-native-reconnect",
+                "in_progress",
+                null,
+                null,
+                IsReconciliation: true));
+
+        Assert.True(reconciled.Success, reconciled.Message);
+        var restored = await repository.GetJobAsync(jobId, CancellationToken.None);
+        Assert.Equal(RoutingState.Skipped, restored!.RoutingState);
+        Assert.Empty(DownloadJobQueries.ActiveSelections([restored]));
+        Assert.Empty(DownloadJobQueries.AutomaticSelections([restored], DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public async Task WhaleReconnectDuplicateEventsDoNotCreateOrReenqueueSkippedJob()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var incoming = Directory.CreateDirectory(Path.Combine(root, "incoming")).FullName;
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartAsync(handler, "skip-whale-reconnect", "keep-original.bin");
+        Assert.True((await SendAsync(
+            handler,
+            "selection.skip",
+            new SelectionSkippedPayload(jobId))).Success);
+
+        var duplicateStart = await SendAsync(
+            handler,
+            "download.started",
+            new DownloadStartedPayload(
+                "Whale",
+                "skip-whale-reconnect",
+                "keep-original.bin",
+                null,
+                "https://example.com/downloads",
+                "https://example.com/keep-original.bin",
+                null,
+                null));
+        var duplicateMetadata = await SendAsync(
+            handler,
+            "download.metadata",
+            new DownloadMetadataChangedPayload(
+                "Whale",
+                "skip-whale-reconnect",
+                "C:\\Downloads\\keep-original.bin",
+                "keep-original.bin"));
+        var source = Path.Combine(incoming, "keep-original.bin");
+        await File.WriteAllTextAsync(source, "keep", CancellationToken.None);
+        var completed = await SendAsync(
+            handler,
+            "download.changed",
+            new DownloadChangedPayload(
+                "Whale",
+                "skip-whale-reconnect",
+                "complete",
+                source,
+                null,
+                "keep-original.bin",
+                IsReconciliation: true));
+
+        Assert.True(duplicateStart.Success, duplicateStart.Message);
+        Assert.True(duplicateMetadata.Success, duplicateMetadata.Message);
+        Assert.True(completed.Success, completed.Message);
+        var restored = Assert.Single(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+        Assert.Equal(jobId, restored.Id);
+        Assert.Equal(BrowserTransferState.Complete, restored.BrowserState);
+        Assert.Equal(RoutingState.Skipped, restored.RoutingState);
+        Assert.Empty(DownloadJobQueries.ActiveSelections([restored]));
+        Assert.True(File.Exists(source));
+        Assert.Empty(Directory.EnumerateFiles(destination));
+    }
+
+    [Fact]
+    public async Task SkipManyMakesCurrentQueueTerminalButLeavesFuturePendingUntouchedAfterRestart()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var queued = new[]
+        {
+            await StartAsync(handler, "skip-many-1", "one.bin"),
+            await StartAsync(handler, "skip-many-2", "two.bin"),
+            await StartAsync(handler, "skip-many-3", "three.bin"),
+        };
+
+        var response = await SendAsync(
+            handler,
+            "selection.skip-many",
+            new SelectionsSkippedPayload(queued));
+        Assert.True(response.Success, response.Message);
+        Assert.Equal(queued.Length, response.Data!.Value.GetProperty("skipped").GetInt32());
+        var future = await StartAsync(handler, "skip-many-future", "future.bin");
+
+        var (_, restartedRepository) = await CreateHandlerAsync();
+        var restored = await restartedRepository.GetRecentJobsAsync(cancellationToken: CancellationToken.None);
+        var skippedJobs = restored.Where(job => queued.Contains(job.Id)).ToArray();
+        var futureJob = Assert.Single(restored, job => job.Id == future);
+
+        Assert.Equal(queued.Length, skippedJobs.Length);
+        Assert.All(skippedJobs, job =>
+        {
+            Assert.Equal(RoutingState.Skipped, job.RoutingState);
+            Assert.True(job.IsTerminal);
+        });
+        Assert.Equal(RoutingState.WaitingForSelection, futureJob.RoutingState);
+        Assert.Equal(future, Assert.Single(DownloadJobQueries.ActiveSelections(restored)).Id);
+        Assert.Equal(future, Assert.Single(
+            DownloadJobQueries.AutomaticSelections(restored, DateTimeOffset.UtcNow)).Id);
+    }
+
+    [Fact]
+    public async Task ReplayedStartAndUnchangedMetadataDoNotRefreshOldPendingPromptAge()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartAsync(handler, "old-replayed-start", "old.bin");
+        var oldTime = DateTimeOffset.UtcNow.Subtract(TimeSpan.FromMinutes(31));
+        var original = await repository.GetJobAsync(jobId, CancellationToken.None);
+        await repository.UpdateJobAsync(
+            original! with { CreatedAt = oldTime, LastBrowserEventAt = oldTime },
+            "test-aged-pending",
+            CancellationToken.None);
+
+        Assert.True((await SendAsync(
+            handler,
+            "download.started",
+            new DownloadStartedPayload(
+                "Whale",
+                "old-replayed-start",
+                "old.bin",
+                null,
+                "https://example.com/downloads",
+                "https://example.com/old.bin",
+                null,
+                null))).Success);
+        Assert.True((await SendAsync(
+            handler,
+            "download.metadata",
+            new DownloadMetadataChangedPayload(
+                "Whale",
+                "old-replayed-start",
+                "C:\\Downloads\\old.bin",
+                "old.bin"))).Success);
+
+        var restored = await repository.GetJobAsync(jobId, CancellationToken.None);
+        Assert.Equal(oldTime, restored!.LastBrowserEventAt);
+        Assert.Single(DownloadJobQueries.ActiveSelections([restored]));
+        Assert.Empty(DownloadJobQueries.AutomaticSelections([restored], DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
     public async Task DeletingHistoryDoesNotDeleteTheDownloadedFile()
     {
         var (handler, repository) = await CreateHandlerAsync();

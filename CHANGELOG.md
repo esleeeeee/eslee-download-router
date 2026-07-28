@@ -8,10 +8,11 @@
 
 - 선택창 전면 표시 전후의 MainWindow/FolderSelectionWindow HWND, visible, iconic, owner, foreground와 native 호출 결과를 남기는 경로·URL 비포함 진단
 - 숨김/최소화 MainWindow, iconic 선택창 복원, foreground fallback, FIFO 취소 제거를 검증하는 Core 회귀 테스트
-- 30분 자동 팝업 정책, 이전 세션 대기 작업 안내와 선택 창의 `모두 나중에 선택` 큐 일괄 숨김
+- 30분 자동 팝업 정책, 이전 세션 대기 작업 안내와 선택 창의 영구 `모두 선택 안 함`
+- 현재 FIFO의 1~1000개 Job을 한 SQLite transaction에서 terminal `Skipped`로 저장하는 `selection.skip-many`와 규칙별 stale Pending 정리 UI
 - Extension `download.cancelled`/`download.interrupted`, 시작 시 complete/interrupted/in_progress/stale 재조정과 정제된 연결 진단
 - 전역 `ThemeManager`, System/Light/Dark 사용자 설정 저장과 열린/새 Window 즉시 적용
-- 정보 화면 제품명·0.3.1 버전·commit·설치형/개발 빌드 표시, 데이터 폴더/GitHub 열기
+- 정보 화면 제품명·0.3.2 버전·commit·설치형/개발 빌드 표시, 데이터 폴더/GitHub 열기
 - `Directory.Build.props` 단일 버전 원본과 App/Agent/Native Host/Installer 일치 검증
 
 - .NET 10/WinUI 3 모노레포와 재현 가능한 bootstrap/build/test/publish 스크립트
@@ -21,7 +22,7 @@
 - 경로 토큰, 루트 경계와 reparse point 방어
 - 동일/교차 볼륨 안전 이동, 안정화 확인, SHA-256 검증, 중복 이름 보존
 - WinUI 대시보드, 규칙, 파일별 선택 대기, 상태 필터·삭제 이력, 브라우저, 진단 화면
-- 73개 .NET 테스트, 13개 TypeScript 테스트, Agent/Native Host 스모크 테스트
+- 80개 .NET 테스트, 13개 TypeScript 테스트, Agent/Native Host 스모크 테스트
 - per-user Native Host 등록 및 Inno Setup 설치 골격
 - Native Host 등록의 Windows PowerShell 5.1 회귀 테스트와 개인정보 로그 회귀 테스트
 - 매칭 규칙의 작업 생성·실제 파일 이동을 검증하는 Agent 통합 테스트
@@ -41,6 +42,8 @@
 - UI 상태 갱신 주기를 500ms로 줄여 취소 후 팝업·Pending·이력을 1초 이내 반영
 - 브라우저 기록에서 찾지 못한 진행 작업은 취소로 추측하지 않고 stale 진단 상태로 보존하며 자동 팝업에서 제외
 - service worker 시작 재조정은 Job 상태만 맞추고 생성/마지막 실시간 브라우저 이벤트 기반의 30분 팝업 연령은 유지
+- 개별 이동 안 함은 idempotent `selection.skip`, 현재 FIFO 일괄 이동 안 함은 `selection.skip-many`로 DB commit 성공을 확인한 뒤에만 UI 큐를 비움
+- 중복 `download.started`와 실제 파일명이 바뀌지 않은 `download.metadata`는 `LastBrowserEventAt`을 갱신하지 않아 재연결 replay가 stale Pending을 최근 작업으로 되살리지 않음
 
 - WinUI 앱을 Per-Monitor V2로 선언하고 공통 콘텐츠를 세로 ScrollViewer, stretch viewport, 1100 DIP 반응형 폼으로 재구성
 - 다운로드 이력이 규칙에 매칭된 작업만 표시함을 명시하고 데이터 변경 시 3초 간격으로 자동 갱신
@@ -56,6 +59,8 @@
 - foreground 제한 시 바로 Flash fallback으로 종료하던 순서를 선택창 HWND의 normal 표시, 활성화, topmost, 입력 스레드 연결 재시도로 보강
 - 앱 시작 때 오래된 `WaitingForSelection` 전체를 FIFO에 재삽입해 20개 이상 팝업이 연속 표시되던 문제
 - service worker 시작 검색 결과가 오래된 Job의 마지막 브라우저 이벤트 시각을 현재로 덮어 다시 자동 팝업 대상으로 만들던 문제
+- 기존 `모두 나중에 선택`이 메모리 큐만 비우고 DB의 `WaitingForSelection`을 남겨 Whale·Agent 재시작 뒤 처리한 파일들이 다시 FIFO에 들어오던 문제
+- 동일 다운로드의 replayed start/unchanged metadata가 실제 사용자 이벤트처럼 저장되어 30분 stale 방어를 반복 무효화하던 문제
 - Whale가 `state` delta 없이 `error.current=USER_CANCELED`만 보낼 때 Extension이 조기 반환해 취소가 누락되던 문제
 - `downloads.onErased`와 실제 사용자 취소를 혼동할 수 있는 시작 재조정 공백
 - 일반 설정의 테마 ComboBox가 저장·적용 로직에 연결되지 않아 화면이 바뀌지 않던 문제

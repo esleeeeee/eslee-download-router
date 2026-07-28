@@ -143,12 +143,12 @@ public sealed partial class MainWindow
     }
 
     private async Task ProcessNextSelectionPromptAsync(
-        IReadOnlyList<DownloadJob> active,
+        IReadOnlyList<DownloadJob> automatic,
         IReadOnlyList<DownloadRule> rules)
     {
         while (selectionPromptQueue.TryDequeue(out var jobId))
         {
-            var job = active.FirstOrDefault(candidate => candidate.Id == jobId);
+            var job = automatic.FirstOrDefault(candidate => candidate.Id == jobId);
             var rule = job is null ? null : rules.FirstOrDefault(candidate => candidate.Id == job.RuleId);
             if (job is null || rule is null || deferredSelectionPrompts.Contains(jobId))
             {
@@ -159,10 +159,10 @@ public sealed partial class MainWindow
             await ShowSelectionPromptAsync(
                 job,
                 rule,
-                Math.Max(0, active.Count - 1),
+                Math.Max(0, automatic.Count - 1),
                 shownAutoPromptCount,
                 Math.Max(shownAutoPromptCount, sessionAutoPromptJobs.Count),
-                active.Select(static candidate => candidate.Id).ToArray());
+                automatic.Select(static candidate => candidate.Id).ToArray());
             return;
         }
     }
@@ -173,7 +173,7 @@ public sealed partial class MainWindow
         int otherPendingCount,
         int queuePosition,
         int queueTotal,
-        IReadOnlyList<Guid> currentQueueJobIds)
+        IReadOnlyList<Guid> currentAutoQueueJobIds)
     {
         selectionPromptInProgress = true;
         currentSelectionJobId = job.Id;
@@ -192,7 +192,7 @@ public sealed partial class MainWindow
                 allowLater: true,
                 allowSkip: true,
                 cancellationToken: currentSelectionCancellation.Token,
-                allowLaterAll: true);
+                allowSkipAll: true);
 
             if (currentSelectionInvalidated)
             {
@@ -214,19 +214,45 @@ public sealed partial class MainWindow
                 var response = await agent.SendAsync("selection.skip", new SelectionSkippedPayload(job.Id));
                 if (!response.Success)
                 {
+                    WriteWindowActivationDiagnostic(
+                        $"selection-window decision-persisted action=Skip job={job.Id:N} success=false");
                     await ShowMessageAsync(response.Message ?? "이동 건너뛰기 적용에 실패했습니다.");
                 }
-            }
-            else if (result.Action == FolderSelectionAction.LaterAll)
-            {
-                foreach (var queuedJobId in currentQueueJobIds)
+                else
                 {
-                    deferredSelectionPrompts.Add(queuedJobId);
+                    deferredSelectionPrompts.Remove(job.Id);
+                    WriteWindowActivationDiagnostic(
+                        $"selection-window decision-persisted action=Skip job={job.Id:N} success=true");
                 }
+            }
+            else if (result.Action == FolderSelectionAction.SkipAll)
+            {
+                var queuedJobIds = currentAutoQueueJobIds
+                    .Append(job.Id)
+                    .Distinct()
+                    .ToArray();
+                var response = await agent.SendAsync(
+                    "selection.skip-many",
+                    new SelectionsSkippedPayload(queuedJobIds));
+                if (!response.Success)
+                {
+                    WriteWindowActivationDiagnostic(
+                        $"selection-window decision-persisted action=SkipAll count={queuedJobIds.Length} success=false");
+                    await ShowMessageAsync(response.Message ?? "대기 파일 일괄 건너뛰기 적용에 실패했습니다.");
+                }
+                else
+                {
+                    foreach (var queuedJobId in queuedJobIds)
+                    {
+                        deferredSelectionPrompts.Remove(queuedJobId);
+                    }
 
-                selectionPromptQueue.Drain();
-                sessionAutoPromptJobs.Clear();
-                shownAutoPromptCount = 0;
+                    selectionPromptQueue.Drain();
+                    sessionAutoPromptJobs.Clear();
+                    shownAutoPromptCount = 0;
+                    WriteWindowActivationDiagnostic(
+                        $"selection-window decision-persisted action=SkipAll count={queuedJobIds.Length} success=true");
+                }
             }
             else
             {

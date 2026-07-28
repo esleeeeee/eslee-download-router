@@ -314,6 +314,88 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<IReadOnlyList<Guid>> SkipSelectionsAsync(
+        IReadOnlyCollection<Guid> jobIds,
+        DateTimeOffset completedAt,
+        CancellationToken cancellationToken = default)
+    {
+        var ids = jobIds.Where(static id => id != Guid.Empty).Distinct().ToArray();
+        if (ids.Length is < 1 or > 1000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(jobIds), "Skip between 1 and 1000 selection jobs.");
+        }
+
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection
+            .BeginTransactionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        var placeholders = ids.Select((_, index) => $"$id{index}").ToArray();
+        var inClause = string.Join(", ", placeholders);
+        var skipped = new List<Guid>();
+
+        await using (var update = connection.CreateCommand())
+        {
+            update.Transaction = transaction;
+            update.CommandText = $"""
+                UPDATE DownloadJobs
+                SET Status = 'Skipped',
+                    RoutingState = 'Skipped',
+                    ErrorCode = NULL,
+                    ErrorMessage = NULL,
+                    CompletedAt = COALESCE(CompletedAt, $completedAt)
+                WHERE Id IN ({inClause})
+                  AND BrowserState IN ('InProgress', 'Complete')
+                  AND RoutingState IN ('WaitingForSelection', 'SelectionReady')
+                RETURNING Id;
+                """;
+            AddIdParameters(update, ids);
+            update.Parameters.AddWithValue("$completedAt", Format(completedAt));
+            await using var reader = await update.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                skipped.Add(Guid.Parse(reader.GetString(0)));
+            }
+        }
+
+        await using (var verify = connection.CreateCommand())
+        {
+            verify.Transaction = transaction;
+            verify.CommandText = $"""
+                SELECT COUNT(*)
+                FROM DownloadJobs
+                WHERE Id IN ({inClause})
+                  AND (
+                    BrowserState IN ('Cancelled', 'Interrupted')
+                    OR RoutingState IN ('Completed', 'Skipped', 'Failed')
+                  );
+                """;
+            AddIdParameters(verify, ids);
+            var terminalCount = Convert.ToInt32(
+                await verify.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
+                CultureInfo.InvariantCulture);
+            if (terminalCount != ids.Length)
+            {
+                throw new InvalidOperationException(
+                    "A queued selection changed state before the batch skip could be committed.");
+            }
+        }
+
+        foreach (var jobId in skipped)
+        {
+            await AppendEventAsync(
+                connection,
+                jobId,
+                "selection.skipped",
+                DownloadJobStatus.Skipped.ToString(),
+                cancellationToken,
+                transaction).ConfigureAwait(false);
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return skipped;
+    }
+
     public async Task<int> DeleteJobsAsync(
         IReadOnlyCollection<Guid> jobIds,
         CancellationToken cancellationToken = default)

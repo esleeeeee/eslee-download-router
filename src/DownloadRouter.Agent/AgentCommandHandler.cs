@@ -63,6 +63,7 @@ public sealed class AgentCommandHandler(
                 "downloads.active" => await HandleActiveDownloadsAsync(request, cancellationToken).ConfigureAwait(false),
                 "selection.complete" => await HandleSelectionCompletedAsync(request, cancellationToken).ConfigureAwait(false),
                 "selection.skip" => await HandleSelectionSkippedAsync(request, cancellationToken).ConfigureAwait(false),
+                "selection.skip-many" => await HandleSelectionsSkippedAsync(request, cancellationToken).ConfigureAwait(false),
                 "route.change" => await HandleRouteChangeAsync(request, cancellationToken).ConfigureAwait(false),
                 "job.retry" => await HandleRetryAsync(request, cancellationToken).ConfigureAwait(false),
                 "diagnostics.status" => AgentResponse.Ok(request.RequestId, new
@@ -114,7 +115,12 @@ public sealed class AgentCommandHandler(
         var existing = await repository.GetJobAsync(browser, payload.DownloadId, cancellationToken).ConfigureAwait(false);
         if (existing is not null)
         {
-            existing = await UpdateFileNameAsync(existing, payload.FileName, payload.FilePath, cancellationToken).ConfigureAwait(false);
+            existing = await UpdateFileNameAsync(
+                existing,
+                payload.FileName,
+                payload.FilePath,
+                refreshBrowserActivity: false,
+                cancellationToken).ConfigureAwait(false);
             return AgentResponse.Ok(request.RequestId, new { tracked = true, jobId = existing.Id, existing = true });
         }
 
@@ -202,7 +208,12 @@ public sealed class AgentCommandHandler(
             return AgentResponse.Ok(request.RequestId, new { tracked = false, failOpen = true });
         }
 
-        var updated = await UpdateFileNameAsync(job, payload.FileName, payload.FilePath, cancellationToken).ConfigureAwait(false);
+        var updated = await UpdateFileNameAsync(
+            job,
+            payload.FileName,
+            payload.FilePath,
+            refreshBrowserActivity: true,
+            cancellationToken).ConfigureAwait(false);
         return AgentResponse.Ok(request.RequestId, new
         {
             tracked = true,
@@ -484,6 +495,11 @@ public sealed class AgentCommandHandler(
             return AgentResponse.Error(request.RequestId, "job.not-found", "The download job was not found.");
         }
 
+        if (job.RoutingState == RoutingState.Skipped)
+        {
+            return AgentResponse.Ok(request.RequestId, JobState(job));
+        }
+
         if (job.BrowserState is not (BrowserTransferState.InProgress or BrowserTransferState.Complete)
             || job.RoutingState is not (RoutingState.WaitingForSelection or RoutingState.SelectionReady))
         {
@@ -491,15 +507,76 @@ public sealed class AgentCommandHandler(
         }
 
         stateMachine.EnsureCanTransition(job.RoutingState, RoutingState.Skipped);
-        job = job with
+        var skippedIds = await repository.SkipSelectionsAsync(
+            [job.Id],
+            DateTimeOffset.UtcNow,
+            cancellationToken).ConfigureAwait(false);
+        if (skippedIds.Count != 1)
         {
-            RoutingState = RoutingState.Skipped,
-            ErrorCode = null,
-            ErrorMessage = null,
-            CompletedAt = DateTimeOffset.UtcNow,
-        };
-        await repository.UpdateJobAsync(job, "selection.skipped", cancellationToken).ConfigureAwait(false);
+            return AgentResponse.Error(request.RequestId, "selection.state-changed", "The selection state changed before it could be skipped.");
+        }
+
+        job = await repository.GetJobAsync(job.Id, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The skipped download job could not be reloaded.");
         return AgentResponse.Ok(request.RequestId, JobState(job));
+    }
+
+    private async Task<AgentResponse> HandleSelectionsSkippedAsync(
+        AgentCommand request,
+        CancellationToken cancellationToken)
+    {
+        var payload = Deserialize<SelectionsSkippedPayload>(request.Payload);
+        var jobIds = payload.JobIds.Where(static id => id != Guid.Empty).Distinct().ToArray();
+        if (jobIds.Length is < 1 or > 1000)
+        {
+            return AgentResponse.Error(request.RequestId, "selection.invalid-count", "Skip between 1 and 1000 queued jobs.");
+        }
+
+        foreach (var jobId in jobIds)
+        {
+            var job = await repository.GetJobAsync(jobId, cancellationToken).ConfigureAwait(false);
+            if (job is null)
+            {
+                return AgentResponse.Error(request.RequestId, "job.not-found", "A queued download job was not found.");
+            }
+
+            if (!job.IsTerminal
+                && (job.BrowserState is not (BrowserTransferState.InProgress or BrowserTransferState.Complete)
+                    || job.RoutingState is not (RoutingState.WaitingForSelection or RoutingState.SelectionReady)))
+            {
+                return AgentResponse.Error(request.RequestId, "selection.not-pending", "A queued download can no longer skip folder routing.");
+            }
+        }
+
+        var skippedIds = await repository.SkipSelectionsAsync(
+            jobIds,
+            DateTimeOffset.UtcNow,
+            cancellationToken).ConfigureAwait(false);
+        var states = new List<object>(jobIds.Length);
+        foreach (var jobId in jobIds)
+        {
+            var job = await repository.GetJobAsync(jobId, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("A skipped download job could not be reloaded.");
+            if (!job.IsTerminal)
+            {
+                return AgentResponse.Error(request.RequestId, "selection.state-changed", "A queued selection did not reach a terminal state.");
+            }
+
+            states.Add(new
+            {
+                jobId,
+                status = job.Status.ToString(),
+                browserState = job.BrowserState.ToString(),
+                routingState = job.RoutingState.ToString(),
+            });
+        }
+
+        return AgentResponse.Ok(request.RequestId, new
+        {
+            requested = jobIds.Length,
+            skipped = skippedIds.Count,
+            jobs = states,
+        });
     }
 
     private async Task<AgentResponse> HandleJobsDeleteAsync(
@@ -744,24 +821,32 @@ public sealed class AgentCommandHandler(
         DownloadJob job,
         string? reportedFileName,
         string? reportedFilePath,
+        bool refreshBrowserActivity,
         CancellationToken cancellationToken)
     {
         var trusted = DownloadPresentation.TrustedFileName(reportedFileName)
             ?? DownloadPresentation.TrustedFileName(reportedFilePath);
+        var currentFileName = trusted ?? job.CurrentFileName;
+        var originalFileName = trusted is not null && string.IsNullOrWhiteSpace(job.OriginalFileName)
+            ? trusted
+            : job.OriginalFileName;
+        var fileNameChanged = !string.Equals(currentFileName, job.CurrentFileName, StringComparison.Ordinal)
+            || !string.Equals(originalFileName, job.OriginalFileName, StringComparison.Ordinal);
+        if (!fileNameChanged)
+        {
+            return job;
+        }
+
         var updated = job with
         {
-            CurrentFileName = trusted ?? job.CurrentFileName,
-            OriginalFileName = trusted is not null && string.IsNullOrWhiteSpace(job.OriginalFileName)
-                ? trusted
-                : job.OriginalFileName,
-            LastBrowserEventAt = DateTimeOffset.UtcNow,
-            IsBrowserRecordStale = false,
+            CurrentFileName = currentFileName,
+            OriginalFileName = originalFileName,
+            LastBrowserEventAt = refreshBrowserActivity ? DateTimeOffset.UtcNow : job.LastBrowserEventAt,
+            IsBrowserRecordStale = refreshBrowserActivity ? false : job.IsBrowserRecordStale,
         };
         await repository.UpdateJobAsync(
             updated,
-            trusted is not null && !string.Equals(trusted, job.CurrentFileName, StringComparison.Ordinal)
-                ? "download.filename-updated"
-                : "download.browser-event",
+            "download.filename-updated",
             cancellationToken).ConfigureAwait(false);
         return updated;
     }

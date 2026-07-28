@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-기준일: 2026-07-23 (Asia/Seoul)
+기준일: 2026-07-28 (Asia/Seoul)
 
 ## 요약
 
@@ -25,7 +25,8 @@
 - 중복 파일 번호 보존과 재시도 상태
 - 브라우저 전송 상태와 라우팅 상태를 분리한 작업 모델과 v1 → v2 SQLite 마이그레이션
 - 파일별 SelectSubfolder 카드, 명시적으로 체크한 항목만 일괄 적용, 건너뛰기와 세션 단위 나중에 선택
-- 생성/마지막 브라우저 이벤트 기준 30분 자동 팝업 정책, 이전 세션 대기 표시, 현재 큐 `모두 나중에 선택`
+- 생성/마지막 실제 브라우저 이벤트 기준 30분 자동 팝업 정책, 이전 세션 대기 표시, 현재 FIFO 전체를 DB `Skipped`로 원자적으로 확정하는 `모두 선택 안 함`
+- 개별/일괄 이동 안 함을 `selection.skip`/`selection.skip-many`로 영구 저장하고 startup·Native Messaging·Whale 재연결이 terminal Job을 Pending으로 되돌리지 않는 단조 복구
 - 고정 DIP 전용 선택 창, lazy 계층형 FolderTreePicker, 단일 FIFO, 숨김/최소화 상태의 선택창 HWND 직접 활성화, 취소 시 자동 닫기
 - `onCreated`/`filename` delta/완료 검색을 통한 같은 Job 파일명 갱신과 임시 이름 차단
 - `USER_CANCELED` 즉시 전송, interrupted 오류 우선순위, onErased 비취소 처리와 팝업 연령을 갱신하지 않는 service worker 시작 재조정
@@ -41,15 +42,15 @@
 - 실패할 때만 분류 코드를 남기는 Extension Native Messaging 진단 로그
 - Per-Monitor V2 WinUI 렌더링, 뷰포트 실폭 제한, 32/48 DIP 공통 상단 여백, 1초 상태 변경 감지
 - 저장된 System/Light/Dark를 열린 모든 Window와 이후 생성 Window에 적용하는 공통 ThemeManager
-- assembly informational version을 표시하는 정보 화면과 `Directory.Build.props` 기반 App/Agent/Native Host/Installer 단일 0.3.1 버전
-- self-contained win-x64 publish와 설치/업그레이드/제거가 검증된 per-user Inno Setup 0.3.1
+- assembly informational version을 표시하는 정보 화면과 `Directory.Build.props` 기반 App/Agent/Native Host/Installer 단일 0.3.2 버전
+- self-contained win-x64 publish와 설치/업그레이드가 검증된 per-user Inno Setup 0.3.2
 
 ## 빌드와 테스트
 
 | 항목 | 결과 |
 |---|---|
 | `.NET Debug build` | 성공, 경고 0, 오류 0 |
-| `.NET tests` | 73/73 통과(Core 46, Infrastructure 7, Integration 20) |
+| `.NET tests` | 80/80 통과(Core 47, Infrastructure 8, Integration 25) |
 | Extension ESLint/TypeScript build | 성공 |
 | Extension Node tests | 13/13 통과 |
 | Agent Named Pipe ping | 성공 |
@@ -59,7 +60,7 @@
 | WinUI QHD 125% | 수정 전 DPI Unaware/96 → 수정 후 Per-Monitor V2/120 확인 |
 | WinUI 반응형 폭 | 900px 창에서 우측 넘침 0, 2400px 창에서 1100 DIP 폼 중앙 정렬 확인 |
 | clean clone | 공식 `feature/initial-spike@9975c47`에서 bootstrap/build/test 성공 |
-| Installer compile/install/upgrade/uninstall | 성공, 사용자 DB 해시·행 수 보존, 자동 시작/6개 Native Host/바로가기 정리 확인 |
+| Installer compile/install/upgrade/uninstall | 0.3.2 compile·기존 설치 위 upgrade 성공. 사용자 규칙 3, 이력 49, Pending 28, terminal 21과 설정 SHA-256 보존 |
 
 ## 브라우저 검증
 
@@ -74,11 +75,14 @@
 
 Whale 에서 로컬 HTTP fixture로 Automatic과 SelectSubfolder를 실제 검증했습니다. Automatic은 C: 기본 다운로드 위치에서 D: 테스트 규칙 루트로 교차 볼륨 이동했고, SelectSubfolder는 테스트 루트에서 `kr → 모야지`만 확장·선택해 이동했습니다. 100자 이상 노드를 표시하고 복귀해도 선택 창 폭은 700px(125%의 560 DIP)로 동일했습니다. 0.3.0 사용자 검증에서 트레이 숨김은 통과했지만 최소화 상태는 선택창이 Whale 뒤에 남는 회귀가 확인됐고, 0.3.1에서 선택창 HWND 전용 foreground/입력 스레드 재시도와 topmost 정책으로 수정했습니다. 2026-07-23에는 아무 선택 없음/선택 완료/나중에 선택/이동 안 함 네 실제 Whale 취소가 모두 약 0.24초 안에 `Cancelled`로 반영되고 팝업·Pending·이동 0건과 이력 취소선을 확인했습니다.
 
+2026-07-28에는 설치된 0.3.2 App·Agent·Native Host와 별도 Whale 프로필로 개별 `이번 파일은 이동하지 않기`, 2건 `모두 선택 안 함`, Whale 완전 종료·재실행, App/Agent 재시작을 검증했습니다. 처리 Job은 모두 `Complete / Skipped`, terminal로 유지되고 재팝업은 0건이었습니다. 실제 미결정 신규 Job은 `Complete / WaitingForSelection`과 팝업을 유지했습니다. Whale 다운로드 기록 UI에서 취소한 Job은 Agent 수신 후 17ms에 선택창이 닫히고 `Cancelled / NotRequired`로 분리됐습니다. 사용자가 설치한 환경에서의 직접 재검증은 아직 남아 있으므로 해결 완료로 확정하지 않습니다.
+
 ## 알려진 문제와 제한
 
 - downloads API만으로 다운로드 시작 탭 URL을 신뢰성 있게 얻을 수 없어 활성 탭을 추측하지 않습니다. 현재 referrer와 파일 URL을 분리해 사용합니다.
 - App 실행 파일을 찾을 수 있으면 Agent가 선택 UI를 시작하고, 실행 중이면 1초 폴링과 독립 창으로 FIFO를 표시합니다. 설치 손상으로 App을 찾지 못해도 다운로드는 원래 위치에서 완료되고 Pending에 남습니다.
-- “나중에 선택”과 “모두 나중에 선택” 팝업 억제는 현재 App 세션 동안만 유지됩니다. 30분이 지난 작업은 대기 탭에서 수동 처리하며 트리의 새 폴더 생성은 미구현입니다.
+- 개별 “나중에 선택” 팝업 억제는 현재 App 세션 동안만 유지됩니다. `모두 선택 안 함`은 현재 자동 FIFO의 각 Job을 영구 `Skipped`로 저장합니다. 30분이 지난 작업은 대기 탭에서 수동 처리하며 트리의 새 폴더 생성은 미구현입니다.
+- 기존 사용자 DB의 stale Pending 28건에는 `selection.skipped` 이벤트가 없고 과거 `모두 나중에 선택` 로그만 있어 Job별 결정을 안전하게 복원할 수 없습니다. 자동 migration은 하지 않았으며 대기 탭의 규칙별 `이 규칙의 대기 파일 모두 이동하지 않기` 확인 동작으로만 원자적 정리가 가능합니다.
 - Extension 시작 시 Agent의 진행 중 ID를 브라우저 다운로드 기록과 대조해 완료·취소·중단을 재전송합니다. 이 재조정은 실제 브라우저 이벤트 시각을 갱신하지 않으므로 오래된 Pending을 자동 팝업 대상으로 되살리지 않으며, 브라우저 기록에서 사라진 작업도 근거 없이 완료·삭제하지 않습니다.
 - Whale registry adapter는 이 PC에서 검증했습니다. Brave/Vivaldi/Opera adapter는 실제 PC 검증이 필요합니다.
 - 브라우저 자체 “다운로드 전에 저장 위치 확인” 설정 감지와 안내는 문서만 있고 UI 자동 감지는 미구현입니다.

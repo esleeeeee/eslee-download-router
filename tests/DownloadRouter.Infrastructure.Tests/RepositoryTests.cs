@@ -124,6 +124,46 @@ public sealed class RepositoryTests : IDisposable
         Assert.NotNull(await repository.GetJobAsync(job.Id, CancellationToken.None));
     }
 
+    [Fact]
+    public async Task SkipSelectionsRollsBackTheWholeBatchWhenOneJobIsNotTerminalOrPending()
+    {
+        var paths = AppPaths.CreateDefault();
+        var repository = new DownloadRouterRepository(paths);
+        await repository.InitializeAsync(CancellationToken.None);
+        var now = DateTimeOffset.UtcNow;
+        var rule = new DownloadRule(
+            Guid.NewGuid(), "batch skip", true, RuleMatchType.ExactHost, "example.com",
+            RuleMatchTarget.FileUrl, root, StorageMode.SelectSubfolder, 0, 0, now, now);
+        await repository.UpsertRuleAsync(rule, CancellationToken.None);
+        var pending = new DownloadJob(
+            Guid.NewGuid(), BrowserKind.Whale, "batch-pending", "pending.bin", "pending.bin",
+            null, null, null, null, "https://example.com", rule.Id, null, null, null,
+            BrowserTransferState.Complete, RoutingState.WaitingForSelection,
+            null, null, now, null);
+        var moving = pending with
+        {
+            Id = Guid.NewGuid(),
+            BrowserDownloadId = "batch-moving",
+            OriginalFileName = "moving.bin",
+            CurrentFileName = "moving.bin",
+            RoutingState = RoutingState.Moving,
+        };
+        await repository.CreateJobAsync(pending, CancellationToken.None);
+        await repository.CreateJobAsync(moving, CancellationToken.None);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SkipSelectionsAsync(
+            [pending.Id, moving.Id],
+            DateTimeOffset.UtcNow,
+            CancellationToken.None));
+
+        Assert.Equal(
+            RoutingState.WaitingForSelection,
+            (await repository.GetJobAsync(pending.Id, CancellationToken.None))!.RoutingState);
+        Assert.Equal(
+            RoutingState.Moving,
+            (await repository.GetJobAsync(moving.Id, CancellationToken.None))!.RoutingState);
+    }
+
     public void Dispose()
     {
         Environment.SetEnvironmentVariable("DOWNLOAD_ROUTER_DATA_DIR", previousOverride);

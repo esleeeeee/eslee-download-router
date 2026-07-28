@@ -77,6 +77,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-installer.ps
 - 트리는 전체 재귀 열거를 금지하고 확장한 노드의 직계 자식만 비동기로 읽습니다. UI와 Agent 양쪽에서 루트 경계를 검사합니다.
 - 이력의 경로 변경은 규칙을 수정하지 않고 Job의 상대 경로만 변경합니다. 이미 이동된 파일은 사용자 확인 뒤 기존 안전 이동 서비스를 다시 사용합니다.
 - 자동 팝업은 `SelectionPromptPolicy.AutoPromptWindow`(30분)를 통과한 Job만 사용합니다. 대기 탭과 InfoBadge는 모든 실제 Pending을 사용하므로 두 목록을 다시 합치지 마세요.
+- `Skipped`, `Cancelled`, `Interrupted`, `Completed`, `Failed` 같은 terminal Job을 startup/reconnect/중복 브라우저 이벤트에서 Pending으로 되돌리지 마세요. 중복 start와 값이 같은 metadata는 `LastBrowserEventAt`도 갱신하지 않습니다.
+- 큐 일괄 이동 안 함은 UI collection만 비우지 말고 `selection.skip-many`의 단일 SQLite transaction이 성공한 뒤 큐를 비웁니다. 과거 stale Pending은 행별 사용자 결정 근거가 없으면 자동 migration하지 않습니다.
 - 테마는 Window별 임시 코드 대신 App의 단일 ThemeManager에 등록합니다. 새 Window를 추가하면 Content 설정 직후 등록하고 UI 설정은 기존 `config.local.json`에 보존합니다.
 
 ## 설치/제거 검증

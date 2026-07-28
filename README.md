@@ -2,7 +2,7 @@
 
 Chromium 기반 브라우저에서 완료된 다운로드를 사이트 규칙에 따라 Windows 폴더로 분류하는 로컬 전용 애플리케이션입니다. 규칙이 없거나 로컬 구성 요소가 응답하지 않으면 브라우저의 원래 다운로드를 그대로 유지하는 fail-open 방식을 사용합니다.
 
-> 현재 상태: 핵심 라우팅, 계층형 폴더 선택, 트레이 상주, 로그인 자동 시작, 규칙/이력 관리와 사용자 단위 설치 흐름을 구현했습니다. 30분 자동 팝업 정책, Whale 취소 재조정, 최소화 상태 선택창 전면 활성화, 전역 System/Light/Dark 테마와 단일 0.3.1 제품 버전 체계를 포함합니다. 자세한 결과와 남은 제약은 [PROJECT_STATE.md](PROJECT_STATE.md)를 확인하세요.
+> 현재 상태: 핵심 라우팅, 계층형 폴더 선택, 트레이 상주, 로그인 자동 시작, 규칙/이력 관리와 사용자 단위 설치 흐름을 구현했습니다. 30분 자동 팝업 정책, 영구 개별/일괄 이동 안 함, Whale 취소 재조정, 최소화 상태 선택창 전면 활성화, 전역 System/Light/Dark 테마와 단일 0.3.2 제품 버전 체계를 포함합니다. 자세한 결과와 남은 제약은 [PROJECT_STATE.md](PROJECT_STATE.md)를 확인하세요.
 
 ## 구성 요소
 
@@ -98,7 +98,7 @@ PowerShell 실행 정책이 로컬 스크립트를 막는 경우 예시처럼 `p
 
 `Directory.Build.props`의 `VersionPrefix`가 App, Agent, Native Host, 설치 프로그램의 단일 버전 원본입니다. 정보 화면은 실행 assembly의 informational version과 짧은 commit, 설치형/개발 빌드 구분을 표시합니다. 일반 설정의 시스템/라이트/다크 테마는 `%LOCALAPPDATA%\eslee\DownloadRouter\config.local.json`에 저장되어 열린 창, 새 선택 창, 트레이 복원과 백그라운드 시작에 동일하게 적용됩니다.
 
-SelectSubfolder 자동 팝업은 생성 또는 마지막 실시간 브라우저 이벤트가 30분 이내인 작업만 대상으로 합니다. Extension 시작 시 검색 기반 재조정은 이 연령을 갱신하지 않습니다. 오래된 작업과 브라우저 기록을 찾을 수 없는 작업은 삭제하지 않고 대기 탭과 배지에 유지합니다. 선택 창의 `모두 나중에 선택`은 현재 App 세션의 기존 큐만 숨기며 이후 새 다운로드는 정상 표시합니다.
+SelectSubfolder 자동 팝업은 생성 또는 마지막 실시간 브라우저 이벤트가 30분 이내인 작업만 대상으로 합니다. Extension 시작 시 검색 기반 재조정, 중복 `download.started`, 실제 이름이 바뀌지 않은 metadata replay는 이 연령을 갱신하지 않습니다. 오래된 작업과 브라우저 기록을 찾을 수 없는 작업은 삭제하지 않고 대기 탭과 배지에 유지합니다. `이번 파일은 이동하지 않기`는 해당 Job을, `모두 선택 안 함`은 현재 FIFO의 모든 Job을 DB terminal `Skipped`로 영구 저장하므로 Whale·Agent·Windows 재시작 뒤 다시 표시되지 않습니다. 개별 `나중에 선택`만 현재 App 세션 동안 팝업을 숨깁니다.
 
 설계와 위협 모델은 [ARCHITECTURE.md](ARCHITECTURE.md), [SECURITY.md](SECURITY.md)를 참고하세요.
 
