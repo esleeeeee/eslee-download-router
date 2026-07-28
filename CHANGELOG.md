@@ -1,8 +1,14 @@
 # 변경 이력
 
-모든 주요 변경은 이 파일에 누적합니다. 버전은 Semantic Versioning을 따를 예정입니다.
+모든 주요 변경은 이 파일에 누적합니다. 버전은 Semantic Versioning을 따릅니다.
 
 ## [Unreleased]
+
+현재 예정된 변경은 없습니다.
+
+## [1.0.0] - 2026-07-28
+
+0.3.x Release Candidate에서 검증한 기능, 상태 복구, 브랜딩과 설치 흐름을 정식 공개 버전으로 승격했습니다. App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.0.0` 버전을 사용하며 README, 지원 범위, 설치 안내와 배포 문서를 공개 제품 수준으로 정리했습니다.
 
 ### Added
 
@@ -14,7 +20,7 @@
 - 현재 FIFO의 1~1000개 Job을 한 SQLite transaction에서 terminal `Skipped`로 저장하는 `selection.skip-many`와 규칙별 stale Pending 정리 UI
 - Extension `download.cancelled`/`download.interrupted`, 시작 시 complete/interrupted/in_progress/stale 재조정과 정제된 연결 진단
 - 전역 `ThemeManager`, System/Light/Dark 사용자 설정 저장과 열린/새 Window 즉시 적용
-- 정보 화면 제품명·0.3.3 버전·commit·설치형/개발 빌드 표시, 데이터 폴더/GitHub 열기
+- 정보 화면 제품명, 1.0.0 버전, commit, 설치형/개발 빌드 표시, 데이터 폴더와 GitHub 열기
 - `Directory.Build.props` 단일 버전 원본과 App/Agent/Native Host/Installer 일치 검증
 
 - .NET 10/WinUI 3 모노레포와 재현 가능한 bootstrap/build/test/publish 스크립트
@@ -40,7 +46,7 @@
 
 ### Changed
 
-- App/Agent/Native Host/Installer 단일 제품 버전을 최종 branding 배포판 0.3.3으로 갱신
+- App, Agent, Native Host와 Installer 단일 제품 버전을 정식 배포판 1.0.0으로 갱신
 - 트레이가 Windows 기본 아이콘 대신 App EXE의 embedded small icon을 추출해 사용하고 종료 시 HICON을 해제
 - 취소 상태는 선택 여부와 관계없이 `Cancelled`가 되고 Waiting/SelectionReady 라우팅은 `NotRequired`로 종료
 - UI 상태 갱신 주기를 500ms로 줄여 취소 후 팝업·Pending·이력을 1초 이내 반영
@@ -102,3 +108,28 @@
 - 새 폴더 생성과 세션 간 “나중에 선택” 알림 미구현
 - 실제 로그아웃/로그인 자동 시작과 미완료 작업 자동 복구 미검증
 - 설치 파일 코드 서명 미구현
+
+## [0.3.3] - 2026-07-28
+
+- eslee Download Router 전용 master PNG, 9-size Windows ICO와 Extension 아이콘을 추가했습니다.
+- App EXE, WinUI Window, taskbar, 트레이, Installer, shortcut와 제거 항목에 같은 브랜딩을 적용했습니다.
+- 트레이가 App EXE의 small icon을 사용하고 HICON을 종료 시 해제하도록 수정했습니다.
+- npm 개발 의존성 감사를 정리해 high 이상 취약점 0건을 확인했습니다.
+
+## [0.3.2] - 2026-07-28
+
+- `이번 파일은 이동하지 않기`와 `모두 선택 안 함`을 SQLite terminal `Skipped`로 영구 저장했습니다.
+- Agent, Native Messaging과 Whale 재연결에서 terminal Job이 Pending으로 돌아가지 않도록 단조 상태 전이를 보강했습니다.
+- 실제 이벤트가 아닌 시작 재조정과 중복 metadata가 30분 자동 팝업 연령을 갱신하지 않도록 수정했습니다.
+
+## [0.3.1] - 2026-07-23
+
+- MainWindow 최소화 상태에서도 독립 FolderSelectionWindow만 전면 활성화하도록 HWND 처리 순서를 수정했습니다.
+- Whale `USER_CANCELED`, 기타 interrupted와 브라우저 기록 삭제를 구분했습니다.
+- System, Light, Dark 공통 ThemeManager와 assembly 기반 정보 화면 버전을 추가했습니다.
+
+## [0.3.0] - 2026-07-23
+
+- 사용자 단위 App, Agent, Native Host와 Inno Setup 설치 흐름을 통합했습니다.
+- 30분 자동 팝업 정책, FIFO 위치 표시와 이전 세션 Pending 관리를 추가했습니다.
+- Whale 다운로드 취소와 상태 재조정 진단을 구현했습니다.

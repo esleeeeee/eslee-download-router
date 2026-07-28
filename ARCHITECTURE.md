@@ -98,10 +98,12 @@ Interrupted                RetryPending
 - 확장: `npm ci` 후 TypeScript compile, manifest 복사, ZIP 생성
 - Native Host: HKCU 브라우저별 registry adapter와 `%LOCALAPPDATA%` manifest
 - Installer: per-user, `PrivilegesRequired=lowest`
-- 버전: `Directory.Build.props` VersionPrefix를 App/Agent/Native Host assembly와 Installer AppVersion의 단일 원본으로 사용
+- 버전: 정식 1.0.0부터 `Directory.Build.props` VersionPrefix를 App/Agent/Native Host assembly와 Installer AppVersion의 단일 원본으로 사용
+- Extension identity: manifest key와 고정 ID는 제품 버전과 독립적으로 유지하며 Installer가 같은 Extension 파일과 Native Messaging origin을 배포
 - 자동 시작: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`에 설치 App의 정확한 따옴표 경로와 `--background`
 - X 버튼: 기본은 AppWindow 숨김, 트레이 `종료` 또는 `--shutdown`만 App/Agent 정상 종료
 - 제거: 설치 파일·자동 시작·Native Host만 제거하고 사용자 DB와 규칙은 보존
+- Release: 최종 main commit에서 Installer를 다시 빌드하고 같은 commit을 가리키는 Git tag와 GitHub Release에 단일 설치 asset으로 게시
 
 설치 페이로드와 PC별 manifest는 커밋하지 않습니다.
 

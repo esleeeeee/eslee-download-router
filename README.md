@@ -1,38 +1,150 @@
-# eslee Download Router
+<p align="center">
+  <img src="assets/branding/eslee-download-router.png" width="180" alt="eslee Download Router icon">
+</p>
 
-Chromium 기반 브라우저에서 완료된 다운로드를 사이트 규칙에 따라 Windows 폴더로 분류하는 로컬 전용 애플리케이션입니다. 규칙이 없거나 로컬 구성 요소가 응답하지 않으면 브라우저의 원래 다운로드를 그대로 유지하는 fail-open 방식을 사용합니다.
+<h1 align="center">eslee Download Router</h1>
 
-> 현재 상태: 핵심 라우팅, 계층형 폴더 선택, 트레이 상주, 로그인 자동 시작, 규칙/이력 관리와 사용자 단위 설치 흐름을 구현했습니다. 30분 자동 팝업 정책, 영구 개별/일괄 이동 안 함, Whale 취소 재조정, 최소화 상태 선택창 전면 활성화, 전역 System/Light/Dark 테마와 eslee 전용 branding을 적용한 단일 0.3.3 제품 버전 체계를 포함합니다. 자세한 결과와 남은 제약은 [PROJECT_STATE.md](PROJECT_STATE.md)를 확인하세요.
+<p align="center">
+  Windows에서 Chromium 계열 브라우저의 다운로드를 사이트 규칙에 따라 자동 정리하거나, 파일마다 저장할 하위 폴더를 직접 선택하는 로컬 다운로드 라우터입니다.
+</p>
 
-## 구성 요소
+<p align="center">
+  <a href="https://github.com/esleeeeee/eslee-Download-Router/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/esleeeeee/eslee-Download-Router"></a>
+  <a href="https://github.com/esleeeeee/eslee-Download-Router/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/esleeeeee/eslee-Download-Router/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <img alt="Windows 11" src="https://img.shields.io/badge/Windows_11-x64-0078D4?logo=windows11&logoColor=white">
+  <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white">
+</p>
 
-```text
-Chromium MV3 Extension
-  -> Native Messaging (길이 접두사 JSON)
-  -> DownloadRouter.NativeHost
-  -> 현재 사용자 전용 Named Pipe
-  -> 단일 인스턴스 DownloadRouter.Agent
-  -> SQLite / 규칙 엔진 / 안전한 파일 이동
-  -> WinUI 3 설정 앱
+<p align="center">
+  <strong><a href="https://github.com/esleeeeee/eslee-Download-Router/releases/latest/download/eslee-download-router-setup.exe">최신 설치 파일 다운로드</a></strong>
+</p>
+
+## 소개
+
+eslee Download Router는 브라우저의 기본 다운로드를 가로막지 않으면서, 사용자가 만든 사이트 규칙에 맞는 완료 파일만 정리합니다. 규칙이 없거나 Extension, Native Host, Agent 중 하나가 응답하지 않으면 원래 브라우저 다운로드를 그대로 유지하는 fail-open 방식을 사용합니다.
+
+모든 규칙, 다운로드 이력, 설정과 진단 데이터는 로컬 PC의 `%LOCALAPPDATA%\eslee\DownloadRouter`에 저장합니다. 서버, 텔레메트리, 광고 SDK와 전체 방문 기록 수집은 사용하지 않습니다.
+
+## 주요 기능
+
+### Automatic
+
+사이트별 규칙과 저장 위치를 지정하면 다운로드가 완료되고 파일이 안정화된 뒤 자동으로 이동합니다. 도메인과 하위 도메인, 정확한 호스트, URL 포함 조건을 지원합니다.
+
+### SelectSubfolder
+
+다운로드마다 독립된 `FolderSelectionWindow`가 열립니다. 규칙에 지정한 root와 그 하위 폴더만 선택할 수 있고, `..`, 심볼릭 링크, junction과 reparse point를 통한 root 외부 이동은 App과 Agent 양쪽에서 차단합니다.
+
+### FolderTreePicker
+
+폴더 트리는 처음부터 전체를 재귀 검색하지 않습니다. 사용자가 펼친 노드의 직계 자식만 비동기로 읽는 lazy-loading 방식이며 긴 폴더명도 창 폭을 늘리지 않고 표시합니다.
+
+### Download History
+
+실제 최종 파일명, 브라우저 전송 상태, 라우팅 상태와 최종 경로를 표시합니다. 완료 파일의 경로를 바꾸고 같은 안전 이동 절차로 다시 이동할 수 있습니다. 이력 항목을 삭제해도 실제 파일은 삭제하지 않습니다.
+
+### Pending
+
+아직 폴더를 선택하지 않은 파일은 저장 위치 선택 대기 화면에서 관리합니다.
+
+- `나중에 선택`: 현재 App 세션에서만 자동 팝업을 숨깁니다.
+- `이번 파일은 이동하지 않기`: 해당 Job을 영구 `Skipped`로 저장합니다.
+- `모두 선택 안 함`: 현재 FIFO의 모든 Job을 한 SQLite transaction에서 영구 `Skipped`로 저장합니다.
+- 저장된 결정은 Whale, Agent, App 또는 Windows를 다시 시작해도 다시 Pending으로 돌아가지 않습니다.
+- 30분이 지난 이전 세션 작업은 대기 목록에는 유지하지만 시작 직후 자동 팝업으로 표시하지 않습니다.
+
+### Browser cancellation
+
+브라우저의 `USER_CANCELED`와 네트워크, 파일, 서버 오류에 따른 interrupted 상태를 구분합니다. 사용자가 취소한 파일은 이동하지 않고 이력에 취소선과 설명으로 남습니다.
+
+### Background
+
+App은 시스템 트레이에 상주합니다. 메인 창의 X 버튼은 종료가 아니라 트레이 숨김이며 트레이 메뉴에서 다시 열 수 있습니다. 설치 시 선택한 경우 Windows 로그인 뒤 `--background`로 자동 시작합니다.
+
+### Theme
+
+System, Light, Dark 테마를 지원합니다. 선택값은 LocalAppData 설정에 저장되고 MainWindow, FolderSelectionWindow, 대화상자, 트레이에서 다시 연 창과 이후 생성되는 창에 공통 적용됩니다.
+
+## 파일 이동 안전성
+
+- 기존 대상 파일을 덮어쓰지 않고 `파일 (1).ext` 형식으로 새 이름을 선택합니다.
+- 같은 볼륨에서는 예약된 최종 경로로 이동합니다.
+- 다른 볼륨에서는 임시 파일로 복사합니다.
+- 복사본의 파일 크기와 SHA-256을 원본과 비교합니다.
+- 검증에 성공한 뒤 최종 이름으로 확정하고 원본을 삭제합니다.
+- 실패하면 가능한 한 원본을 유지하고 재시도 또는 실패 상태를 기록합니다.
+- Agent 장애나 규칙 미매칭은 브라우저 다운로드 자체를 막지 않습니다.
+
+## 지원 환경과 실제 검증 범위
+
+| 환경 | 상태 |
+|---|---|
+| Windows 11 x64 | 지원 및 실제 설치 검증 완료 |
+| Naver Whale  | Extension, Native Messaging, Automatic, SelectSubfolder와 사용자 재시작 검증 완료 |
+| Microsoft Edge, Google Chrome | 설치 탐지와 Native Host 등록 구현, 실제 다운로드 검증 전 |
+| Brave, Vivaldi, Opera | Native Host 등록 adapter 구현, 실제 브라우저 검증 전 |
+| QHD, Windows 125% | Per-Monitor V2, 반응형 폭, 테마와 선택 창 실제 검증 완료 |
+| FHD, 4K, Windows 100%, 150% | DIP 및 반응형 경계 자동 검증 완료, 물리 디스플레이 실검증 전 |
+
+Firefox, Safari, 모바일과 Windows 이외 운영체제는 지원하지 않습니다. 자세한 기록은 [브라우저 호환성 문서](docs/BROWSER_COMPATIBILITY.md)를 확인하세요.
+
+## 설치
+
+1. [v1.0.0 Release](https://github.com/esleeeeee/eslee-Download-Router/releases/tag/v1.0.0)에서 `eslee-download-router-setup.exe`를 내려받습니다.
+2. 설치 프로그램을 실행합니다. 관리자 권한이 필요 없는 현재 사용자 단위 설치입니다.
+3. 설치 프로그램은 App, Agent, Native Host, Extension 파일을 설치하고 지원 브라우저의 HKCU Native Messaging 등록을 구성합니다.
+4. Whale에서 `whale://extensions`를 열고 개발자 모드를 켭니다.
+5. `압축해제된 확장앱 설치`에서 `%LOCALAPPDATA%\Programs\eslee\DownloadRouter\extension` 폴더를 선택합니다.
+6. 표시된 Extension ID가 `gilicenlclaemgiijcjjejilikbooggj`인지 확인합니다.
+
+Native Messaging 레지스트리나 manifest를 사용자가 직접 수정할 필요는 없습니다. 브라우저 스토어 자동 설치는 아직 제공하지 않으므로 확장 로드 단계만 수동입니다. Edge, Chrome과 다른 Chromium 브라우저의 관리 주소는 [수동 확장 설치 문서](docs/MANUAL_EXTENSION_INSTALL.md)에 정리되어 있습니다.
+
+설치 파일은 현재 코드 서명되지 않았습니다. Windows가 게시자를 확인할 수 없다는 경고를 표시할 수 있습니다.
+
+## 간단 사용법
+
+### Automatic 규칙
+
+1. 사이트 규칙에서 도메인 또는 URL 조건을 입력합니다.
+2. 처리 방식을 `Automatic`으로 선택합니다.
+3. Windows FolderPicker로 저장 폴더를 지정하고 규칙을 저장합니다.
+4. 해당 사이트에서 다운로드하면 완료 후 파일이 자동 이동합니다.
+
+### SelectSubfolder 규칙
+
+1. 처리 방식을 `SelectSubfolder`로 선택하고 선택 범위의 root 폴더를 지정합니다.
+2. 다운로드를 시작합니다.
+3. 표시된 FolderSelectionWindow에서 root 또는 하위 폴더를 선택합니다.
+4. 나중에 처리할 파일은 저장 위치 선택 대기 화면에서 다시 엽니다.
+5. 메인 창을 닫아 트레이로 숨긴 뒤에는 트레이 메뉴의 `열기` 또는 `저장 위치 선택 대기 열기`를 사용합니다.
+
+## 아키텍처
+
+```mermaid
+flowchart LR
+    A["Chromium Browser"] --> B["Manifest V3 Extension"]
+    B --> C["Native Messaging Host"]
+    C --> D["Current-user Named Pipe"]
+    D --> E["Download Router Agent"]
+    E --> F["SQLite"]
+    E --> G["File Router"]
+    H["WinUI 3 App"] <--> D
 ```
 
-- 정식 지원 목표: Naver Whale, Microsoft Edge, Google Chrome
-- 호환 지원 목표: Brave, Vivaldi, Opera
-- 제외: Firefox, Safari, 모바일, Windows 이외 운영체제
-- 데이터 위치: `%LOCALAPPDATA%\eslee\DownloadRouter`
-- 서버, 텔레메트리, 광고 SDK, 전체 방문 기록 수집 없음
+Extension은 브라우저 이벤트를 전달하고 Native Host는 입력 검증과 Named Pipe 중계만 담당합니다. Agent가 규칙, 작업 상태, SQLite와 파일 이동을 단독으로 소유하며 App은 같은 IPC 계약으로 UI를 제공합니다. 세부 구조와 신뢰 경계는 [ARCHITECTURE.md](ARCHITECTURE.md)를 참고하세요.
 
-## 개발 요구사항
+## 기술 스택
 
-- Windows 11 x64
-- [.NET SDK 10.0.302](https://dotnet.microsoft.com/download/dotnet/10.0) — `global.json`에 고정
-- Node.js 24 이상과 npm 11 이상
-- PowerShell 5.1 이상
-- 선택: Inno Setup 6(설치 파일 생성 시)
+- C#과 .NET 10
+- WinUI 3과 Windows App SDK
+- SQLite
+- TypeScript Manifest V3 Chromium Extension
+- Native Messaging과 current-user Named Pipe
+- xUnit과 Node test runner
+- PowerShell 자동화
+- Inno Setup 사용자 단위 Installer
 
-스크립트는 도구를 자동 설치하지 않습니다. 누락된 항목을 확인하고 설치 안내만 표시합니다.
-
-## 빠른 시작
+## 개발
 
 ```powershell
 git clone https://github.com/esleeeeee/eslee-Download-Router.git
@@ -40,87 +152,26 @@ cd eslee-Download-Router
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-dev.ps1 -SkipBuild
 ```
 
-개발 환경 실행은 Agent를 백그라운드로 시작하고 설정 앱을 엽니다. 앱과 Agent를 종료한 뒤 Native Host 게시 및 등록을 진행하세요.
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Configuration Release -PublishNativeHost
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\register-native-host.ps1 -Action Register -Browser Edge,Whale,Chrome
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-extension.ps1
-```
-
-브라우저 개발자 모드에서 압축 해제된 확장 경로 `src\DownloadRouter.Extension\dist`를 로드합니다. 고정 공개 키로 계산되는 개발 확장 ID는 `gilicenlclaemgiijcjjejilikbooggj`입니다. 개인 키는 저장소에 포함하지 않습니다. 단계별 절차는 [docs/MANUAL_EXTENSION_INSTALL.md](docs/MANUAL_EXTENSION_INSTALL.md)에 있습니다.
-
-## 주요 명령
-
-| 목적 | 명령 |
-|---|---|
-| 환경 확인 및 복원 | `scripts\bootstrap.ps1` |
-| 전체 빌드 | `scripts\build.ps1` |
-| 전체 자동 테스트 | `scripts\test.ps1` |
-| Agent IPC 스모크 테스트 | `scripts\smoke-agent.ps1` |
-| 확장 패키지 생성 | `scripts\package-extension.ps1` |
-| self-contained 설치 페이로드 | `scripts\publish.ps1` |
-| 사용자 단위 설치 파일 | `scripts\build-installer.ps1` |
-| Native Host 상태 확인 | `scripts\register-native-host.ps1 -Action Status` |
-| 진단 | `scripts\diagnose.ps1` |
-
-PowerShell 실행 정책이 로컬 스크립트를 막는 경우 예시처럼 `powershell -ExecutionPolicy Bypass -File ...` 형식으로 실행합니다.
-
-## 저장소 구조
-
-- `src/DownloadRouter.Core`: 도메인 모델, 규칙, 경로, IPC, 상태 머신
-- `src/DownloadRouter.Infrastructure`: SQLite, 파일 이동, JSONL 로깅
-- `src/DownloadRouter.Agent`: 단일 인스턴스 중앙 처리기와 Named Pipe 서버
-- `src/DownloadRouter.NativeHost`: 최소 권한 Native Messaging 브리지
-- `src/DownloadRouter.App`: WinUI 3 설정 및 대기 작업 UI
-- `src/DownloadRouter.Extension`: TypeScript Manifest V3 확장
-- `assets/branding`: 제품 master PNG와 multi-resolution Windows ICO
-- `tests`: .NET 단위·기능·통합 테스트
-- `installer`: 사용자 단위 Inno Setup 정의
-- `scripts`: 복원, 빌드, 테스트, 게시, 등록, 진단 자동화
-
-## 안전 원칙
-
-- 규칙이 없는 다운로드는 추적하거나 이동하지 않습니다.
-- 브라우저가 완료를 보고하고 파일이 안정화되기 전에는 이동하지 않습니다.
-- 다른 볼륨은 임시 파일 복사, 크기와 SHA-256 검증, 최종 이름 변경 후에만 원본을 삭제합니다.
-- 기존 파일을 덮어쓰지 않고 `파일 (1).ext` 형식으로 보존합니다.
-- 직접 선택 경로는 지정 루트 내부로 제한하고 `..`, 심볼릭 링크, junction, reparse point 탈출을 거부합니다.
-- URL 자격 증명, query, fragment는 저장 전에 제거합니다.
-
-## 설치형 실행
-
-`scripts\build-installer.ps1`은 Release self-contained 페이로드와 Inno Setup 사용자 단위 설치 파일을 `artifacts\installer`에 만듭니다. 설치본은 App을 `--background`로 로그인 자동 시작하고, App이 단일 인스턴스 트레이 호스트로서 Agent 실행을 보장합니다. 기본 X 버튼 동작은 메인 창 숨기기이며 완전 종료는 트레이의 `종료` 또는 일반 설정의 명시적 종료 동작으로 수행합니다.
-
-설치/업그레이드 시 기존 프로세스는 정상 종료 신호를 받고, Whale·Edge·Chrome·Brave·Vivaldi·Opera의 HKCU Native Host가 설치 경로로 등록됩니다. 제거 시 자동 시작, 바로가기와 Native Host 등록만 제거하며 `%LOCALAPPDATA%\eslee\DownloadRouter`의 규칙·이력 DB는 보존합니다.
-
-`Directory.Build.props`의 `VersionPrefix`가 App, Agent, Native Host, 설치 프로그램의 단일 버전 원본입니다. 정보 화면은 실행 assembly의 informational version과 짧은 commit, 설치형/개발 빌드 구분을 표시합니다. 일반 설정의 시스템/라이트/다크 테마는 `%LOCALAPPDATA%\eslee\DownloadRouter\config.local.json`에 저장되어 열린 창, 새 선택 창, 트레이 복원과 백그라운드 시작에 동일하게 적용됩니다.
-
-SelectSubfolder 자동 팝업은 생성 또는 마지막 실시간 브라우저 이벤트가 30분 이내인 작업만 대상으로 합니다. Extension 시작 시 검색 기반 재조정, 중복 `download.started`, 실제 이름이 바뀌지 않은 metadata replay는 이 연령을 갱신하지 않습니다. 오래된 작업과 브라우저 기록을 찾을 수 없는 작업은 삭제하지 않고 대기 탭과 배지에 유지합니다. `이번 파일은 이동하지 않기`는 해당 Job을, `모두 선택 안 함`은 현재 FIFO의 모든 Job을 DB terminal `Skipped`로 영구 저장하므로 Whale·Agent·Windows 재시작 뒤 다시 표시되지 않습니다. 개별 `나중에 선택`만 현재 App 세션 동안 팝업을 숨깁니다.
-
-설계와 위협 모델은 [ARCHITECTURE.md](ARCHITECTURE.md), [SECURITY.md](SECURITY.md)를 참고하세요.
-
-## 현재 제한
-
-- Chromium downloads API가 다운로드 시작 탭 URL을 직접 제공하지 않으므로, 신뢰할 수 없는 활성 탭 추측은 하지 않습니다. 제공되는 referrer, 최초 URL, 최종 URL을 분리해 사용합니다.
-- 폴더 트리는 lazy loading과 선택 노드 새로 고침을 지원하지만 새 폴더 만들기는 제공하지 않습니다.
-- 실제 Windows 재부팅과 로그인 후 자동 시작 및 정상 동작은 사용자 환경에서 확인했습니다.
-- `System` 테마는 WinUI의 `ElementTheme.Default`를 사용합니다. Windows 앱 테마 실시간 변경은 WinUI 알림에 따르며, 최소한 다음 창 생성과 App 재시작 시에는 현재 시스템 값을 반영합니다.
-- UI는 QHD 125%에서 실제 검증했습니다. FHD/4K와 Windows 100%/150%는 Per-Monitor V2/DIP 구조 및 좁은·넓은 창 경계 테스트만 완료했고 물리 디스플레이 전환 검증은 남아 있습니다.
-- Edge·Chrome·Brave·Vivaldi·Opera의 실제 다운로드는 아직 수동 검증하지 않았습니다.
-- 설치 파일은 현재 코드 서명되지 않았습니다.
+정확한 SDK와 도구 버전, Native Host 등록, Installer 생성 절차는 [DEVELOPMENT.md](DEVELOPMENT.md)에 있습니다.
 
 ## 문서
 
-- [DEVELOPMENT.md](DEVELOPMENT.md): 개발 규칙과 반복 작업
-- [TESTING.md](TESTING.md): 자동·수동 검증
-- [PROJECT_STATE.md](PROJECT_STATE.md): 현재 기준 상태
-- [HANDOFF.md](HANDOFF.md): 다른 PC 인수인계
-- [docs/BROWSER_COMPATIBILITY.md](docs/BROWSER_COMPATIBILITY.md): 브라우저별 검증표
-- [docs/TECHNICAL_SPIKE.md](docs/TECHNICAL_SPIKE.md): Phase 1 결과
+- [ARCHITECTURE.md](ARCHITECTURE.md): 구성 요소, 상태 모델, 신뢰 경계와 배포 구조
+- [DEVELOPMENT.md](DEVELOPMENT.md): 개발 환경, 빌드, 브랜치와 브랜딩 관리
+- [TESTING.md](TESTING.md): 자동 테스트와 실제 Whale 검증 시나리오
+- [CHANGELOG.md](CHANGELOG.md): 버전별 변경 이력
+- [docs/BROWSER_COMPATIBILITY.md](docs/BROWSER_COMPATIBILITY.md): 브라우저별 지원 및 실제 검증 범위
+- [SECURITY.md](SECURITY.md): 보안 정책과 취약점 제보
+
+## 알려진 제한
+
+- 브라우저 스토어 배포와 자동 확장 설치는 제공하지 않습니다.
+- 새 폴더 만들기는 FolderTreePicker 밖에서 수행한 뒤 새로 고침해야 합니다.
+- FHD, 4K, Windows 100%, 150% 물리 디스플레이는 아직 직접 검증하지 않았습니다.
+- Edge, Chrome, Brave, Vivaldi와 Opera의 실제 다운로드는 아직 검증하지 않았습니다.
+- Installer 코드 서명과 자동 업데이트 채널은 제공하지 않습니다.
 
 ## 라이선스
 

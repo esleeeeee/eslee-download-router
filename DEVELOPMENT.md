@@ -14,7 +14,7 @@ bootstrap은 버전 검사, NuGet restore, `npm ci`, 로컬 데이터 디렉터�
 
 ## 브랜치
 
-- `main`: 빌드와 자동 테스트가 통과한 기준점
+- `main`: 정식 배포와 최신 Release의 기준점
 - `develop`: 다음 기능을 통합하는 지점
 - `feature/*`: 기능 단위 작업
 - 강제 push 금지
@@ -64,7 +64,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-installer.ps
 
 `build-installer.ps1`은 publish 결과에 `App.xbf`, `MainWindow.xbf`, `DownloadRouter.App.pri`가 있는지 먼저 검사합니다. unpackaged WinUI 3 게시에서 이 세 파일이 빠지면 설치본이 `XamlParseException`으로 시작하지 못하므로 해당 검사를 제거하지 않습니다. 설치 파일은 아직 코드 서명되지 않았습니다.
 
-제품 버전은 `Directory.Build.props`의 `VersionPrefix` 한 곳에서만 변경합니다. build/publish는 가능한 경우 Git HEAD를 `SourceRevisionId`로 전달하고 정보 화면은 informational version을 읽습니다. `build-installer.ps1`은 App/Agent/Native Host ProductVersion이 VersionPrefix와 일치하지 않으면 Inno Setup 실행 전에 실패합니다. `DownloadRouter.iss`에 버전을 직접 하드코딩하지 마세요.
+제품 버전은 `Directory.Build.props`의 `VersionPrefix` 한 곳에서만 변경합니다. 정식 v1.0.0부터 같은 정책을 App, Agent, Native Host와 Installer에 적용합니다. build/publish는 가능한 경우 Git HEAD를 `SourceRevisionId`로 전달하고 정보 화면은 informational version을 읽습니다. `build-installer.ps1`은 App/Agent/Native Host ProductVersion이 VersionPrefix와 일치하지 않으면 Inno Setup 실행 전에 실패합니다. `DownloadRouter.iss`에 버전을 직접 하드코딩하지 마세요.
+
+Extension `manifest.json`의 버전은 Chromium 패키지 수명 주기용이며 제품 assembly 버전과 독립 관리합니다. 제품 버전 승격만을 이유로 Extension key, manifest version 또는 identity를 수정하지 마세요.
 
 ## 브랜딩 자산
 
@@ -92,6 +94,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-installer.ps
 ## 설치/제거 검증
 
 업그레이드 전 App의 `--shutdown` 완료를 기다리고 설치합니다. 설치 뒤에는 시작 메뉴, HKCU Run, 6개 브라우저 Native Host, 백그라운드 단일 인스턴스, X 후 프로세스 유지와 트레이 메뉴를 확인합니다. 업그레이드 전후에는 사용자 DB의 행 수·SHA-256과 `config.local.json`의 테마 값을 비교합니다. 제거 스크립트는 `%LOCALAPPDATA%\eslee\DownloadRouter`를 삭제하면 안 됩니다.
+
+## 정식 Release 절차
+
+1. 버전과 문서를 기능 브랜치에서 확정하고 전체 build, test, audit와 Installer 사전 검증을 수행합니다.
+2. PR의 최종 feature commit과 CI가 일치하는지 확인한 뒤 main에 병합합니다.
+3. main을 `--ff-only`로 동기화하고 최종 main commit에서 Installer를 다시 생성합니다.
+4. 생성된 App, Agent, Native Host와 Installer의 버전, commit metadata, icon, 크기와 SHA-256을 확인합니다.
+5. 기존 설치 위에 같은 Installer를 적용해 사용자 데이터와 Native Messaging 등록을 다시 검증합니다.
+6. main CI 성공 뒤 main commit에 `vX.Y.Z` tag와 GitHub Release를 생성합니다.
+7. Release에는 최종 Installer만 첨부하고 notes에 SHA-256과 실제 검증 범위를 기록합니다.
+8. GitHub에서 tag target, latest, draft false, prerelease false, asset 크기와 UTF-8 본문을 재조회합니다.
 
 ## 기능 추가 순서
 
