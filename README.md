@@ -90,7 +90,7 @@ Firefox, Safari, 모바일과 Windows 이외 운영체제는 지원하지 않습
 
 ## 설치
 
-1. [v1.0.0 Release](https://github.com/esleeeeee/eslee-Download-Router/releases/tag/v1.0.0)에서 `eslee-download-router-setup.exe`를 내려받습니다.
+1. [최신 Release](https://github.com/esleeeeee/eslee-Download-Router/releases/latest)에서 `eslee-download-router-setup.exe`를 내려받습니다.
 2. 설치 프로그램을 실행합니다. 관리자 권한이 필요 없는 현재 사용자 단위 설치입니다.
 3. 설치 프로그램은 App, Agent, Native Host, Extension 파일을 설치하고 지원 브라우저의 HKCU Native Messaging 등록을 구성합니다.
 4. Whale에서 `whale://extensions`를 열고 개발자 모드를 켭니다.

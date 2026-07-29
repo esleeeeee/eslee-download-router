@@ -6,6 +6,19 @@
 
 현재 예정된 변경은 없습니다.
 
+## [1.0.1] - 2026-07-29
+
+### Fixed
+
+- Windows 작업표시줄과 시스템 트레이에서 아이콘이 eslee Auto Power보다 약 15% 작게 보이던 문제
+- ICO 각 프레임을 master 디자인과 종횡비는 그대로 유지한 채 중앙 기준 1.18배로 렌더링하고, 트레이용 16/20px은 안전 여백과 실제 표시 크기가 맞는 1.15배로 별도 생성
+- 16px 프레임에서도 안티앨리어싱이 캔버스 가장자리에 닿지 않도록 최소 1px 안전 여백 유지
+
+### Changed
+
+- App, Agent, Native Host와 Installer의 단일 제품 버전을 1.0.1로 갱신
+- Extension 16/32/48/128px 아이콘도 같은 canvas occupancy 보정을 적용하되 Extension key와 고정 ID는 유지
+
 ## [1.0.0] - 2026-07-28
 
 0.3.x Release Candidate에서 검증한 기능, 상태 복구, 브랜딩과 설치 흐름을 정식 공개 버전으로 승격했습니다. App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.0.0` 버전을 사용하며 README, 지원 범위, 설치 안내와 배포 문서를 공개 제품 수준으로 정리했습니다.

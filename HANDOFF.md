@@ -1,12 +1,12 @@
 # 다른 PC 인수인계
 
-정식 배포 기준은 GitHub의 `main`과 [v1.0.0 Release](https://github.com/esleeeeee/eslee-Download-Router/releases/tag/v1.0.0)입니다. 회사 PC의 빌드 산출물, 사용자 DB, 브라우저 프로필이나 개인 경로 없이 개발을 이어갈 수 있습니다.
+정식 배포 기준은 GitHub의 `main`과 [최신 Release](https://github.com/esleeeeee/eslee-Download-Router/releases/latest)입니다. 회사 PC의 빌드 산출물, 사용자 DB, 브라우저 프로필이나 개인 경로 없이 개발을 이어갈 수 있습니다.
 
 ## 기준점
 
 - 저장소: `https://github.com/esleeeeee/eslee-Download-Router.git`
 - 기본 브랜치: `main`
-- 제품 버전: `1.0.0`
+- 제품 버전: `1.0.1`
 - 최종 개발 PR: [#1](https://github.com/esleeeeee/eslee-Download-Router/pull/1)
 - .NET SDK: `10.0.302`
 - Node.js: 24 이상
@@ -34,7 +34,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Configu
 - npm audit high 이상 취약점 0건
 - Agent Named Pipe와 Native Host framed ping 성공
 - App, Agent와 Native Host win-x64 self-contained publish 성공
-- App, Agent, Native Host와 Installer 제품 버전 1.0.0 일치
+- App, Agent, Native Host와 Installer 제품 버전 1.0.1 일치
 - QHD 125% Per-Monitor V2, 공통 반응형 폭, 전역 테마와 독립 FolderSelectionWindow
 - Whale  Automatic, SelectSubfolder, 취소, FIFO와 영구 `Skipped`
 - 기존 설치 위 업그레이드에서 DB, 규칙, 이력, Pending, 설정, 테마와 자동 시작 보존
