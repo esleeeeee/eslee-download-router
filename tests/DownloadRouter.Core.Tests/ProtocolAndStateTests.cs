@@ -276,6 +276,10 @@ public sealed class ProtocolAndStateTests
             Path.Combine(repositoryRoot, "src", "DownloadRouter.App", "FolderSelectionWindow.cs"));
         var productBranding = File.ReadAllText(
             Path.Combine(repositoryRoot, "src", "DownloadRouter.App", "ProductBranding.cs"));
+        var trayIconHost = File.ReadAllText(
+            Path.Combine(repositoryRoot, "src", "DownloadRouter.App", "TrayIconHost.cs"));
+        var brandingGenerator = File.ReadAllText(
+            Path.Combine(repositoryRoot, "scripts", "generate-branding-assets.ps1"));
         var extensionRoot = Path.Combine(repositoryRoot, "src", "DownloadRouter.Extension");
         using var manifest = JsonDocument.Parse(
             File.ReadAllText(Path.Combine(extensionRoot, "manifest.json")));
@@ -291,6 +295,11 @@ public sealed class ProtocolAndStateTests
         Assert.Contains("ProductBranding.ApplyWindowIcon(appWindow)", mainWindowLifetime, StringComparison.Ordinal);
         Assert.Contains("ProductBranding.ApplyWindowIcon(appWindow)", selectionWindow, StringComparison.Ordinal);
         Assert.Contains("ApplicationIconResourceId = 32512", productBranding, StringComparison.Ordinal);
+        Assert.Contains("$artworkScale = 1.18", brandingGenerator, StringComparison.Ordinal);
+        Assert.Contains("16 = 1.15", brandingGenerator, StringComparison.Ordinal);
+        Assert.Contains("20 = 1.15", brandingGenerator, StringComparison.Ordinal);
+        Assert.Contains("ExtractIconEx(executablePath", trayIconHost, StringComparison.Ordinal);
+        Assert.DoesNotContain("LoadImage", trayIconHost, StringComparison.Ordinal);
 
         var expectedExtensionSizes = new[] { 16, 32, 48, 128 };
         var icons = manifest.RootElement.GetProperty("icons");

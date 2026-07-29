@@ -4,17 +4,17 @@
 
 ## 요약
 
-- 현재 단계: 정식 버전 1.0.0 개발 및 배포 완료
+- 현재 단계: 정식 버전 1.0.1 아이콘 시각 크기 hotfix 개발 및 배포 완료
 - 공식 저장소: https://github.com/esleeeeee/eslee-Download-Router
 - 기본 브랜치: `main`
 - 최종 개발 PR: [#1 Fix pending prompts, Whale cancellation, version, and themes](https://github.com/esleeeeee/eslee-Download-Router/pull/1)
-- 정식 Release: [eslee Download Router v1.0.0](https://github.com/esleeeeee/eslee-Download-Router/releases/tag/v1.0.0)
+- 최신 정식 Release: [GitHub Releases](https://github.com/esleeeeee/eslee-Download-Router/releases/latest)
 - 지원 운영체제: Windows 11 x64
 - 실제 검증 브라우저: Naver Whale 
 
 ## 정식 버전 구성
 
-- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.0.0` 제품 버전을 사용합니다.
+- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.0.1` 제품 버전을 사용합니다.
 - assembly informational version에는 빌드한 Git commit metadata가 포함됩니다.
 - Extension manifest 버전은 기존 정책에 따라 제품 assembly와 독립 관리합니다.
 - 고정 Extension ID `gilicenlclaemgiijcjjejilikbooggj`와 Native Messaging identity를 유지합니다.
@@ -51,11 +51,11 @@
 | Extension | ESLint, TypeScript, dist build 성공, Node tests 13/13 |
 | npm audit | 취약점 0건 |
 | Release publish | App, Agent, Native Host win-x64 self-contained 성공 |
-| Installer | Inno Setup compile과 기존 설치 위 1.0.0 업그레이드 성공 |
+| Installer | Inno Setup compile과 기존 1.0.0 설치 위 1.0.1 업그레이드 성공 |
 | 사용자 데이터 | SQLite, 규칙, 이력, Pending, 설정과 테마 보존 |
 | 자동 시작 | 기존 HKCU Run 값 보존, 사용자 실제 Windows 재부팅 검증 성공 |
 | Native Messaging | 6개 Chromium 등록 보존, 설치 Native Host와 Agent ping 성공 |
-| 브랜딩 | App, Window, taskbar, 트레이, Installer, shortcut, 제거 항목과 Extension 확인 |
+| 브랜딩 | 16/20px 1.15배, 24px 이상 1.18배 canvas occupancy 보정. 실제 Auto Power 비교에서 taskbar 23×24 대 24×24, 트레이 16×15 동일 확인 |
 | CI | feature PR과 main의 최종 GitHub Actions 성공 |
 
 ## 실제 사용자 검증
@@ -70,7 +70,7 @@
 
 ## 배포
 
-- 설치 파일: GitHub v1.0.0 Release의 `eslee-download-router-setup.exe`
+- 설치 파일: GitHub 최신 Release의 `eslee-download-router-setup.exe`
 - 설치 범위: 현재 사용자
 - 기본 경로: `%LOCALAPPDATA%\Programs\eslee\DownloadRouter`
 - 사용자 데이터: `%LOCALAPPDATA%\eslee\DownloadRouter`
