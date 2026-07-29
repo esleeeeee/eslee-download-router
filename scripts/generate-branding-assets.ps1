@@ -10,6 +10,11 @@ $icoPath = Join-Path $root 'assets\branding\eslee-download-router.ico'
 $extensionDirectory = Join-Path $root 'src\DownloadRouter.Extension\icons'
 $icoSizes = @(16, 20, 24, 32, 40, 48, 64, 128, 256)
 $extensionSizes = @(16, 32, 48, 128)
+$artworkScale = 1.18
+$smallFrameArtworkScales = @{
+    16 = 1.15
+    20 = 1.15
+}
 
 if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
     throw "Branding master asset was not found: $sourcePath"
@@ -23,7 +28,10 @@ function New-ResizedPngBytes {
         [System.Drawing.Image]$Source,
 
         [Parameter(Mandatory)]
-        [int]$Size
+        [int]$Size,
+
+        [Parameter(Mandatory)]
+        [double]$ArtworkScale
     )
 
     $bitmap = [System.Drawing.Bitmap]::new(
@@ -38,13 +46,16 @@ function New-ResizedPngBytes {
         $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
         $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
         $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        $drawSize = [single]($Size * $ArtworkScale)
+        $offset = [single](($Size - $drawSize) / 2.0)
         $graphics.DrawImage(
             $Source,
-            [System.Drawing.Rectangle]::new(0, 0, $Size, $Size),
-            0,
-            0,
-            $Source.Width,
-            $Source.Height,
+            [System.Drawing.RectangleF]::new($offset, $offset, $drawSize, $drawSize),
+            [System.Drawing.RectangleF]::new(
+                0,
+                0,
+                [single]$Source.Width,
+                [single]$Source.Height),
             [System.Drawing.GraphicsUnit]::Pixel)
         $bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
         return $stream.ToArray()
@@ -64,7 +75,16 @@ try {
 
     $icoFrames = @{}
     foreach ($size in $icoSizes) {
-        $icoFrames[$size] = New-ResizedPngBytes -Source $source -Size $size
+        $frameArtworkScale = if ($smallFrameArtworkScales.ContainsKey($size)) {
+            $smallFrameArtworkScales[$size]
+        }
+        else {
+            $artworkScale
+        }
+        $icoFrames[$size] = New-ResizedPngBytes `
+            -Source $source `
+            -Size $size `
+            -ArtworkScale $frameArtworkScale
     }
 
     $icoStream = [System.IO.File]::Create($icoPath)
@@ -99,9 +119,18 @@ try {
 
     foreach ($size in $extensionSizes) {
         $destination = Join-Path $extensionDirectory "icon-$size.png"
+        $frameArtworkScale = if ($smallFrameArtworkScales.ContainsKey($size)) {
+            $smallFrameArtworkScales[$size]
+        }
+        else {
+            $artworkScale
+        }
         [System.IO.File]::WriteAllBytes(
             $destination,
-            (New-ResizedPngBytes -Source $source -Size $size))
+            (New-ResizedPngBytes `
+                -Source $source `
+                -Size $size `
+                -ArtworkScale $frameArtworkScale))
     }
 }
 finally {
@@ -110,3 +139,4 @@ finally {
 
 Write-Host "Generated Windows icon: $icoPath"
 Write-Host "Generated extension icons: $($extensionSizes -join ', ')"
+Write-Host "Artwork scale: $artworkScale (16/20px: 1.15)"
