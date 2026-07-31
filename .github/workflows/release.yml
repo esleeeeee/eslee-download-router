@@ -1,0 +1,54 @@
+name: Build Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: src/DownloadRouter.Extension/package-lock.json
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build and test
+        shell: pwsh
+        run: |
+          .\scripts\bootstrap.ps1
+          .\scripts\test.ps1
+
+      - name: Build installer
+        shell: pwsh
+        run: .\scripts\build-installer.ps1 -Configuration Release
+
+      - name: Verify release privacy
+        shell: pwsh
+        run: .\scripts\verify-release-privacy.ps1
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: eslee Download Router ${{ github.ref_name }}
+          generate_release_notes: true
+          files: artifacts/installer/eslee-download-router-setup.exe

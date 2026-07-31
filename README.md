@@ -80,10 +80,10 @@ System, Light, Dark 테마를 지원합니다. 선택값은 LocalAppData 설정�
 | 환경 | 상태 |
 |---|---|
 | Windows 11 x64 | 지원 및 실제 설치 검증 완료 |
-| Naver Whale  | Extension, Native Messaging, Automatic, SelectSubfolder와 사용자 재시작 검증 완료 |
+| Naver Whale | Extension, Native Messaging, Automatic과 SelectSubfolder 격리 검증 완료 |
 | Microsoft Edge, Google Chrome | 설치 탐지와 Native Host 등록 구현, 실제 다운로드 검증 전 |
 | Brave, Vivaldi, Opera | Native Host 등록 adapter 구현, 실제 브라우저 검증 전 |
-| QHD, Windows 125% | Per-Monitor V2, 반응형 폭, 테마와 선택 창 실제 검증 완료 |
+| 다양한 DPI | Per-Monitor V2, 반응형 폭, 테마와 선택 창 검증 완료 |
 | FHD, 4K, Windows 100%, 150% | DIP 및 반응형 경계 자동 검증 완료, 물리 디스플레이 실검증 전 |
 
 Firefox, Safari, 모바일과 Windows 이외 운영체제는 지원하지 않습니다. 자세한 기록은 [브라우저 호환성 문서](docs/BROWSER_COMPATIBILITY.md)를 확인하세요.
@@ -160,7 +160,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): 구성 요소, 상태 모델, 신뢰 경계와 배포 구조
 - [DEVELOPMENT.md](DEVELOPMENT.md): 개발 환경, 빌드, 브랜치와 브랜딩 관리
-- [TESTING.md](TESTING.md): 자동 테스트와 실제 Whale 검증 시나리오
+- [TESTING.md](TESTING.md): 자동 테스트와 격리된 브라우저 검증 시나리오
 - [CHANGELOG.md](CHANGELOG.md): 버전별 변경 이력
 - [docs/BROWSER_COMPATIBILITY.md](docs/BROWSER_COMPATIBILITY.md): 브라우저별 지원 및 실제 검증 범위
 - [SECURITY.md](SECURITY.md): 보안 정책과 취약점 제보

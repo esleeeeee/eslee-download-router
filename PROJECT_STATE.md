@@ -10,7 +10,7 @@
 - 최종 개발 PR: [#1 Fix pending prompts, Whale cancellation, version, and themes](https://github.com/esleeeeee/eslee-Download-Router/pull/1)
 - 최신 정식 Release: [GitHub Releases](https://github.com/esleeeeee/eslee-Download-Router/releases/latest)
 - 지원 운영체제: Windows 11 x64
-- 실제 검증 브라우저: Naver Whale 
+- 격리 환경 수동 검증 브라우저: Naver Whale
 
 ## 정식 버전 구성
 
@@ -36,7 +36,7 @@
 - MainWindow 최소화 또는 트레이 숨김 상태에서 독립 FolderSelectionWindow 활성화
 - X 버튼 트레이 숨김, HKCU Windows 로그인 자동 시작과 명시적 종료
 - System, Light, Dark 전역 테마와 실행 assembly 버전 정보 화면
-- Per-Monitor V2, DIP 기반 반응형 공통 레이아웃과 QHD 125% 검증
+- Per-Monitor V2와 DIP 기반 반응형 공통 레이아웃 검증
 - 규칙 미매칭과 구성 요소 장애에서 브라우저 다운로드를 유지하는 fail-open
 - 동일 볼륨 move, 교차 볼륨 copy, 크기와 SHA-256 검증, 확정 뒤 원본 삭제
 - 기존 대상 덮어쓰기 금지와 중복 이름 보존
