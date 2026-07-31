@@ -35,7 +35,7 @@ Name: "desktopicon"; Description: "바탕 화면 바로가기 만들기"; GroupD
 Name: "autostart"; Description: "Windows 로그인 시 백그라운드로 자동 시작"; GroupDescription: "백그라운드 실행:"; Flags: checkedonce
 
 [Files]
-Source: "..\artifacts\publish\app\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\artifacts\publish\app\*"; DestDir: "{app}"; Excludes: "*.pdb"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\eslee Download Router"; Filename: "{app}\DownloadRouter.App.exe"

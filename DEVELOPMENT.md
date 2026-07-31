@@ -93,7 +93,7 @@ Extension `manifest.json`의 버전은 Chromium 패키지 수명 주기용이며
 
 ## 설치/제거 검증
 
-업그레이드 전 App의 `--shutdown` 완료를 기다리고 설치합니다. 설치 뒤에는 시작 메뉴, HKCU Run, 6개 브라우저 Native Host, 백그라운드 단일 인스턴스, X 후 프로세스 유지와 트레이 메뉴를 확인합니다. 업그레이드 전후에는 사용자 DB의 행 수·SHA-256과 `config.local.json`의 테마 값을 비교합니다. 제거 스크립트는 `%LOCALAPPDATA%\eslee\DownloadRouter`를 삭제하면 안 됩니다.
+업그레이드 전 App의 `--shutdown` 완료를 기다리고 설치합니다. 설치 뒤에는 시작 메뉴, HKCU Run, 브라우저 Native Host, 백그라운드 단일 인스턴스, X 후 프로세스 유지와 트레이 메뉴를 확인합니다. 업그레이드 전후에는 격리된 테스트 DB와 설정이 보존되는지 기능적으로 확인합니다. 제거 스크립트는 `%LOCALAPPDATA%\eslee\DownloadRouter`를 삭제하면 안 됩니다.
 
 ## 정식 Release 절차
 
@@ -103,7 +103,7 @@ Extension `manifest.json`의 버전은 Chromium 패키지 수명 주기용이며
 4. 생성된 App, Agent, Native Host와 Installer의 버전, commit metadata, icon, 크기와 SHA-256을 확인합니다.
 5. 기존 설치 위에 같은 Installer를 적용해 사용자 데이터와 Native Messaging 등록을 다시 검증합니다.
 6. main CI 성공 뒤 main commit에 `vX.Y.Z` tag와 GitHub Release를 생성합니다.
-7. Release에는 최종 Installer만 첨부하고 notes에 SHA-256과 실제 검증 범위를 기록합니다.
+7. Release에는 최종 Installer만 첨부하고 민감정보를 제외한 검증 범위를 기록합니다.
 8. GitHub에서 tag target, latest, draft false, prerelease false, asset 크기와 UTF-8 본문을 재조회합니다.
 
 ## 기능 추가 순서
