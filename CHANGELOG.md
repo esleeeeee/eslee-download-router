@@ -6,6 +6,17 @@
 
 현재 예정된 변경은 없습니다.
 
+## [1.0.3] - 2026-08-01
+
+### Fixed
+
+- 표준 툴팁을 억제하던 NotifyIcon 버전 협상을 제거해 hover 시 `eslee Download Router` 제품명 툴팁이 표시되도록 수정
+
+### Changed
+
+- 사용자 제공 white master PNG를 App, Window, taskbar, tray, Installer, shortcut, uninstall entry와 Extension 공통 아이콘으로 적용
+- App, Agent, Native Host와 Installer의 단일 제품 버전을 1.0.3으로 갱신
+
 ## [1.0.1] - 2026-07-29
 
 ### Fixed
