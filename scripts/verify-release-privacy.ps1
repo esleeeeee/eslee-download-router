@@ -32,7 +32,7 @@ foreach ($file in $files) {
     )
 
     foreach ($pattern in $forbiddenPathPatterns) {
-        if ($texts.Where({ $_.Contains($pattern, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) {
+        if ($texts.Where({ $_.IndexOf($pattern, [StringComparison]::OrdinalIgnoreCase) -ge 0 }).Count -gt 0) {
             $violations.Add("Absolute user path '$pattern' in $($file.FullName)")
         }
     }
