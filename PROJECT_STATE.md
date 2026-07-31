@@ -1,10 +1,10 @@
 # 프로젝트 상태
 
-기준일: 2026-07-28 (Asia/Seoul)
+기준일: 2026-08-01 (Asia/Seoul)
 
 ## 요약
 
-- 현재 단계: 정식 버전 1.0.1 아이콘 시각 크기 hotfix 개발 및 배포 완료
+- 현재 단계: 정식 버전 1.0.3 white icon 및 tray tooltip hotfix 검증
 - 공식 저장소: https://github.com/esleeeeee/eslee-Download-Router
 - 기본 브랜치: `main`
 - 최종 개발 PR: [#1 Fix pending prompts, Whale cancellation, version, and themes](https://github.com/esleeeeee/eslee-Download-Router/pull/1)
@@ -14,7 +14,7 @@
 
 ## 정식 버전 구성
 
-- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.0.1` 제품 버전을 사용합니다.
+- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.0.3` 제품 버전을 사용합니다.
 - assembly informational version에는 빌드한 Git commit metadata가 포함됩니다.
 - Extension manifest 버전은 기존 정책에 따라 제품 assembly와 독립 관리합니다.
 - 고정 Extension ID `gilicenlclaemgiijcjjejilikbooggj`와 Native Messaging identity를 유지합니다.
