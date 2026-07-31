@@ -36,7 +36,8 @@ jobs:
         shell: pwsh
         run: |
           .\scripts\bootstrap.ps1
-          .\scripts\test.ps1
+          .\scripts\build.ps1 -Configuration Release
+          .\scripts\test.ps1 -Configuration Release
 
       - name: Build installer
         shell: pwsh
