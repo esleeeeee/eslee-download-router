@@ -2,9 +2,9 @@
 
 브라우저 정책을 수정하거나 확장을 강제 설치하지 않습니다. 정식 설치본과 개발 clone은 서로 다른 확장 폴더를 사용하므로 현재 실행 중인 App에 맞는 경로를 선택합니다.
 
-## 정식 v1.0.0 설치본
+## 정식 설치본
 
-1. [GitHub v1.0.0 Release](https://github.com/esleeeeee/eslee-Download-Router/releases/tag/v1.0.0)의 `eslee-download-router-setup.exe`를 설치합니다.
+1. [최신 Release](https://github.com/esleeeeee/eslee-Download-Router/releases/latest)의 `eslee-download-router-setup.exe`를 설치합니다.
 2. Installer가 App, Agent, Native Host, Extension 파일과 HKCU Native Messaging 등록을 구성합니다.
 3. 브라우저의 확장 관리 주소를 열고 개발자 모드를 켭니다.
 4. 압축 해제된 확장 로드에서 `%LOCALAPPDATA%\Programs\eslee\DownloadRouter\extension`을 선택합니다.
