@@ -49,7 +49,6 @@ public sealed partial class MainWindow : Window
             "dashboard" => ShowDashboardAsync(),
             "rules" => ShowRulesManagementAsync(),
             "history" => ShowHistoryAsync(),
-            "pending" => ShowPendingAsync(),
             "browsers" => ShowBrowsersAsync(),
             "settings" => ShowSettingsManagementAsync(),
             "diagnostics" => ShowDiagnosticsAsync(),
@@ -185,7 +184,7 @@ public sealed partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         openGitHub.Click += async (_, _) =>
-            _ = await Launcher.LaunchUriAsync(new Uri("https://github.com/esleeeeee/eslee-Download-Router"));
+            _ = await Launcher.LaunchUriAsync(new Uri("https://github.com/esleeeeee/eslee-download-router"));
         ContentPanel.Children.Add(openGitHub);
         await Task.CompletedTask;
     }
@@ -210,15 +209,93 @@ public sealed partial class MainWindow : Window
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         panel.Children.Add(new TextBlock { Text = value, TextWrapping = TextWrapping.Wrap });
-        ContentPanel.Children.Add(new Border
+        ContentPanel.Children.Add(CreateCard(panel));
+    }
+
+    /// <summary>White card surface with a soft blue-grey outline.</summary>
+    private Border CreateCard(UIElement child, double padding = 16)
+        => new()
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Padding = new Thickness(padding),
+            CornerRadius = new CornerRadius(8),
+            BorderThickness = new Thickness(1),
+            BorderBrush = themeManager.GetThemeBrush("CardBorderBrush"),
+            Background = themeManager.GetThemeBrush("CardSurfaceBrush"),
+            Child = child,
+        };
+
+    /// <summary>Grouped area inside a card, used to tie related inputs together.</summary>
+    private Border CreateSection(string title, string? helpText, UIElement child)
+    {
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = title,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        if (!string.IsNullOrWhiteSpace(helpText))
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = helpText,
+                Opacity = 0.75,
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
+
+        panel.Children.Add(child);
+        return new Border
         {
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(16),
             CornerRadius = new CornerRadius(8),
-            Background = themeManager.GetThemeBrush("CardSurfaceBrush"),
+            BorderThickness = new Thickness(1),
+            BorderBrush = themeManager.GetThemeBrush("CardBorderBrush"),
+            Background = themeManager.GetThemeBrush("SectionSurfaceBrush"),
             Child = panel,
-        });
+        };
     }
+
+    private Border CreateSeparator(double verticalMargin = 8)
+        => new()
+        {
+            Height = 1,
+            Background = themeManager.GetThemeBrush("SeparatorBrush"),
+            Margin = new Thickness(0, verticalMargin, 0, verticalMargin),
+        };
+
+    private static Button CreatePrimaryButton(string content)
+        => new()
+        {
+            Content = content,
+            Style = Application.Current.Resources["AccentButtonStyle"] as Style,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+
+    private static TextBlock CreateHelpText(string text)
+        => new()
+        {
+            Text = text,
+            Opacity = 0.75,
+            TextWrapping = TextWrapping.Wrap,
+        };
+
+    private Border CreateAccentBadge(string text)
+        => new()
+        {
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(8, 3, 8, 3),
+            CornerRadius = new CornerRadius(12),
+            Background = themeManager.GetThemeBrush("AccentStatusSurfaceBrush"),
+            Child = new TextBlock
+            {
+                Text = text,
+                Foreground = themeManager.GetThemeBrush("AccentTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+            },
+        };
 
     private void AddMuted(string text)
         => ContentPanel.Children.Add(new TextBlock

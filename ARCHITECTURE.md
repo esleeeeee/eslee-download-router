@@ -86,9 +86,13 @@ Interrupted                RetryPending
 
 ## 팝업 수명과 테마
 
-자동 선택 팝업은 `SelectionPromptPolicy.AutoPromptWindow`의 30분 안에 생성되었거나 실제 브라우저 이벤트가 갱신된 SelectSubfolder 대기 Job만 대상으로 합니다. 오래되거나 브라우저 record가 stale인 Job은 DB/대기 탭/InfoBadge에 남고 자동 큐에는 들어가지 않습니다. 재연결의 중복 start와 값이 바뀌지 않은 metadata는 실제 이벤트 시각을 갱신하지 않습니다.
+자동 선택 팝업 대상은 `DownloadJobs.SelectionPromptState`가 결정합니다. 이 값은 브라우저 전송 상태와 분리된 축이며 `NeverShown`, `Shown`, `Deferred`, `Resolved` 순서로만 전진합니다. 자동 큐에는 `NeverShown`이면서 브라우저 record가 stale하지 않은 대기 Job만 들어갑니다. 팝업을 여는 시점보다 먼저 `Shown`을 커밋하므로 앱이 비정상 종료해도 같은 Job이 다음 실행에서 다시 자동 표시되지 않습니다. 하위 폴더 선택 방식이 아닌 규칙의 Job은 생성 시점에 `Resolved`로 시작합니다.
 
-`이번 파일은 이동하지 않기`는 `selection.skip`, `모두 선택 안 함`은 현재 자동 FIFO의 ID 목록을 `selection.skip-many`로 Agent에 보냅니다. Repository는 허용된 `WaitingForSelection`/`SelectionReady`만 한 transaction에서 `RoutingState=Skipped`, `Status=Skipped`, `CompletedAt`으로 바꾸고 같은 transaction에 `selection.skipped` 이벤트를 기록합니다. UI는 commit 성공 뒤에만 큐를 비웁니다. `Skipped`는 popup/startup/reconnect 복구의 terminal 상태이고 `BrowserTransferState.Cancelled`와는 별개입니다. 개별 `나중에 선택`만 메모리의 세션 숨김 집합을 사용합니다.
+`LastBrowserEventAt`은 전송 상태 확인 용도로만 사용하며 자동 팝업 자격을 되살리지 않습니다. 브라우저 재연결, 시작 재조정, 중복 start와 값이 바뀌지 않은 metadata는 사용자의 팝업 결정을 되돌릴 수 없습니다.
+
+`대기 목록에 남기기`와 선택 창 닫기는 `selection.prompt-state`로 `Deferred`를 저장합니다. `이번 파일은 이동하지 않기`는 `selection.skip`, `대기 중인 파일 모두 이동하지 않기`는 현재 자동 FIFO의 ID 목록을 `selection.skip-many`로 Agent에 보냅니다. Repository는 허용된 `WaitingForSelection`/`SelectionReady`만 한 transaction에서 `RoutingState=Skipped`, `Status=Skipped`, `SelectionPromptState=Resolved`, `CompletedAt`으로 바꾸고 같은 transaction에 `selection.skipped` 이벤트를 기록합니다. UI는 commit 성공 뒤에만 큐를 비웁니다. `Skipped`는 popup/startup/reconnect 복구의 terminal 상태이고 `BrowserTransferState.Cancelled`와는 별개입니다.
+
+대기 목록은 별도 탐색 항목이 아니라 다운로드 이력의 `처리 대기` 필터입니다. 일괄 하위 폴더 적용은 저장 루트가 같은 단일 규칙으로 제한합니다.
 
 `ThemeManager`는 App 시작 때 `config.local.json`의 System/Light/Dark를 정규화하고 모든 Window 루트 FrameworkElement를 등록합니다. 설정 변경은 등록된 열린 Window 전체에 적용되고 새 FolderSelectionWindow는 Content 지정 직후 등록됩니다. System은 `ElementTheme.Default`입니다. UI 설정 저장은 SQLite 이력 스키마와 분리합니다.
 

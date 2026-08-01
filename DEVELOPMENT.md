@@ -19,7 +19,7 @@ bootstrap은 버전 검사, NuGet restore, `npm ci`, 로컬 데이터 디렉터�
 - `feature/*`: 기능 단위 작업
 - 강제 push 금지
 
-작업 시작 시 `git fetch --prune`, `git status`, `git branch --show-current`, `git remote -v`를 확인합니다. 공식 origin은 `https://github.com/esleeeeee/eslee-Download-Router.git`입니다.
+작업 시작 시 `git fetch --prune`, `git status`, `git branch --show-current`, `git remote -v`를 확인합니다. 공식 origin은 `https://github.com/esleeeeee/eslee-download-router.git`입니다.
 
 ## 코딩 원칙
 
@@ -38,6 +38,22 @@ bootstrap은 버전 검사, NuGet restore, `npm ci`, 로컬 데이터 디렉터�
 - Compact/Wide의 공통 상단 여백 32/48 DIP를 화면별 Spacer로 중복 구현하지 않습니다.
 - 좁은 창은 가로 스크롤 대신 세로 스크롤을 사용하고, 최소 폭을 지정할 때는 실제 720 DIP 창에서 우측 경계를 확인합니다.
 - 시각 검증 시 `GetProcessDpiAwareness`, `GetWindowDpiAwarenessContext`, `GetDpiForWindow`와 진단 화면의 `XamlRoot.RasterizationScale`을 함께 확인합니다.
+
+## 색상과 사용자 문구
+
+- 색은 `App.xaml`의 theme dictionary에서만 정의하고 화면 코드에 hex 값을 하드코딩하지 않습니다. Light와 Dark 양쪽에 같은 키를 정의합니다.
+- Light는 흰색 카드와 연한 청회색 경계를 사용하고 파랑은 primary action, 선택 상태와 badge에만 적용합니다. 넓은 파란 배경은 사용하지 않습니다.
+- 위험 작업은 `DangerTextBrush`, 경고 상태는 기존 `WarningStatusSurfaceBrush`를 사용합니다.
+- Dark theme와 사용자의 기존 theme 설정은 유지하며 새 설치의 기본값을 임의로 바꾸지 않습니다.
+- 내부 enum 이름을 화면에 노출하지 않습니다. 규칙 화면의 문구, 설명, 예시와 자연어 요약은 `RulePresentation`에서 관리합니다.
+- 오류 메시지는 원인과 함께 사용자가 취할 다음 행동을 알려 줍니다.
+
+## 자동 선택 팝업 상태
+
+- 자동 팝업 자격은 `DownloadJobs.SelectionPromptState` 한 축으로만 판단합니다. 시간 기반 조건이나 브라우저 활동 시각을 다시 도입하지 않습니다.
+- 상태는 `NeverShown → Shown → Deferred → Resolved` 방향으로만 전진합니다. 되돌리는 갱신은 Repository에서 거부합니다.
+- 팝업을 여는 코드는 창을 표시하기 전에 `Shown`을 커밋해야 합니다.
+- 새 상태나 명령을 추가할 때는 SQLite migration 버전을 올리고 재실행이 안전한지 확인합니다.
 
 ## 반복 작업
 

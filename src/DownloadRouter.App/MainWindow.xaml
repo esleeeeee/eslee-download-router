@@ -34,8 +34,7 @@
       <NavigationView.MenuItems>
         <NavigationViewItem Content="대시보드" Tag="dashboard" Icon="Home" />
         <NavigationViewItem Content="사이트 규칙" Tag="rules" Icon="Library" />
-        <NavigationViewItem Content="다운로드 이력" Tag="history" Icon="Download" />
-        <NavigationViewItem x:Name="PendingNavigationItem" Content="저장 위치 선택 대기" Tag="pending" Icon="Folder">
+        <NavigationViewItem x:Name="HistoryNavigationItem" Content="다운로드 이력" Tag="history" Icon="Download">
           <NavigationViewItem.InfoBadge>
             <InfoBadge x:Name="PendingInfoBadge" Visibility="Collapsed" />
           </NavigationViewItem.InfoBadge>
