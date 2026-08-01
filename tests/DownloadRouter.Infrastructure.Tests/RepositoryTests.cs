@@ -95,8 +95,114 @@ public sealed class RepositoryTests : IDisposable
         Assert.Equal(1L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
         versionCommand.CommandText = "SELECT COUNT(*) FROM MigrationHistory WHERE Version = 4;";
         Assert.Equal(1L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
+        versionCommand.CommandText = "SELECT COUNT(*) FROM MigrationHistory WHERE Version = 5;";
+        Assert.Equal(1L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
         Assert.NotNull(migrated.LastBrowserEventAt);
         Assert.False(migrated.IsBrowserRecordStale);
+        // An existing waiting job must never replay its automatic prompt after upgrading.
+        Assert.Equal(SelectionPromptState.Deferred, migrated.SelectionPromptState);
+    }
+
+    [Fact]
+    public async Task SelectionPromptMigrationClassifiesExistingJobsAndIsIdempotent()
+    {
+        var paths = AppPaths.CreateDefault();
+        var repository = new DownloadRouterRepository(paths);
+        await repository.InitializeAsync(CancellationToken.None);
+        var now = DateTimeOffset.UtcNow;
+        var rule = new DownloadRule(
+            Guid.NewGuid(), "prompt migration", true, RuleMatchType.ExactHost, "example.com",
+            RuleMatchTarget.FileUrl, root, StorageMode.SelectSubfolder, 0, 0, now, now);
+        await repository.UpsertRuleAsync(rule, CancellationToken.None);
+
+        var waiting = new DownloadJob(
+            Guid.NewGuid(), BrowserKind.Whale, "migrate-waiting", "waiting.bin", "waiting.bin",
+            null, null, null, null, "https://example.com", rule.Id, null, null, null,
+            BrowserTransferState.Complete, RoutingState.WaitingForSelection,
+            null, null, now, null);
+        var completed = waiting with
+        {
+            Id = Guid.NewGuid(),
+            BrowserDownloadId = "migrate-completed",
+            RoutingState = RoutingState.Completed,
+        };
+        var cancelled = waiting with
+        {
+            Id = Guid.NewGuid(),
+            BrowserDownloadId = "migrate-cancelled",
+            BrowserState = BrowserTransferState.Cancelled,
+            RoutingState = RoutingState.NotRequired,
+        };
+        await repository.CreateJobAsync(waiting, CancellationToken.None);
+        await repository.CreateJobAsync(completed, CancellationToken.None);
+        await repository.CreateJobAsync(cancelled, CancellationToken.None);
+
+        // Simulate a database written before v5 by clearing the marker and the column value.
+        await using (var connection = new SqliteConnection($"Data Source={paths.DatabasePath}"))
+        {
+            await connection.OpenAsync(CancellationToken.None);
+            await using var reset = connection.CreateCommand();
+            reset.CommandText = """
+                DELETE FROM MigrationHistory WHERE Version = 5;
+                UPDATE DownloadJobs SET SelectionPromptState = 'NeverShown';
+                """;
+            await reset.ExecuteNonQueryAsync(CancellationToken.None);
+        }
+
+        await repository.InitializeAsync(CancellationToken.None);
+
+        Assert.Equal(
+            SelectionPromptState.Deferred,
+            (await repository.GetJobAsync(waiting.Id, CancellationToken.None))!.SelectionPromptState);
+        Assert.Equal(
+            SelectionPromptState.Resolved,
+            (await repository.GetJobAsync(completed.Id, CancellationToken.None))!.SelectionPromptState);
+        Assert.Equal(
+            SelectionPromptState.Resolved,
+            (await repository.GetJobAsync(cancelled.Id, CancellationToken.None))!.SelectionPromptState);
+
+        // Re-running the migration must not reclassify a decision made after the upgrade.
+        await repository.AdvanceSelectionPromptStateAsync(
+            [waiting.Id],
+            SelectionPromptState.Resolved,
+            CancellationToken.None);
+        await repository.InitializeAsync(CancellationToken.None);
+
+        Assert.Equal(
+            SelectionPromptState.Resolved,
+            (await repository.GetJobAsync(waiting.Id, CancellationToken.None))!.SelectionPromptState);
+        Assert.NotNull(await repository.GetJobAsync(completed.Id, CancellationToken.None));
+        Assert.Equal(3, (await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None)).Count);
+    }
+
+    [Fact]
+    public async Task AdvanceSelectionPromptStateOnlyMovesForward()
+    {
+        var paths = AppPaths.CreateDefault();
+        var repository = new DownloadRouterRepository(paths);
+        await repository.InitializeAsync(CancellationToken.None);
+        var now = DateTimeOffset.UtcNow;
+        var rule = new DownloadRule(
+            Guid.NewGuid(), "prompt order", true, RuleMatchType.ExactHost, "example.com",
+            RuleMatchTarget.FileUrl, root, StorageMode.SelectSubfolder, 0, 0, now, now);
+        await repository.UpsertRuleAsync(rule, CancellationToken.None);
+        var job = new DownloadJob(
+            Guid.NewGuid(), BrowserKind.Whale, "prompt-order", "order.bin", "order.bin",
+            null, null, null, null, "https://example.com", rule.Id, null, null, null,
+            BrowserTransferState.Complete, RoutingState.WaitingForSelection,
+            null, null, now, null);
+        await repository.CreateJobAsync(job, CancellationToken.None);
+
+        Assert.Single(await repository.AdvanceSelectionPromptStateAsync(
+            [job.Id], SelectionPromptState.Shown, CancellationToken.None));
+        Assert.Single(await repository.AdvanceSelectionPromptStateAsync(
+            [job.Id], SelectionPromptState.Deferred, CancellationToken.None));
+        Assert.Empty(await repository.AdvanceSelectionPromptStateAsync(
+            [job.Id], SelectionPromptState.Shown, CancellationToken.None));
+
+        Assert.Equal(
+            SelectionPromptState.Deferred,
+            (await repository.GetJobAsync(job.Id, CancellationToken.None))!.SelectionPromptState);
     }
 
     [Fact]

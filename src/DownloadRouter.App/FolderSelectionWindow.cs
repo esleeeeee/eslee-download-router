@@ -115,6 +115,7 @@ public sealed class FolderSelectionWindow(
         var apply = new Button
         {
             Content = "이 위치로 보내기",
+            Style = Application.Current.Resources["AccentButtonStyle"] as Style,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         apply.Click += (_, _) => Complete(FolderSelectionAction.Apply);
@@ -125,18 +126,20 @@ public sealed class FolderSelectionWindow(
         {
             var later = new Button
             {
-                Content = "나중에 선택",
+                Content = "대기 목록에 남기기",
                 HorizontalAlignment = HorizontalAlignment.Stretch,
             };
             later.Click += (_, _) => Complete(FolderSelectionAction.Later);
             buttons.Children.Add(later);
+            buttons.Children.Add(CreateHint(
+                "자동 팝업은 다시 표시하지 않으며, 다운로드 이력의 처리 대기에서 나중에 처리할 수 있습니다."));
         }
 
         if (allowSkipAll)
         {
             var skipAll = new Button
             {
-                Content = "모두 선택 안 함",
+                Content = "대기 중인 파일 모두 이동하지 않기",
                 HorizontalAlignment = HorizontalAlignment.Stretch,
             };
             skipAll.Click += (_, _) => Complete(FolderSelectionAction.SkipAll);
@@ -156,7 +159,7 @@ public sealed class FolderSelectionWindow(
 
         var close = new Button
         {
-            Content = "창 닫기",
+            Content = allowLater ? "닫고 대기 목록에 남기기" : "창 닫기",
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         close.Click += (_, _) => Complete(FolderSelectionAction.Closed);
@@ -165,6 +168,14 @@ public sealed class FolderSelectionWindow(
         root.Children.Add(buttons);
         return root;
     }
+
+    private static TextBlock CreateHint(string text)
+        => new()
+        {
+            Text = text,
+            Opacity = 0.75,
+            TextWrapping = TextWrapping.Wrap,
+        };
 
     private void Complete(FolderSelectionAction action)
     {
