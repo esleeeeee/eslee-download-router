@@ -5,23 +5,46 @@
   <Application.Resources>
     <ResourceDictionary>
       <ResourceDictionary.ThemeDictionaries>
+        <!--
+          Light surfaces match the white product icon: a near-white page, white cards,
+          soft blue-grey borders, and blue reserved for primary actions and selection.
+          Large saturated fills are intentionally avoided.
+        -->
         <ResourceDictionary x:Key="Default">
-          <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F3F3F3" />
+          <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F7F9FC" />
           <SolidColorBrush x:Key="CardSurfaceBrush" Color="#FFFFFF" />
-          <SolidColorBrush x:Key="StatusSurfaceBrush" Color="#EAEAEA" />
+          <SolidColorBrush x:Key="CardBorderBrush" Color="#DCE4EE" />
+          <SolidColorBrush x:Key="SectionSurfaceBrush" Color="#F2F6FB" />
+          <SolidColorBrush x:Key="StatusSurfaceBrush" Color="#E8EFF9" />
+          <SolidColorBrush x:Key="AccentStatusSurfaceBrush" Color="#DCEBFB" />
+          <SolidColorBrush x:Key="AccentTextBrush" Color="#0B5CAD" />
           <SolidColorBrush x:Key="WarningStatusSurfaceBrush" Color="#FFF4CE" />
+          <SolidColorBrush x:Key="DangerTextBrush" Color="#B03A2E" />
+          <SolidColorBrush x:Key="SeparatorBrush" Color="#E2E8F1" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="Light">
-          <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F3F3F3" />
+          <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#F7F9FC" />
           <SolidColorBrush x:Key="CardSurfaceBrush" Color="#FFFFFF" />
-          <SolidColorBrush x:Key="StatusSurfaceBrush" Color="#EAEAEA" />
+          <SolidColorBrush x:Key="CardBorderBrush" Color="#DCE4EE" />
+          <SolidColorBrush x:Key="SectionSurfaceBrush" Color="#F2F6FB" />
+          <SolidColorBrush x:Key="StatusSurfaceBrush" Color="#E8EFF9" />
+          <SolidColorBrush x:Key="AccentStatusSurfaceBrush" Color="#DCEBFB" />
+          <SolidColorBrush x:Key="AccentTextBrush" Color="#0B5CAD" />
           <SolidColorBrush x:Key="WarningStatusSurfaceBrush" Color="#FFF4CE" />
+          <SolidColorBrush x:Key="DangerTextBrush" Color="#B03A2E" />
+          <SolidColorBrush x:Key="SeparatorBrush" Color="#E2E8F1" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
           <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#202020" />
           <SolidColorBrush x:Key="CardSurfaceBrush" Color="#2B2B2B" />
+          <SolidColorBrush x:Key="CardBorderBrush" Color="#3C4450" />
+          <SolidColorBrush x:Key="SectionSurfaceBrush" Color="#262A30" />
           <SolidColorBrush x:Key="StatusSurfaceBrush" Color="#383838" />
+          <SolidColorBrush x:Key="AccentStatusSurfaceBrush" Color="#20364F" />
+          <SolidColorBrush x:Key="AccentTextBrush" Color="#8CC2FF" />
           <SolidColorBrush x:Key="WarningStatusSurfaceBrush" Color="#4A3B19" />
+          <SolidColorBrush x:Key="DangerTextBrush" Color="#FF9A8F" />
+          <SolidColorBrush x:Key="SeparatorBrush" Color="#3A3A3A" />
         </ResourceDictionary>
       </ResourceDictionary.ThemeDictionaries>
       <ResourceDictionary.MergedDictionaries>

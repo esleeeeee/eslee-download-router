@@ -64,6 +64,7 @@ public sealed class AgentCommandHandler(
                 "selection.complete" => await HandleSelectionCompletedAsync(request, cancellationToken).ConfigureAwait(false),
                 "selection.skip" => await HandleSelectionSkippedAsync(request, cancellationToken).ConfigureAwait(false),
                 "selection.skip-many" => await HandleSelectionsSkippedAsync(request, cancellationToken).ConfigureAwait(false),
+                "selection.prompt-state" => await HandleSelectionPromptStateAsync(request, cancellationToken).ConfigureAwait(false),
                 "route.change" => await HandleRouteChangeAsync(request, cancellationToken).ConfigureAwait(false),
                 "job.retry" => await HandleRetryAsync(request, cancellationToken).ConfigureAwait(false),
                 "diagnostics.status" => AgentResponse.Ok(request.RequestId, new
@@ -148,9 +149,14 @@ public sealed class AgentCommandHandler(
             return AgentResponse.Ok(request.RequestId, new { tracked = false, failOpen = true });
         }
 
-        var routingState = matched.Rule.StorageMode == StorageMode.SelectSubfolder
+        var requiresSelection = matched.Rule.StorageMode == StorageMode.SelectSubfolder;
+        var routingState = requiresSelection
             ? RoutingState.WaitingForSelection
             : RoutingState.NotRequired;
+        // Automatic rules never open the selection window, so they start already resolved.
+        var promptState = requiresSelection
+            ? SelectionPromptState.NeverShown
+            : SelectionPromptState.Resolved;
         var job = new DownloadJob(
             Guid.NewGuid(),
             browser,
@@ -172,11 +178,12 @@ public sealed class AgentCommandHandler(
             null,
             DateTimeOffset.UtcNow,
             null,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            false,
+            promptState);
 
         await repository.CreateJobAsync(job, cancellationToken).ConfigureAwait(false);
-        var selectionUiRequested = matched.Rule.StorageMode == StorageMode.SelectSubfolder
-            && selectionUiLauncher.RequestSelectionUi();
+        var selectionUiRequested = requiresSelection && selectionUiLauncher.RequestSelectionUi();
         logger.LogInformation(
             "Rule {RuleId} matched download {DownloadId} using {SourceField}",
             matched.Rule.Id,
@@ -324,6 +331,8 @@ public sealed class AgentCommandHandler(
                     ? job.LastBrowserEventAt
                     : DateTimeOffset.UtcNow,
                 IsBrowserRecordStale = false,
+                // A cancelled or interrupted transfer never needs a folder decision again.
+                SelectionPromptState = SelectionPromptState.Resolved,
             };
             await repository.UpdateJobAsync(job, cancelled ? "download.cancelled" : "download.interrupted", cancellationToken).ConfigureAwait(false);
             LogTransition(sanitizedDownloadId, request.Command, beforeBrowser, beforeRouting, job);
@@ -461,6 +470,7 @@ public sealed class AgentCommandHandler(
             {
                 SelectedRelativeFolder = payload.RelativeFolder,
                 RoutingState = RoutingState.SelectionReady,
+                SelectionPromptState = SelectionPromptState.Resolved,
                 ErrorCode = null,
                 ErrorMessage = null,
             };
@@ -579,6 +589,45 @@ public sealed class AgentCommandHandler(
         });
     }
 
+    private async Task<AgentResponse> HandleSelectionPromptStateAsync(
+        AgentCommand request,
+        CancellationToken cancellationToken)
+    {
+        var payload = Deserialize<SelectionPromptStatePayload>(request.Payload);
+        if (payload.State is not (SelectionPromptState.Shown or SelectionPromptState.Deferred))
+        {
+            return AgentResponse.Error(
+                request.RequestId,
+                "selection.invalid-prompt-state",
+                "Only Shown and Deferred can be recorded from the selection window.");
+        }
+
+        var jobIds = payload.JobIds.Where(static id => id != Guid.Empty).Distinct().ToArray();
+        if (jobIds.Length is < 1 or > 1000)
+        {
+            return AgentResponse.Error(
+                request.RequestId,
+                "selection.invalid-count",
+                "Record between 1 and 1000 selection prompts.");
+        }
+
+        var advanced = await repository.AdvanceSelectionPromptStateAsync(
+            jobIds,
+            payload.State,
+            cancellationToken).ConfigureAwait(false);
+        logger.LogInformation(
+            "Selection prompt state recorded: state={State}, requested={Requested}, advanced={Advanced}",
+            payload.State,
+            jobIds.Length,
+            advanced.Count);
+        return AgentResponse.Ok(request.RequestId, new
+        {
+            requested = jobIds.Length,
+            advanced = advanced.Count,
+            state = payload.State.ToString(),
+        });
+    }
+
     private async Task<AgentResponse> HandleJobsDeleteAsync(
         AgentCommand request,
         CancellationToken cancellationToken)
@@ -651,6 +700,7 @@ public sealed class AgentCommandHandler(
         job = job with
         {
             SelectedRelativeFolder = payload.RelativeFolder,
+            SelectionPromptState = SelectionPromptState.Resolved,
             ErrorCode = null,
             ErrorMessage = null,
             CompletedAt = null,
