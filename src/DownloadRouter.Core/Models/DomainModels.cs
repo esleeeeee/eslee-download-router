@@ -81,6 +81,19 @@ public enum RoutingState
     NotRequired,
 }
 
+/// <summary>
+/// Tracks whether the automatic folder selection window was already offered for a job.
+/// This is persisted so a restart of the app, the browser, or Windows cannot replay a
+/// prompt the user already answered or postponed.
+/// </summary>
+public enum SelectionPromptState
+{
+    NeverShown,
+    Shown,
+    Deferred,
+    Resolved,
+}
+
 public sealed record DownloadRule(
     Guid Id,
     string Name,
@@ -133,7 +146,8 @@ public sealed record DownloadJob(
     DateTimeOffset CreatedAt,
     DateTimeOffset? CompletedAt,
     DateTimeOffset? LastBrowserEventAt = null,
-    bool IsBrowserRecordStale = false)
+    bool IsBrowserRecordStale = false,
+    SelectionPromptState SelectionPromptState = SelectionPromptState.NeverShown)
 {
     public DownloadJobStatus Status
         => BrowserState switch
@@ -219,6 +233,10 @@ public sealed record SelectionSkippedPayload(Guid JobId);
 
 public sealed record SelectionsSkippedPayload(IReadOnlyList<Guid> JobIds);
 
+public sealed record SelectionPromptStatePayload(
+    IReadOnlyList<Guid> JobIds,
+    SelectionPromptState State);
+
 public sealed record JobRouteChangePayload(
     Guid JobId,
     string RelativeFolder,
@@ -266,6 +284,7 @@ public static class ProtocolConstants
         "selection.complete",
         "selection.skip",
         "selection.skip-many",
+        "selection.prompt-state",
         "route.change",
         "job.retry",
         "diagnostics.status",
