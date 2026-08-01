@@ -11,12 +11,10 @@ public sealed class TrayIconHost : IDisposable
     private const uint NimAdd = 0x00000000;
     private const uint NimModify = 0x00000001;
     private const uint NimDelete = 0x00000002;
-    private const uint NimSetVersion = 0x00000004;
     private const uint NifMessage = 0x00000001;
     private const uint NifIcon = 0x00000002;
     private const uint NifTip = 0x00000004;
     private const uint NifInfo = 0x00000010;
-    private const uint NotifyIconVersion4 = 4;
     private const uint WmLeftButtonDoubleClick = 0x0203;
     private const uint WmRightButtonUp = 0x0205;
     private const uint WmContextMenu = 0x007B;
@@ -171,9 +169,6 @@ public sealed class TrayIconHost : IDisposable
             trayIconHandle = 0;
             throw new InvalidOperationException("The system tray icon could not be created.");
         }
-
-        data.TimeoutOrVersion = NotifyIconVersion4;
-        _ = ShellNotifyIcon(NimSetVersion, ref data);
     }
 
     private NotifyIconData CreateIconData(uint flags)

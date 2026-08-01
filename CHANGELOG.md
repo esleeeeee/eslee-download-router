@@ -6,6 +6,30 @@
 
 현재 예정된 변경은 없습니다.
 
+## [1.0.3] - 2026-08-01
+
+### Fixed
+
+- 표준 툴팁을 억제하던 NotifyIcon 버전 협상을 제거해 hover 시 `eslee Download Router` 제품명 툴팁이 표시되도록 수정
+
+### Changed
+
+- 새 흰색 기반 제품 아이콘을 App, Window, taskbar, tray, Installer, shortcut, uninstall entry와 Extension에 공통 적용
+- 트레이 아이콘에서 메인 창을 열 때는 더블 클릭 또는 오른쪽 클릭 메뉴를 사용합니다.
+- 다운로드 라우팅 기능 로직은 변경하지 않았습니다.
+
+## [1.0.2] - 2026-07-31
+
+### Added
+
+- 릴리스 산출물에서 개발 환경 정보를 검사하는 `scripts/verify-release-privacy.ps1`
+- 태그 push 시 빌드, 테스트, Installer 생성, 개인정보 검사와 Release 발행을 수행하는 `Build Release` 워크플로
+- 개인정보를 남기지 않는 검증 기준 문서 `TESTING.md`와 `docs/BROWSER_COMPATIBILITY.md`
+
+### Changed
+
+- 소스와 릴리스 산출물에서 로컬 개발 환경 정보를 제거
+
 ## [1.0.1] - 2026-07-29
 
 ### Fixed

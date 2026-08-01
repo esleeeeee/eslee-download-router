@@ -70,9 +70,9 @@ Extension `manifest.json`의 버전은 Chromium 패키지 수명 주기용이며
 
 ## 브랜딩 자산
 
-- master 원본은 `assets/branding/eslee-download-router.png`이며 생성된 `eslee-download-router.ico`와 함께 소스 관리합니다.
+- 현재 제품용 white master 원본은 `assets/branding/eslee-download-router.png`이며 생성된 `eslee-download-router.ico`와 함께 소스 관리합니다.
 - `scripts/generate-branding-assets.ps1`은 master PNG를 변경하지 않고 16/20/24/32/40/48/64/128/256px ICO와 Extension 16/32/48/128px PNG를 재생성합니다. v1.0.1부터 24px 이상은 canvas 내부 artwork를 중앙 기준 1.18배로 렌더링하고, 트레이용 16/20px은 실제 Auto Power 비교와 1px 안전 여백을 만족하는 1.15배를 사용합니다. 종횡비, 색, 그림자와 구성 요소는 변경하지 않습니다.
-- App EXE는 `ApplicationIcon`, MainWindow/FolderSelectionWindow는 embedded group icon ID, Installer는 `SetupIconFile`을 통해 같은 ICO를 사용합니다. 트레이는 현재 App EXE의 small icon을 추출하며 HICON lifetime을 직접 관리합니다.
+- App EXE는 `ApplicationIcon`, MainWindow/FolderSelectionWindow는 embedded group icon ID, Installer는 `SetupIconFile`을 통해 같은 ICO를 사용합니다. 트레이는 현재 App EXE의 small icon을 추출하며 HICON lifetime을 직접 관리하고, 별도 버전 협상 없이 셸 기본 제품명 툴팁을 사용합니다.
 - Extension `key`와 고정 ID `gilicenlclaemgiijcjjejilikbooggj`는 branding 변경과 무관하게 유지합니다. `manifest.json`의 별도 확장 버전은 제품 assembly 버전과 자동 동기화하지 않습니다.
 - 아이콘을 갱신한 뒤에는 App/Installer embedded resource, Start Menu shortcut target, 실행 창·작업표시줄·트레이, Extension `dist/icons`를 실제 산출물에서 확인합니다. 작은 프레임은 알파 경계와 알파 32 이상 핵심 시각 경계를 모두 측정하며 Windows icon cache 파일을 직접 삭제하지 않습니다.
 
