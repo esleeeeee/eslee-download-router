@@ -299,6 +299,12 @@ public sealed class ProtocolAndStateTests
         Assert.Contains("16 = 1.15", brandingGenerator, StringComparison.Ordinal);
         Assert.Contains("20 = 1.15", brandingGenerator, StringComparison.Ordinal);
         Assert.Contains("ExtractIconEx(executablePath", trayIconHost, StringComparison.Ordinal);
+        Assert.Contains(
+            "CreateIconData(NifMessage | NifIcon | NifTip)",
+            trayIconHost,
+            StringComparison.Ordinal);
+        Assert.Contains("data.Tip = \"eslee Download Router\"", trayIconHost, StringComparison.Ordinal);
+        Assert.DoesNotContain("NimSetVersion", trayIconHost, StringComparison.Ordinal);
         Assert.DoesNotContain("LoadImage", trayIconHost, StringComparison.Ordinal);
 
         var expectedExtensionSizes = new[] { 16, 32, 48, 128 };
