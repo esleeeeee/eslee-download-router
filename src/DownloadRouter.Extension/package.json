@@ -11,7 +11,7 @@
     "clean": "node scripts/clean.mjs",
     "build": "npm run clean && tsc -p tsconfig.json && node scripts/copy-manifest.mjs",
     "lint": "eslint .",
-    "test": "tsc -p tsconfig.test.json && node --test build-tests/tests/download-state.test.js build-tests/tests/file-name.test.js build-tests/tests/native.test.js build-tests/tests/protocol.test.js build-tests/tests/source-attribution.test.js",
+    "test": "tsc -p tsconfig.test.json && node --test build-tests/tests/download-state.test.js build-tests/tests/file-name.test.js build-tests/tests/native.test.js build-tests/tests/protocol.test.js build-tests/tests/reconciliation.test.js build-tests/tests/source-attribution.test.js",
     "check": "npm run lint && npm run test && npm run build"
   },
   "devDependencies": {

@@ -4,7 +4,7 @@
 
 ## 정식 설치본
 
-1. [최신 Release](https://github.com/esleeeeee/eslee-Download-Router/releases/latest)의 `eslee-download-router-setup.exe`를 설치합니다.
+1. [최신 Release](https://github.com/esleeeeee/eslee-download-router/releases/latest)의 `eslee-download-router-setup.exe`를 설치합니다.
 2. Installer가 App, Agent, Native Host, Extension 파일과 HKCU Native Messaging 등록을 구성합니다.
 3. 브라우저의 확장 관리 주소를 열고 개발자 모드를 켭니다.
 4. 압축 해제된 확장 로드에서 `%LOCALAPPDATA%\Programs\eslee\DownloadRouter\extension`을 선택합니다.

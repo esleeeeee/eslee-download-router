@@ -9,8 +9,6 @@ public sealed partial class MainWindow
 {
     private readonly DispatcherTimer liveUpdateTimer = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private readonly SelectionPromptQueue selectionPromptQueue = new();
-    private readonly HashSet<Guid> deferredSelectionPrompts = [];
-    private readonly HashSet<Guid> sessionAutoPromptJobs = [];
     private CancellationTokenSource? currentSelectionCancellation;
     private Guid? currentSelectionJobId;
     private DownloadRule? currentSelectionRule;
@@ -22,6 +20,7 @@ public sealed partial class MainWindow
     private string? livePageSnapshot;
     private int previousAutomaticCount;
     private int shownAutoPromptCount;
+    private int sessionAutoPromptTotal;
 
     private void InitializeLiveUpdates()
     {
@@ -58,10 +57,51 @@ public sealed partial class MainWindow
         var counts = DownloadJobQueries.CountDashboard(jobs);
         AddCard("활성 규칙", rules.Count(static rule => rule.IsEnabled).ToString());
         AddCard("다운로드 중", counts.DownloadsInProgress.ToString());
-        AddCard("저장 위치 선택 대기", counts.WaitingForSelection.ToString());
+        AddPendingDashboardCard(counts.WaitingForSelection);
         AddCard("최근 완료", counts.RecentlyCompleted.ToString());
         AddCard("취소/중단", counts.CancelledOrInterrupted.ToString());
         AddCard("재시도/실패", counts.RetryOrFailed.ToString());
+    }
+
+    /// <summary>
+    /// The pending card is the dashboard entry point into the download history
+    /// "처리 대기" filter now that the separate navigation tab is gone.
+    /// </summary>
+    private void AddPendingDashboardCard(int pendingCount)
+    {
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = "저장 위치 선택 대기",
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = pendingCount.ToString(),
+            Style = Application.Current.Resources["SubtitleTextBlockStyle"] as Style,
+        });
+        panel.Children.Add(CreateHelpText(pendingCount == 0
+            ? "지금 처리할 대기 파일이 없습니다."
+            : "다운로드 이력의 처리 대기 목록에서 저장 위치를 지정할 수 있습니다."));
+
+        var open = new Button
+        {
+            Content = "처리 대기 목록 열기",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            IsEnabled = pendingCount > 0,
+        };
+        open.Click += async (_, _) => await OpenPendingHistoryAsync();
+        panel.Children.Add(open);
+        ContentPanel.Children.Add(CreateCard(panel));
+    }
+
+    private async Task OpenPendingHistoryAsync()
+    {
+        historyFilter = HistoryFilter.Pending;
+        selectedHistoryJobs.Clear();
+        Navigation.SelectedItem = HistoryNavigationItem;
+        await ShowHistoryAsync();
+        ContentScrollViewer.ChangeView(null, 0, null);
     }
 
     private async void LiveUpdateTimer_Tick(object? sender, object args)
@@ -77,12 +117,14 @@ public sealed partial class MainWindow
             var jobs = AgentClient.ReadData<List<DownloadJob>>(await agent.SendAsync("jobs.list")) ?? [];
             var rules = AgentClient.ReadData<List<DownloadRule>>(await agent.SendAsync("rules.list")) ?? [];
             var active = DownloadJobQueries.ActiveSelections(jobs);
-            var automatic = DownloadJobQueries.AutomaticSelections(jobs, DateTimeOffset.UtcNow);
+            var automatic = DownloadJobQueries.AutomaticSelections(jobs);
             UpdatePendingBadge(active.Count, automatic.Count);
             SynchronizeSelectionPrompt(active, automatic);
 
             if (!selectionPromptInProgress && !blockingDialogOpen)
             {
+                // Detached on purpose: while the modal selection window is open the timer must
+                // keep running so the window can be refreshed or invalidated by later events.
                 _ = ProcessNextSelectionPromptAsync(automatic, rules);
             }
 
@@ -125,19 +167,18 @@ public sealed partial class MainWindow
                             currentSelectionRule,
                             Math.Max(0, active.Count - 1),
                             Math.Max(1, shownAutoPromptCount),
-                            Math.Max(shownAutoPromptCount, sessionAutoPromptJobs.Count)));
+                            Math.Max(shownAutoPromptCount, sessionAutoPromptTotal)));
                 }
             }
         }
 
+        // Eligibility already comes from the persisted prompt state, so the queue only
+        // needs to guard against inserting the same job twice within this session.
         foreach (var job in automatic)
         {
-            if (job.Id != currentSelectionJobId && !deferredSelectionPrompts.Contains(job.Id))
+            if (job.Id != currentSelectionJobId && selectionPromptQueue.Enqueue(job.Id))
             {
-                if (selectionPromptQueue.Enqueue(job.Id))
-                {
-                    sessionAutoPromptJobs.Add(job.Id);
-                }
+                sessionAutoPromptTotal++;
             }
         }
     }
@@ -146,24 +187,83 @@ public sealed partial class MainWindow
         IReadOnlyList<DownloadJob> automatic,
         IReadOnlyList<DownloadRule> rules)
     {
-        while (selectionPromptQueue.TryDequeue(out var jobId))
+        // Claim the single-prompt slot before the first await so a later timer tick
+        // cannot start a second window while the prompt state is being persisted.
+        if (selectionPromptInProgress)
         {
-            var job = automatic.FirstOrDefault(candidate => candidate.Id == jobId);
-            var rule = job is null ? null : rules.FirstOrDefault(candidate => candidate.Id == job.RuleId);
-            if (job is null || rule is null || deferredSelectionPrompts.Contains(jobId))
-            {
-                continue;
-            }
-
-            shownAutoPromptCount++;
-            await ShowSelectionPromptAsync(
-                job,
-                rule,
-                Math.Max(0, automatic.Count - 1),
-                shownAutoPromptCount,
-                Math.Max(shownAutoPromptCount, sessionAutoPromptJobs.Count),
-                automatic.Select(static candidate => candidate.Id).ToArray());
             return;
+        }
+
+        selectionPromptInProgress = true;
+        var promptOpened = false;
+        try
+        {
+            while (selectionPromptQueue.TryDequeue(out var jobId))
+            {
+                var job = automatic.FirstOrDefault(candidate => candidate.Id == jobId);
+                var rule = job is null ? null : rules.FirstOrDefault(candidate => candidate.Id == job.RuleId);
+                if (job is null || rule is null)
+                {
+                    continue;
+                }
+
+                // Persist "Shown" before the window opens. A crash or a forced exit therefore
+                // cannot replay this prompt on the next launch.
+                if (!await RecordSelectionPromptStateAsync([job.Id], SelectionPromptState.Shown))
+                {
+                    WriteWindowActivationDiagnostic(
+                        $"selection-window prompt-state-not-persisted job={job.Id:N} skipping-auto-prompt");
+                    continue;
+                }
+
+                shownAutoPromptCount++;
+                promptOpened = true;
+                await ShowSelectionPromptAsync(
+                    job,
+                    rule,
+                    Math.Max(0, automatic.Count - 1),
+                    shownAutoPromptCount,
+                    Math.Max(shownAutoPromptCount, sessionAutoPromptTotal),
+                    automatic.Select(static candidate => candidate.Id).ToArray());
+                return;
+            }
+        }
+        finally
+        {
+            if (!promptOpened)
+            {
+                selectionPromptInProgress = false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Records the automatic prompt decision in SQLite. Returns false when the agent
+    /// could not persist it, in which case the prompt is not opened.
+    /// </summary>
+    private async Task<bool> RecordSelectionPromptStateAsync(
+        IReadOnlyList<Guid> jobIds,
+        SelectionPromptState state)
+    {
+        if (jobIds.Count == 0)
+        {
+            return true;
+        }
+
+        try
+        {
+            var response = await agent.SendAsync(
+                "selection.prompt-state",
+                new SelectionPromptStatePayload(jobIds, state));
+            WriteWindowActivationDiagnostic(
+                $"selection-prompt-state state={state} count={jobIds.Count} success={response.Success}");
+            return response.Success;
+        }
+        catch (Exception exception)
+        {
+            WriteWindowActivationDiagnostic(
+                $"selection-prompt-state state={state} count={jobIds.Count} failed={exception.GetType().Name}");
+            return false;
         }
     }
 
@@ -175,6 +275,7 @@ public sealed partial class MainWindow
         int queueTotal,
         IReadOnlyList<Guid> currentAutoQueueJobIds)
     {
+        // The slot was already claimed by ProcessNextSelectionPromptAsync.
         selectionPromptInProgress = true;
         currentSelectionJobId = job.Id;
         currentSelectionRule = rule;
@@ -212,17 +313,11 @@ public sealed partial class MainWindow
             else if (result.Action == FolderSelectionAction.Skip)
             {
                 var response = await agent.SendAsync("selection.skip", new SelectionSkippedPayload(job.Id));
+                WriteWindowActivationDiagnostic(
+                    $"selection-window decision-persisted action=Skip job={job.Id:N} success={response.Success}");
                 if (!response.Success)
                 {
-                    WriteWindowActivationDiagnostic(
-                        $"selection-window decision-persisted action=Skip job={job.Id:N} success=false");
                     await ShowMessageAsync(response.Message ?? "이동 건너뛰기 적용에 실패했습니다.");
-                }
-                else
-                {
-                    deferredSelectionPrompts.Remove(job.Id);
-                    WriteWindowActivationDiagnostic(
-                        $"selection-window decision-persisted action=Skip job={job.Id:N} success=true");
                 }
             }
             else if (result.Action == FolderSelectionAction.SkipAll)
@@ -234,34 +329,29 @@ public sealed partial class MainWindow
                 var response = await agent.SendAsync(
                     "selection.skip-many",
                     new SelectionsSkippedPayload(queuedJobIds));
+                WriteWindowActivationDiagnostic(
+                    $"selection-window decision-persisted action=SkipAll count={queuedJobIds.Length} success={response.Success}");
                 if (!response.Success)
                 {
-                    WriteWindowActivationDiagnostic(
-                        $"selection-window decision-persisted action=SkipAll count={queuedJobIds.Length} success=false");
                     await ShowMessageAsync(response.Message ?? "대기 파일 일괄 건너뛰기 적용에 실패했습니다.");
                 }
                 else
                 {
-                    foreach (var queuedJobId in queuedJobIds)
-                    {
-                        deferredSelectionPrompts.Remove(queuedJobId);
-                    }
-
                     selectionPromptQueue.Drain();
-                    sessionAutoPromptJobs.Clear();
                     shownAutoPromptCount = 0;
-                    WriteWindowActivationDiagnostic(
-                        $"selection-window decision-persisted action=SkipAll count={queuedJobIds.Length} success=true");
+                    sessionAutoPromptTotal = 0;
                 }
             }
             else
             {
-                deferredSelectionPrompts.Add(job.Id);
+                // "대기 목록에 남기기" and closing the window both mean the same thing:
+                // keep the file waiting, but never auto-open this prompt again.
+                await DeferSelectionPromptAsync(job.Id);
             }
         }
         catch (Exception exception)
         {
-            deferredSelectionPrompts.Add(job.Id);
+            await DeferSelectionPromptAsync(job.Id);
             System.Diagnostics.Debug.WriteLine($"Selection prompt failed open: {exception.GetType().Name}");
         }
         finally
@@ -276,6 +366,9 @@ public sealed partial class MainWindow
             selectionPromptInProgress = false;
         }
     }
+
+    private async Task DeferSelectionPromptAsync(Guid jobId)
+        => _ = await RecordSelectionPromptStateAsync([jobId], SelectionPromptState.Deferred);
 
     private async Task RefreshVisibleLivePageAsync(
         IReadOnlyList<DownloadJob> jobs,
@@ -305,10 +398,9 @@ public sealed partial class MainWindow
                 selectedHistoryJobs.IntersectWith(jobs.Select(static job => job.Id));
                 RenderHistory();
                 break;
-            case "pending":
-                await ShowPendingAsync();
-                break;
         }
+
+        await Task.CompletedTask;
     }
 
     private static string CreateSelectionPromptSnapshot(DownloadJob job, int activeCount)
@@ -332,5 +424,4 @@ public sealed partial class MainWindow
         }
         previousAutomaticCount = automaticCount;
     }
-
 }
