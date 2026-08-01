@@ -4,7 +4,7 @@
 
 ## 요약
 
-- 현재 단계: 정식 버전 1.0.3 white icon 및 tray tooltip hotfix 검증
+- 현재 단계: 정식 버전 1.0.3 흰색 아이콘 및 트레이 툴팁 hotfix 개발 및 배포
 - 공식 저장소: https://github.com/esleeeeee/eslee-Download-Router
 - 기본 브랜치: `main`
 - 최종 개발 PR: [#1 Fix pending prompts, Whale cancellation, version, and themes](https://github.com/esleeeeee/eslee-Download-Router/pull/1)
@@ -19,7 +19,8 @@
 - Extension manifest 버전은 기존 정책에 따라 제품 assembly와 독립 관리합니다.
 - 고정 Extension ID `gilicenlclaemgiijcjjejilikbooggj`와 Native Messaging identity를 유지합니다.
 - 설치 프로그램은 현재 사용자 단위이며 App, Agent, Native Host와 Extension 파일을 함께 설치합니다.
-- eslee 로고, 폴더, cyan 다운로드와 분기 경로, gold node를 사용한 master PNG와 9-size ICO를 App, Window, taskbar, 트레이, Installer, shortcut, 제거 항목과 Extension에 공통 적용합니다.
+- v1.0.3부터 흰색 기반 master PNG와 9-size ICO를 App, Window, taskbar, 트레이, Installer, shortcut, 제거 항목과 Extension에 공통 적용합니다. eslee 로고, 폴더, cyan 다운로드와 분기 경로, gold node 구성은 유지합니다.
+- 트레이 아이콘은 별도 NotifyIcon 버전 협상 없이 셸 기본 툴팁 경로를 사용해 hover 시 제품명을 표시합니다.
 
 ## 구현 완료
 
@@ -47,16 +48,20 @@
 | 항목 | 결과 |
 |---|---|
 | .NET Debug build | 성공, 경고 0, 오류 0 |
+| .NET Release build | 성공, 경고 0, 오류 0 |
 | .NET tests | 81/81 통과, Core 48, Infrastructure 8, Integration 25 |
 | Extension | ESLint, TypeScript, dist build 성공, Node tests 13/13 |
 | npm audit | 취약점 0건 |
 | Release publish | App, Agent, Native Host win-x64 self-contained 성공 |
-| Installer | Inno Setup compile과 기존 1.0.0 설치 위 1.0.1 업그레이드 성공 |
+| 릴리스 개인정보 검사 | `verify-release-privacy.ps1` 통과 |
+| Installer | Inno Setup compile과 기존 1.0.2 설치 위 1.0.3 업그레이드 성공 |
 | 사용자 데이터 | SQLite, 규칙, 이력, Pending, 설정과 테마 보존 |
-| 자동 시작 | 기존 HKCU Run 값 보존, 사용자 실제 Windows 재부팅 검증 성공 |
-| Native Messaging | 6개 Chromium 등록 보존, 설치 Native Host와 Agent ping 성공 |
-| 브랜딩 | 16/20px 1.15배, 24px 이상 1.18배 canvas occupancy 보정. 실제 Auto Power 비교에서 taskbar 23×24 대 24×24, 트레이 16×15 동일 확인 |
-| CI | feature PR과 main의 최종 GitHub Actions 성공 |
+| 자동 시작 | 기존 HKCU Run 값 보존, 자동 시작 경로 실행 성공 |
+| Native Messaging | 등록 보존, 설치 Native Host와 Agent ping 성공 |
+| 브랜딩 | 흰색 master 기준으로 App, Window, taskbar, 트레이, Installer, 시작 메뉴, 제거 항목과 Extension 아이콘 갱신 확인 |
+| 트레이 툴팁 | 실행 직후, 트레이 숨김 뒤, 재실행과 자동 시작 경로에서 제품명 툴팁 표시 확인 |
+| 트레이 동작 | 더블 클릭 창 열기, 오른쪽 클릭 메뉴, 아이콘 중복 없음 확인 |
+| CI | PR과 main의 최종 GitHub Actions 성공 |
 
 ## 실제 사용자 검증
 
@@ -65,6 +70,7 @@
 - 실제 Windows 재부팅
 - 로그인 후 eslee Download Router 자동 시작
 - 재부팅 이후 정상 동작
+- 1.0.3 업그레이드 설치 뒤 흰색 아이콘, 트레이 툴팁, 트레이 더블 클릭과 오른쪽 클릭 메뉴 정상 동작
 
 별도 격리 Whale 프로필에서는 Automatic 교차 볼륨 이동, SelectSubfolder 계층형 선택, 긴 폴더명, 네 취소 흐름, 개별과 일괄 `Skipped`, FIFO, 최소화 상태 선택창과 재연결 상태 보존을 검증했습니다.
 
@@ -85,6 +91,7 @@
 - FHD, 4K, Windows 100%, 150% 물리 디스플레이는 직접 검증하지 않았습니다.
 - FolderTreePicker에서 새 폴더 만들기는 제공하지 않습니다.
 - 개별 `나중에 선택`은 현재 App 세션 동안만 자동 팝업을 숨깁니다.
+- 트레이 아이콘은 단일 왼쪽 클릭으로 창을 열지 않습니다. 더블 클릭 또는 오른쪽 클릭 메뉴를 사용합니다.
 - 다운로드 시작 탭 URL은 Chromium API가 신뢰할 수 있는 필드로 제공하지 않으므로 활성 탭을 추측하지 않습니다.
 
 ## 유지보수 기준
