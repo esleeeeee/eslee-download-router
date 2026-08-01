@@ -9,14 +9,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/esleeeeee/eslee-Download-Router/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/esleeeeee/eslee-Download-Router"></a>
-  <a href="https://github.com/esleeeeee/eslee-Download-Router/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/esleeeeee/eslee-Download-Router/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/esleeeeee/eslee-download-router/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/esleeeeee/eslee-download-router"></a>
+  <a href="https://github.com/esleeeeee/eslee-download-router/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/esleeeeee/eslee-download-router/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <img alt="Windows 11" src="https://img.shields.io/badge/Windows_11-x64-0078D4?logo=windows11&logoColor=white">
   <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white">
 </p>
 
 <p align="center">
-  <strong><a href="https://github.com/esleeeeee/eslee-Download-Router/releases/latest/download/eslee-download-router-setup.exe">최신 설치 파일 다운로드</a></strong>
+  <strong><a href="https://github.com/esleeeeee/eslee-download-router/releases/latest/download/eslee-download-router-setup.exe">최신 설치 파일 다운로드</a></strong>
 </p>
 
 ## 소개
@@ -43,15 +43,17 @@ eslee Download Router는 브라우저의 기본 다운로드를 가로막지 않
 
 실제 최종 파일명, 브라우저 전송 상태, 라우팅 상태와 최종 경로를 표시합니다. 완료 파일의 경로를 바꾸고 같은 안전 이동 절차로 다시 이동할 수 있습니다. 이력 항목을 삭제해도 실제 파일은 삭제하지 않습니다.
 
-### Pending
+### 처리 대기
 
-아직 폴더를 선택하지 않은 파일은 저장 위치 선택 대기 화면에서 관리합니다.
+아직 폴더를 선택하지 않은 파일은 다운로드 이력의 `처리 대기` 필터에서 관리합니다.
 
-- `나중에 선택`: 현재 App 세션에서만 자동 팝업을 숨깁니다.
-- `이번 파일은 이동하지 않기`: 해당 Job을 영구 `Skipped`로 저장합니다.
-- `모두 선택 안 함`: 현재 FIFO의 모든 Job을 한 SQLite transaction에서 영구 `Skipped`로 저장합니다.
-- 저장된 결정은 Whale, Agent, App 또는 Windows를 다시 시작해도 다시 Pending으로 돌아가지 않습니다.
-- 30분이 지난 이전 세션 작업은 대기 목록에는 유지하지만 시작 직후 자동 팝업으로 표시하지 않습니다.
+- 자동 저장 위치 선택 팝업은 파일당 한 번만 표시합니다.
+- `대기 목록에 남기기`: 팝업을 다시 띄우지 않고 파일을 처리 대기 목록에 남깁니다. 창을 닫아도 같은 결과입니다.
+- `이번 파일은 이동하지 않기`: 해당 작업을 영구 `이동 안 함`으로 저장합니다.
+- `대기 중인 파일 모두 이동하지 않기`: 현재 대기 목록의 작업을 한 SQLite transaction에서 함께 저장합니다.
+- 저장된 결정은 Whale, Agent, App 또는 Windows를 다시 시작해도 자동 팝업으로 되돌아오지 않습니다.
+- 처리 대기 목록에서는 규칙별로 묶어 보고, 같은 규칙의 여러 파일에 하나의 하위 폴더를 함께 적용할 수 있습니다.
+- 서로 다른 규칙은 기준 폴더가 다르므로 하나의 하위 폴더를 함께 적용하지 않습니다.
 
 ### Browser cancellation
 
@@ -90,7 +92,7 @@ Firefox, Safari, 모바일과 Windows 이외 운영체제는 지원하지 않습
 
 ## 설치
 
-1. [최신 Release](https://github.com/esleeeeee/eslee-Download-Router/releases/latest)에서 `eslee-download-router-setup.exe`를 내려받습니다.
+1. [최신 Release](https://github.com/esleeeeee/eslee-download-router/releases/latest)에서 `eslee-download-router-setup.exe`를 내려받습니다.
 2. 설치 프로그램을 실행합니다. 관리자 권한이 필요 없는 현재 사용자 단위 설치입니다.
 3. 설치 프로그램은 App, Agent, Native Host, Extension 파일을 설치하고 지원 브라우저의 HKCU Native Messaging 등록을 구성합니다.
 4. Whale에서 `whale://extensions`를 열고 개발자 모드를 켭니다.
@@ -103,20 +105,20 @@ Native Messaging 레지스트리나 manifest를 사용자가 직접 수정할 �
 
 ## 간단 사용법
 
-### Automatic 규칙
+### 정한 폴더로 자동 이동
 
-1. 사이트 규칙에서 도메인 또는 URL 조건을 입력합니다.
-2. 처리 방식을 `Automatic`으로 선택합니다.
-3. Windows FolderPicker로 저장 폴더를 지정하고 규칙을 저장합니다.
+1. 사이트 규칙에서 적용할 사이트 주소와 적용 범위를 입력합니다.
+2. 저장 방식을 `정한 폴더로 자동 이동`으로 선택합니다.
+3. 폴더 선택 버튼으로 기준 폴더를 지정하고 규칙을 저장합니다.
 4. 해당 사이트에서 다운로드하면 완료 후 파일이 자동 이동합니다.
 
-### SelectSubfolder 규칙
+### 다운로드마다 하위 폴더 선택
 
-1. 처리 방식을 `SelectSubfolder`로 선택하고 선택 범위의 root 폴더를 지정합니다.
+1. 저장 방식을 `다운로드마다 하위 폴더 선택`으로 선택하고 기준 폴더를 지정합니다.
 2. 다운로드를 시작합니다.
-3. 표시된 FolderSelectionWindow에서 root 또는 하위 폴더를 선택합니다.
-4. 나중에 처리할 파일은 저장 위치 선택 대기 화면에서 다시 엽니다.
-5. 메인 창을 닫아 트레이로 숨긴 뒤에는 트레이 메뉴의 `열기` 또는 `저장 위치 선택 대기 열기`를 사용합니다.
+3. 표시된 선택 창에서 기준 폴더 또는 그 하위 폴더를 선택합니다.
+4. 나중에 처리할 파일은 `대기 목록에 남기기`를 누른 뒤 다운로드 이력의 `처리 대기` 필터에서 처리합니다.
+5. 메인 창을 닫아 트레이로 숨긴 뒤에는 트레이 메뉴의 `열기` 또는 `저장 위치 선택 대기 열기`를 사용합니다. 트레이 아이콘은 더블 클릭으로 창을 엽니다.
 
 ## 아키텍처
 
@@ -147,8 +149,8 @@ Extension은 브라우저 이벤트를 전달하고 Native Host는 입력 검증
 ## 개발
 
 ```powershell
-git clone https://github.com/esleeeeee/eslee-Download-Router.git
-cd eslee-Download-Router
+git clone https://github.com/esleeeeee/eslee-download-router.git
+cd eslee-download-router
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1

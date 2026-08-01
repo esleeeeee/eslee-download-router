@@ -68,7 +68,7 @@ public sealed class ProtocolAndStateTests
         Assert.False(skipped.IsSelectionPending);
         Assert.False(stateMachine.CanTransition(RoutingState.Skipped, RoutingState.WaitingForSelection));
         Assert.Empty(DownloadJobQueries.ActiveSelections([skipped]));
-        Assert.Empty(DownloadJobQueries.AutomaticSelections([skipped], DateTimeOffset.UtcNow));
+        Assert.Empty(DownloadJobQueries.AutomaticSelections([skipped]));
     }
 
     [Fact]
@@ -150,30 +150,73 @@ public sealed class ProtocolAndStateTests
     }
 
     [Fact]
-    public void AutomaticSelectionPolicyKeepsOldAndStaleJobsInPendingWithoutPopup()
+    public void AutomaticSelectionPolicyKeepsDeferredAndStaleJobsInPendingWithoutPopup()
     {
         var now = DateTimeOffset.UtcNow;
-        var recent = CreateJob(BrowserTransferState.InProgress, RoutingState.WaitingForSelection) with
+        var fresh = CreateJob(BrowserTransferState.InProgress, RoutingState.WaitingForSelection) with
         {
             CreatedAt = now.AddMinutes(-5),
             LastBrowserEventAt = now.AddMinutes(-1),
+            SelectionPromptState = SelectionPromptState.NeverShown,
         };
-        var old = recent with
+        var deferred = fresh with { Id = Guid.NewGuid(), SelectionPromptState = SelectionPromptState.Deferred };
+        var shown = fresh with { Id = Guid.NewGuid(), SelectionPromptState = SelectionPromptState.Shown };
+        var stale = fresh with { Id = Guid.NewGuid(), IsBrowserRecordStale = true };
+        var cancelled = fresh with { Id = Guid.NewGuid(), BrowserState = BrowserTransferState.Cancelled };
+
+        var pending = DownloadJobQueries.ActiveSelections([fresh, deferred, shown, stale, cancelled]);
+        var automatic = DownloadJobQueries.AutomaticSelections([deferred, shown, stale, fresh, cancelled]);
+
+        Assert.Equal(4, pending.Count);
+        Assert.Equal(fresh.Id, Assert.Single(automatic).Id);
+        Assert.True(SelectionPromptPolicy.IsPreviousSessionPending(deferred));
+        Assert.True(SelectionPromptPolicy.IsPreviousSessionPending(shown));
+        Assert.True(SelectionPromptPolicy.IsPreviousSessionPending(stale));
+        Assert.Equal(3, DownloadJobQueries.PreviousSessionSelections([fresh, deferred, shown, stale, cancelled]).Count);
+    }
+
+    [Fact]
+    public void BrowserActivityTimestampsNeverReArmAnAnsweredPrompt()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var deferred = CreateJob(BrowserTransferState.Complete, RoutingState.WaitingForSelection) with
         {
-            Id = Guid.NewGuid(),
-            CreatedAt = now.AddHours(-1),
-            LastBrowserEventAt = now.AddMinutes(-31),
+            CreatedAt = now.AddDays(-1),
+            LastBrowserEventAt = now.AddDays(-1),
+            SelectionPromptState = SelectionPromptState.Deferred,
         };
-        var stale = recent with { Id = Guid.NewGuid(), IsBrowserRecordStale = true };
-        var cancelled = recent with { Id = Guid.NewGuid(), BrowserState = BrowserTransferState.Cancelled };
 
-        var pending = DownloadJobQueries.ActiveSelections([recent, old, stale, cancelled]);
-        var automatic = DownloadJobQueries.AutomaticSelections([old, stale, recent, cancelled], now);
+        // A browser or PC restart reconciles the record and refreshes the activity time.
+        var afterRestart = deferred with { LastBrowserEventAt = now };
 
-        Assert.Equal(3, pending.Count);
-        Assert.Equal(recent.Id, Assert.Single(automatic).Id);
-        Assert.True(SelectionPromptPolicy.IsPreviousSessionPending(old, now));
-        Assert.True(SelectionPromptPolicy.IsPreviousSessionPending(stale, now));
+        Assert.False(SelectionPromptPolicy.IsAutoPromptEligible(afterRestart));
+        Assert.Empty(DownloadJobQueries.AutomaticSelections([afterRestart]));
+        Assert.Single(DownloadJobQueries.ActiveSelections([afterRestart]));
+    }
+
+    [Fact]
+    public void SelectionPromptStateOnlyMovesForward()
+    {
+        Assert.True(SelectionPromptPolicy.CanAdvanceTo(SelectionPromptState.NeverShown, SelectionPromptState.Shown));
+        Assert.True(SelectionPromptPolicy.CanAdvanceTo(SelectionPromptState.Shown, SelectionPromptState.Deferred));
+        Assert.True(SelectionPromptPolicy.CanAdvanceTo(SelectionPromptState.Deferred, SelectionPromptState.Resolved));
+        Assert.False(SelectionPromptPolicy.CanAdvanceTo(SelectionPromptState.Deferred, SelectionPromptState.Shown));
+        Assert.False(SelectionPromptPolicy.CanAdvanceTo(SelectionPromptState.Resolved, SelectionPromptState.NeverShown));
+        Assert.False(SelectionPromptPolicy.CanAdvanceTo(SelectionPromptState.Shown, SelectionPromptState.Shown));
+    }
+
+    [Fact]
+    public void ResolvedAndTerminalJobsAreNeverAutoPrompted()
+    {
+        var resolved = CreateJob(BrowserTransferState.Complete, RoutingState.WaitingForSelection) with
+        {
+            SelectionPromptState = SelectionPromptState.Resolved,
+        };
+        var completed = CreateJob(BrowserTransferState.Complete, RoutingState.Completed);
+        var failed = CreateJob(BrowserTransferState.Complete, RoutingState.Failed);
+        var interrupted = CreateJob(BrowserTransferState.Interrupted, RoutingState.Failed);
+
+        Assert.Empty(DownloadJobQueries.AutomaticSelections([resolved, completed, failed, interrupted]));
     }
 
     [Theory]

@@ -4,17 +4,18 @@
 
 ## 요약
 
-- 현재 단계: 정식 버전 1.0.3 흰색 아이콘 및 트레이 툴팁 hotfix 개발 및 배포
-- 공식 저장소: https://github.com/esleeeeee/eslee-Download-Router
+- 현재 단계: 1.1.0 후보 개발 중. 자동 팝업 영속 상태, 처리 대기 통합과 사이트 규칙 UI 개선을 로컬 검증 중이며 아직 Release로 게시하지 않았습니다.
+- 직전 정식 버전: 1.0.3 (흰색 아이콘 및 트레이 툴팁 hotfix)
+- 공식 저장소: https://github.com/esleeeeee/eslee-download-router
 - 기본 브랜치: `main`
-- 최종 개발 PR: [#1 Fix pending prompts, Whale cancellation, version, and themes](https://github.com/esleeeeee/eslee-Download-Router/pull/1)
-- 최신 정식 Release: [GitHub Releases](https://github.com/esleeeeee/eslee-Download-Router/releases/latest)
+- 최종 개발 PR: [#1 Fix pending prompts, Whale cancellation, version, and themes](https://github.com/esleeeeee/eslee-download-router/pull/1)
+- 최신 정식 Release: [GitHub Releases](https://github.com/esleeeeee/eslee-download-router/releases/latest)
 - 지원 운영체제: Windows 11 x64
 - 격리 환경 수동 검증 브라우저: Naver Whale
 
 ## 정식 버전 구성
 
-- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.0.3` 제품 버전을 사용합니다.
+- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.1.0` 제품 버전을 사용합니다.
 - assembly informational version에는 빌드한 Git commit metadata가 포함됩니다.
 - Extension manifest 버전은 기존 정책에 따라 제품 assembly와 독립 관리합니다.
 - 고정 Extension ID `gilicenlclaemgiijcjjejilikbooggj`와 Native Messaging identity를 유지합니다.
@@ -30,7 +31,9 @@
 - root 경계 안에서만 탐색하는 lazy-loading FolderTreePicker
 - 브라우저 완료 전 선택, 실제 최종 파일명 갱신과 단일 FIFO
 - 다운로드 이력, 경로 변경, 완료 파일 재이동과 실제 파일 비삭제 이력 정리
-- Pending InfoBadge, 30분 자동 팝업 정책과 이전 세션 대기 안내
+- SQLite에 영구 저장하는 자동 팝업 상태(`NeverShown`, `Shown`, `Deferred`, `Resolved`)와 재시작 뒤 팝업 비재현
+- 다운로드 이력의 `처리 대기` 필터로 통합한 저장 위치 선택 대기 목록과 규칙별 일괄 처리
+- 사용자 문구 기반 사이트 규칙 편집기와 자연어 규칙 요약
 - 개별 `selection.skip`과 일괄 `selection.skip-many`의 영구 terminal `Skipped`
 - Whale, Agent, App과 Native Messaging 재연결 뒤 terminal Job 비회귀
 - `USER_CANCELED`, 기타 interrupted와 브라우저 기록 삭제의 분리
@@ -49,12 +52,12 @@
 |---|---|
 | .NET Debug build | 성공, 경고 0, 오류 0 |
 | .NET Release build | 성공, 경고 0, 오류 0 |
-| .NET tests | 81/81 통과, Core 48, Infrastructure 8, Integration 25 |
-| Extension | ESLint, TypeScript, dist build 성공, Node tests 13/13 |
+| .NET tests | 107/107 통과, Core 67, Infrastructure 10, Integration 30 |
+| Extension | ESLint, TypeScript, dist build 성공, Node tests 17/17 |
 | npm audit | 취약점 0건 |
 | Release publish | App, Agent, Native Host win-x64 self-contained 성공 |
 | 릴리스 개인정보 검사 | `verify-release-privacy.ps1` 통과 |
-| Installer | Inno Setup compile과 기존 1.0.2 설치 위 1.0.3 업그레이드 성공 |
+| Installer | Inno Setup compile과 기존 1.0.3 설치 위 1.1.0 업그레이드 성공 |
 | 사용자 데이터 | SQLite, 규칙, 이력, Pending, 설정과 테마 보존 |
 | 자동 시작 | 기존 HKCU Run 값 보존, 자동 시작 경로 실행 성공 |
 | Native Messaging | 등록 보존, 설치 Native Host와 Agent ping 성공 |
@@ -90,7 +93,7 @@
 - Edge, Chrome, Brave, Vivaldi와 Opera 실제 다운로드는 검증하지 않았습니다.
 - FHD, 4K, Windows 100%, 150% 물리 디스플레이는 직접 검증하지 않았습니다.
 - FolderTreePicker에서 새 폴더 만들기는 제공하지 않습니다.
-- 개별 `나중에 선택`은 현재 App 세션 동안만 자동 팝업을 숨깁니다.
+- 자동 저장 위치 선택 팝업은 작업당 한 번만 표시합니다. 이후에는 다운로드 이력의 `처리 대기` 목록에서 처리합니다.
 - 트레이 아이콘은 단일 왼쪽 클릭으로 창을 열지 않습니다. 더블 클릭 또는 오른쪽 클릭 메뉴를 사용합니다.
 - 다운로드 시작 탭 URL은 Chromium API가 신뢰할 수 있는 필드로 제공하지 않으므로 활성 탭을 추측하지 않습니다.
 

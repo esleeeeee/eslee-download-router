@@ -315,7 +315,7 @@ public sealed class CommandValidationTests : IDisposable
         Assert.Equal(RoutingState.WaitingForSelection, stale.RoutingState);
         Assert.True(stale.IsBrowserRecordStale);
         Assert.Single(DownloadJobQueries.ActiveSelections([stale]));
-        Assert.Empty(DownloadJobQueries.AutomaticSelections([stale], DateTimeOffset.UtcNow));
+        Assert.Empty(DownloadJobQueries.AutomaticSelections([stale]));
 
         Assert.True((await SendAsync(
             handler,
@@ -323,22 +323,28 @@ public sealed class CommandValidationTests : IDisposable
             new DownloadChangedPayload("Whale", "stale-1", "in_progress", null, null))).Success);
         var restored = await repository.GetJobAsync(jobId, CancellationToken.None);
         Assert.False(restored!.IsBrowserRecordStale);
-        Assert.Single(DownloadJobQueries.AutomaticSelections([restored], DateTimeOffset.UtcNow));
+        Assert.Single(DownloadJobQueries.AutomaticSelections([restored]));
     }
 
     [Fact]
-    public async Task StartupReconciliationDoesNotMakeAnOldPendingJobAutoPromptEligibleAgain()
+    public async Task StartupReconciliationDoesNotMakeADeferredPendingJobAutoPromptEligibleAgain()
     {
         var (handler, repository) = await CreateHandlerAsync();
         var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
         await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
         var jobId = await StartAsync(handler, "old-reconciled", "old.bin");
-        var oldTime = DateTimeOffset.UtcNow.Subtract(TimeSpan.FromMinutes(31));
+        var oldTime = DateTimeOffset.UtcNow.Subtract(TimeSpan.FromDays(1));
         var original = await repository.GetJobAsync(jobId, CancellationToken.None);
         await repository.UpdateJobAsync(
             original! with { CreatedAt = oldTime, LastBrowserEventAt = oldTime },
             "test-aged-pending",
             CancellationToken.None);
+
+        // The user left this file in the pending list yesterday.
+        Assert.True((await SendAsync(
+            handler,
+            "selection.prompt-state",
+            new SelectionPromptStatePayload([jobId], SelectionPromptState.Deferred))).Success);
 
         var reconciled = await SendAsync(
             handler,
@@ -349,8 +355,112 @@ public sealed class CommandValidationTests : IDisposable
         Assert.True(reconciled.Success, reconciled.Message);
         var job = await repository.GetJobAsync(jobId, CancellationToken.None);
         Assert.Equal(oldTime, job!.LastBrowserEventAt);
+        Assert.Equal(SelectionPromptState.Deferred, job.SelectionPromptState);
         Assert.Single(DownloadJobQueries.ActiveSelections([job]));
-        Assert.Empty(DownloadJobQueries.AutomaticSelections([job], DateTimeOffset.UtcNow));
+        Assert.Empty(DownloadJobQueries.AutomaticSelections([job]));
+    }
+
+    [Fact]
+    public async Task ShownPromptIsNotReplayedAfterAnAgentRestart()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartAsync(handler, "prompt-shown-once", "once.bin");
+
+        var initial = await repository.GetJobAsync(jobId, CancellationToken.None);
+        Assert.Equal(SelectionPromptState.NeverShown, initial!.SelectionPromptState);
+        Assert.Single(DownloadJobQueries.AutomaticSelections([initial]));
+
+        Assert.True((await SendAsync(
+            handler,
+            "selection.prompt-state",
+            new SelectionPromptStatePayload([jobId], SelectionPromptState.Shown))).Success);
+
+        var (_, restartedRepository) = await CreateHandlerAsync();
+        var restored = await restartedRepository.GetJobAsync(jobId, CancellationToken.None);
+
+        Assert.Equal(SelectionPromptState.Shown, restored!.SelectionPromptState);
+        Assert.Single(DownloadJobQueries.ActiveSelections([restored]));
+        Assert.Empty(DownloadJobQueries.AutomaticSelections([restored]));
+    }
+
+    [Fact]
+    public async Task PromptStateNeverMovesBackwardsAndRejectsTerminalValues()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartAsync(handler, "prompt-monotonic", "monotonic.bin");
+
+        Assert.True((await SendAsync(
+            handler,
+            "selection.prompt-state",
+            new SelectionPromptStatePayload([jobId], SelectionPromptState.Deferred))).Success);
+
+        var backwards = await SendAsync(
+            handler,
+            "selection.prompt-state",
+            new SelectionPromptStatePayload([jobId], SelectionPromptState.Shown));
+        Assert.True(backwards.Success, backwards.Message);
+        Assert.Equal(0, backwards.Data!.Value.GetProperty("advanced").GetInt32());
+
+        var invalid = await SendAsync(
+            handler,
+            "selection.prompt-state",
+            new SelectionPromptStatePayload([jobId], SelectionPromptState.NeverShown));
+        Assert.False(invalid.Success);
+        Assert.Equal("selection.invalid-prompt-state", invalid.ErrorCode);
+
+        var job = await repository.GetJobAsync(jobId, CancellationToken.None);
+        Assert.Equal(SelectionPromptState.Deferred, job!.SelectionPromptState);
+    }
+
+    [Fact]
+    public async Task ChoosingAFolderResolvesThePromptSoItNeverReturns()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartAsync(handler, "prompt-resolved", "resolved.bin");
+
+        Assert.True((await SendAsync(
+            handler,
+            "selection.complete",
+            new SelectionCompletedPayload([jobId], "docs"))).Success);
+
+        var job = await repository.GetJobAsync(jobId, CancellationToken.None);
+        Assert.Equal(SelectionPromptState.Resolved, job!.SelectionPromptState);
+        Assert.Empty(DownloadJobQueries.AutomaticSelections([job]));
+    }
+
+    [Fact]
+    public async Task SkippingASelectionResolvesThePromptState()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartAsync(handler, "prompt-skip-resolved", "skip.bin");
+
+        Assert.True((await SendAsync(handler, "selection.skip", new SelectionSkippedPayload(jobId))).Success);
+
+        var job = await repository.GetJobAsync(jobId, CancellationToken.None);
+        Assert.Equal(SelectionPromptState.Resolved, job!.SelectionPromptState);
+        Assert.Empty(DownloadJobQueries.AutomaticSelections([job]));
+    }
+
+    [Fact]
+    public async Task AutomaticRulesNeverEnterTheSelectionPromptQueue()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.Automatic);
+        var jobId = await StartAsync(handler, "automatic-rule", "auto.bin");
+
+        var job = await repository.GetJobAsync(jobId, CancellationToken.None);
+        Assert.Equal(SelectionPromptState.Resolved, job!.SelectionPromptState);
+        Assert.Empty(DownloadJobQueries.AutomaticSelections([job]));
+        Assert.Empty(DownloadJobQueries.ActiveSelections([job]));
     }
 
     [Fact]
@@ -372,7 +482,7 @@ public sealed class CommandValidationTests : IDisposable
         Assert.Equal(RoutingState.Skipped, restored.RoutingState);
         Assert.True(restored.IsTerminal);
         Assert.Empty(DownloadJobQueries.ActiveSelections([restored]));
-        Assert.Empty(DownloadJobQueries.AutomaticSelections([restored], DateTimeOffset.UtcNow));
+        Assert.Empty(DownloadJobQueries.AutomaticSelections([restored]));
     }
 
     [Fact]
@@ -409,7 +519,7 @@ public sealed class CommandValidationTests : IDisposable
         var restored = await repository.GetJobAsync(jobId, CancellationToken.None);
         Assert.Equal(RoutingState.Skipped, restored!.RoutingState);
         Assert.Empty(DownloadJobQueries.ActiveSelections([restored]));
-        Assert.Empty(DownloadJobQueries.AutomaticSelections([restored], DateTimeOffset.UtcNow));
+        Assert.Empty(DownloadJobQueries.AutomaticSelections([restored]));
     }
 
     [Fact]
@@ -506,7 +616,7 @@ public sealed class CommandValidationTests : IDisposable
         Assert.Equal(RoutingState.WaitingForSelection, futureJob.RoutingState);
         Assert.Equal(future, Assert.Single(DownloadJobQueries.ActiveSelections(restored)).Id);
         Assert.Equal(future, Assert.Single(
-            DownloadJobQueries.AutomaticSelections(restored, DateTimeOffset.UtcNow)).Id);
+            DownloadJobQueries.AutomaticSelections(restored)).Id);
     }
 
     [Fact]
@@ -522,6 +632,10 @@ public sealed class CommandValidationTests : IDisposable
             original! with { CreatedAt = oldTime, LastBrowserEventAt = oldTime },
             "test-aged-pending",
             CancellationToken.None);
+        Assert.True((await SendAsync(
+            handler,
+            "selection.prompt-state",
+            new SelectionPromptStatePayload([jobId], SelectionPromptState.Deferred))).Success);
 
         Assert.True((await SendAsync(
             handler,
@@ -547,7 +661,7 @@ public sealed class CommandValidationTests : IDisposable
         var restored = await repository.GetJobAsync(jobId, CancellationToken.None);
         Assert.Equal(oldTime, restored!.LastBrowserEventAt);
         Assert.Single(DownloadJobQueries.ActiveSelections([restored]));
-        Assert.Empty(DownloadJobQueries.AutomaticSelections([restored], DateTimeOffset.UtcNow));
+        Assert.Empty(DownloadJobQueries.AutomaticSelections([restored]));
     }
 
     [Fact]

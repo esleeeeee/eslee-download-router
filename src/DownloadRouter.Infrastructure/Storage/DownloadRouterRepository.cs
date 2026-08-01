@@ -6,7 +6,7 @@ namespace DownloadRouter.Infrastructure.Storage;
 
 public sealed class DownloadRouterRepository(AppPaths paths)
 {
-    private const int CurrentSchemaVersion = 4;
+    private const int CurrentSchemaVersion = 5;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -68,6 +68,7 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 CompletedAt TEXT NULL,
                 LastBrowserEventAt TEXT NULL,
                 IsBrowserRecordStale INTEGER NOT NULL DEFAULT 0,
+                SelectionPromptState TEXT NOT NULL DEFAULT 'NeverShown',
                 FOREIGN KEY(RuleId) REFERENCES Rules(Id),
                 UNIQUE(Browser, BrowserDownloadId)
             );
@@ -213,13 +214,13 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 InitiatingPageUrl, InitialUrl, FinalUrl, ReferrerUrl, SanitizedSource,
                 RuleId, OriginalPath, FinalPath, SelectedRelativeFolder, Status,
                 BrowserState, RoutingState, ErrorCode, ErrorMessage, CreatedAt, CompletedAt,
-                LastBrowserEventAt, IsBrowserRecordStale)
+                LastBrowserEventAt, IsBrowserRecordStale, SelectionPromptState)
             VALUES(
                 $id, $browser, $browserDownloadId, $originalFileName, $currentFileName,
                 $initiatingPageUrl, $initialUrl, $finalUrl, $referrerUrl, $sanitizedSource,
                 $ruleId, $originalPath, $finalPath, $selectedRelativeFolder, $status,
                 $browserState, $routingState, $errorCode, $errorMessage, $createdAt, $completedAt,
-                $lastBrowserEventAt, $isBrowserRecordStale);
+                $lastBrowserEventAt, $isBrowserRecordStale, $selectionPromptState);
             """;
         AddJobParameters(command, job);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -300,7 +301,8 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 ErrorMessage = $errorMessage,
                 CompletedAt = $completedAt,
                 LastBrowserEventAt = $lastBrowserEventAt,
-                IsBrowserRecordStale = $isBrowserRecordStale
+                IsBrowserRecordStale = $isBrowserRecordStale,
+                SelectionPromptState = $selectionPromptState
             WHERE Id = $id;
             """;
         AddJobParameters(command, job);
@@ -341,6 +343,7 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 UPDATE DownloadJobs
                 SET Status = 'Skipped',
                     RoutingState = 'Skipped',
+                    SelectionPromptState = 'Resolved',
                     ErrorCode = NULL,
                     ErrorMessage = NULL,
                     CompletedAt = COALESCE(CompletedAt, $completedAt)
@@ -478,7 +481,7 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                InitiatingPageUrl, InitialUrl, FinalUrl, ReferrerUrl, SanitizedSource,
                RuleId, OriginalPath, FinalPath, SelectedRelativeFolder, Status,
                BrowserState, RoutingState, ErrorCode, ErrorMessage, CreatedAt, CompletedAt,
-               LastBrowserEventAt, IsBrowserRecordStale
+               LastBrowserEventAt, IsBrowserRecordStale, SelectionPromptState
         FROM DownloadJobs
         """;
 
@@ -607,7 +610,38 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             cancellationToken,
             transaction).ConfigureAwait(false);
 
-        if (CurrentSchemaVersion != 4)
+        if (!columns.Contains("SelectionPromptState"))
+        {
+            await ExecuteAsync(
+                connection,
+                "ALTER TABLE DownloadJobs ADD COLUMN SelectionPromptState TEXT NOT NULL DEFAULT 'NeverShown';",
+                cancellationToken,
+                transaction).ConfigureAwait(false);
+        }
+
+        // v5 classifies every pre-existing job exactly once. Terminal work is already
+        // resolved; anything still waiting for a folder becomes Deferred so it stays in the
+        // download history "처리 대기" filter without replaying an automatic prompt.
+        // File locations, routing states, and user files are never changed here.
+        await ExecuteAsync(
+            connection,
+            """
+            UPDATE DownloadJobs
+            SET SelectionPromptState = CASE
+                    WHEN BrowserState IN ('Cancelled', 'Interrupted') THEN 'Resolved'
+                    WHEN RoutingState IN ('Completed', 'Skipped', 'Failed') THEN 'Resolved'
+                    WHEN RoutingState = 'WaitingForSelection' THEN 'Deferred'
+                    ELSE 'Resolved'
+                END
+            WHERE NOT EXISTS (SELECT 1 FROM MigrationHistory WHERE Version = 5);
+
+            INSERT OR IGNORE INTO MigrationHistory(Version, AppliedAt)
+            VALUES (5, CURRENT_TIMESTAMP);
+            """,
+            cancellationToken,
+            transaction).ConfigureAwait(false);
+
+        if (CurrentSchemaVersion != 5)
         {
             throw new InvalidOperationException("Repository migration version is inconsistent.");
         }
@@ -686,7 +720,10 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             Parse(reader.GetString(19)),
             reader.IsDBNull(20) ? null : Parse(reader.GetString(20)),
             reader.IsDBNull(21) ? null : Parse(reader.GetString(21)),
-            reader.GetBoolean(22));
+            reader.GetBoolean(22),
+            Enum.TryParse<SelectionPromptState>(reader.GetString(23), out var promptState)
+                ? promptState
+                : SelectionPromptState.NeverShown);
 
     private static string? GetNullableString(SqliteDataReader reader, int ordinal)
         => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
@@ -734,7 +771,77 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             "$lastBrowserEventAt",
             job.LastBrowserEventAt is null ? DBNull.Value : Format(job.LastBrowserEventAt.Value));
         command.Parameters.AddWithValue("$isBrowserRecordStale", job.IsBrowserRecordStale);
+        command.Parameters.AddWithValue("$selectionPromptState", job.SelectionPromptState.ToString());
     }
+
+    /// <summary>
+    /// Persists the automatic prompt decision for the given jobs in a single transaction.
+    /// The state only moves forward, so a late browser event cannot replay a prompt
+    /// the user already answered or postponed.
+    /// </summary>
+    public async Task<IReadOnlyList<Guid>> AdvanceSelectionPromptStateAsync(
+        IReadOnlyCollection<Guid> jobIds,
+        SelectionPromptState state,
+        CancellationToken cancellationToken = default)
+    {
+        var ids = jobIds.Where(static id => id != Guid.Empty).Distinct().ToArray();
+        if (ids.Length is < 1 or > 1000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(jobIds), "Advance between 1 and 1000 selection prompts.");
+        }
+
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection
+            .BeginTransactionAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var advanced = new List<Guid>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            var inClause = string.Join(", ", ids.Select((_, index) => $"$id{index}"));
+            var allowed = SelectionPromptRanksBelow(state);
+            var allowedClause = string.Join(", ", allowed.Select(static value => $"'{value}'"));
+            command.CommandText = $"""
+                UPDATE DownloadJobs
+                SET SelectionPromptState = $state
+                WHERE Id IN ({inClause})
+                  AND SelectionPromptState IN ({allowedClause})
+                RETURNING Id;
+                """;
+            AddIdParameters(command, ids);
+            command.Parameters.AddWithValue("$state", state.ToString());
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                advanced.Add(Guid.Parse(reader.GetString(0)));
+            }
+        }
+
+        foreach (var jobId in advanced)
+        {
+            await AppendEventAsync(
+                connection,
+                jobId,
+                $"selection.prompt-{state.ToString().ToLowerInvariant()}",
+                state.ToString(),
+                cancellationToken,
+                transaction).ConfigureAwait(false);
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return advanced;
+    }
+
+    private static IReadOnlyList<string> SelectionPromptRanksBelow(SelectionPromptState state)
+        => state switch
+        {
+            SelectionPromptState.Shown => ["NeverShown"],
+            SelectionPromptState.Deferred => ["NeverShown", "Shown"],
+            SelectionPromptState.Resolved => ["NeverShown", "Shown", "Deferred"],
+            _ => [],
+        };
 
     private static async Task AppendEventAsync(
         SqliteConnection connection,
