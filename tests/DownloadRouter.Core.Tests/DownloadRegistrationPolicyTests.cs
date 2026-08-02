@@ -7,7 +7,17 @@ public sealed class DownloadRegistrationPolicyTests
 {
     private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-08-02T03:08:27Z");
 
+    private static readonly string SupportedBuild =
+        DownloadRegistrationPolicy.SupportedExtensionBuilds.First();
+
+    /// <summary>Builds a payload from a supported extension build unless one is given.</summary>
     private static DownloadStartedPayload Payload(string? state, DateTimeOffset? startedAt)
+        => Build(state, startedAt, SupportedBuild);
+
+    private static DownloadStartedPayload Build(
+        string? state,
+        DateTimeOffset? startedAt,
+        string? extensionBuild)
         => new(
             "Whale",
             "500",
@@ -18,7 +28,8 @@ public sealed class DownloadRegistrationPolicyTests
             null,
             null,
             state,
-            startedAt);
+            startedAt,
+            extensionBuild);
 
     [Theory]
     [InlineData("complete")]
@@ -55,14 +66,59 @@ public sealed class DownloadRegistrationPolicyTests
     }
 
     [Fact]
-    public void AMissingStateKeepsTheExistingFailOpenBehaviourForOlderExtensions()
+    public void AnOlderExtensionBuildCanNeverRegisterANewDownload()
     {
+        // The browser can keep serving a cached older service worker after an upgrade.
+        // Such a build sends no state, so creation must be refused rather than assumed live.
         Assert.Equal(
-            DownloadRegistrationDecision.Track,
-            DownloadRegistrationPolicy.Classify(Payload(null, null), Now));
+            DownloadRegistrationDecision.RejectUnsupportedExtension,
+            DownloadRegistrationPolicy.Classify(Build(null, null, null), Now));
         Assert.Equal(
-            DownloadRegistrationDecision.Track,
+            DownloadRegistrationDecision.RejectUnsupportedExtension,
+            DownloadRegistrationPolicy.Classify(Build("in_progress", Now, null), Now));
+        Assert.Equal(
+            DownloadRegistrationDecision.RejectUnsupportedExtension,
+            DownloadRegistrationPolicy.Classify(Build("in_progress", Now, "   "), Now));
+        Assert.Equal(
+            DownloadRegistrationDecision.RejectUnsupportedExtension,
+            DownloadRegistrationPolicy.Classify(Build("in_progress", Now, "1999.01.01"), Now));
+    }
+
+    [Fact]
+    public void AKnownBuildWithoutATransferStateIsAlsoRefused()
+        => Assert.Equal(
+            DownloadRegistrationDecision.RejectUnsupportedExtension,
             DownloadRegistrationPolicy.Classify(Payload(null, Now), Now));
+
+    [Fact]
+    public void TheAgentAndExtensionAgreeOnTheBuildIdentifier()
+    {
+        var extensionSource = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(), "src", "DownloadRouter.Extension", "src", "download-origin.ts"));
+
+        Assert.Single(DownloadRegistrationPolicy.SupportedExtensionBuilds);
+        Assert.Contains(
+            $"export const extensionBuild = \"{SupportedBuild}\"",
+            extensionSource,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RefreshGuidanceTellsTheUserWhatToDo()
+    {
+        Assert.Contains("새로 고", DownloadRegistrationPolicy.ExtensionRefreshGuidance, StringComparison.Ordinal);
+        Assert.Contains("다시 시작", DownloadRegistrationPolicy.ExtensionRefreshGuidance, StringComparison.Ordinal);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "DownloadRouter.slnx")))
+        {
+            directory = directory.Parent;
+        }
+
+        return directory?.FullName ?? throw new InvalidOperationException("Repository root was not found.");
     }
 
     [Fact]

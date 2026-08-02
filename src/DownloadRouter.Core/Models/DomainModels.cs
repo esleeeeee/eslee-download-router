@@ -209,10 +209,12 @@ public sealed record DownloadStartedPayload(
     string? InitialUrl,
     string? FinalUrl,
     string? ReferrerUrl,
-    /// <summary>Browser transfer state at creation. Optional for older extension builds.</summary>
+    /// <summary>Browser transfer state at creation. Absent on unsupported extension builds.</summary>
     string? State = null,
     /// <summary>Browser-reported start time. Past values indicate a replayed history item.</summary>
-    DateTimeOffset? StartedAt = null);
+    DateTimeOffset? StartedAt = null,
+    /// <summary>Identifies the extension code that sent this request.</summary>
+    string? ExtensionBuild = null);
 
 public sealed record DownloadChangedPayload(
     string Browser,

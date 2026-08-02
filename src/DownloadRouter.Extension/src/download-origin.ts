@@ -6,13 +6,22 @@
  * a job.
  */
 
+/**
+ * Identifies the extension code the agent is talking to. The agent refuses to create
+ * jobs for builds it does not recognise, so a browser still running a cached older
+ * service worker cannot re-register past downloads.
+ *
+ * Bump this together with `manifest.json` whenever the download registration behaviour
+ * changes, and keep it in sync with `ExtensionBuildCompatibility` on the agent side.
+ */
+export const extensionBuild = "2026.08.02";
+
 /** A newly started transfer reaches the listener within milliseconds. */
 export const liveDownloadWindowMs = 5 * 60 * 1000;
 
 export interface CreatedDownloadLike {
   state?: string;
   startTime?: string;
-  exists?: boolean;
 }
 
 export type DownloadOriginDecision =

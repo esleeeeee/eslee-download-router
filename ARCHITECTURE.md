@@ -88,7 +88,11 @@ Interrupted                RetryPending
 
 ## 작업 생성 경계
 
-새 `DownloadJob`은 실시간 `downloads.onCreated`에서 시작한 `download.started`만 만들 수 있습니다. Chromium은 브라우저를 시작할 때 다운로드 기록 전체에 대해 `onCreated`를 다시 발생시키므로, 확장은 `state`가 `in_progress`이고 `startTime`이 이번 세션 범위인 항목만 전달합니다. Agent는 `DownloadRegistrationPolicy`로 같은 검사를 반복해 이미 끝났거나 이전 세션에서 시작한 다운로드를 거부합니다. 두 계층 모두 거부는 fail-open이며 브라우저 다운로드 자체는 막지 않습니다.
+새 `DownloadJob`은 실시간 `downloads.onCreated`에서 시작한 `download.started`만 만들 수 있습니다. Chromium은 브라우저를 시작할 때 다운로드 기록 전체에 대해 `onCreated`를 다시 발생시키므로, 확장은 `state`가 `in_progress`이고 `startTime`이 이번 세션 범위인 항목만 전달합니다.
+
+브라우저는 프로그램을 업데이트해도 이전에 읽은 확장 코드를 계속 사용할 수 있습니다. 따라서 확장 필터가 동작한다고 가정하지 않고, Agent의 작업 생성은 `DownloadRegistrationPolicy`에서 fail-closed로 판단합니다. 확장 빌드 식별자가 없거나 Agent가 모르는 값이면, 그리고 전송 상태가 없으면 새 작업을 만들지 않습니다. 확장 빌드 식별자는 확장의 `extensionBuild`와 Agent의 `SupportedExtensionBuilds`가 같은 값을 공유하며, 등록 동작을 바꿀 때 `manifest.json` 버전과 함께 올립니다.
+
+거부는 기존 작업 갱신과 브라우저 다운로드에 영향을 주지 않습니다. 인식할 수 없는 확장 빌드가 감지되면 Agent가 횟수를 기록하고 App 진단 화면이 확장 새로고침을 안내합니다.
 
 `downloads.active`, `chrome.downloads.search`, `download.changed`, `download.metadata`는 기존 작업의 상태만 갱신하며 어떤 경우에도 작업을 새로 만들지 않습니다. `DownloadJobs`의 `UNIQUE(Browser, BrowserDownloadId)`가 같은 다운로드의 중복 등록을 막고, 같은 이벤트가 반복되면 insert 대신 기존 작업을 갱신합니다. 사용자가 이력을 삭제해도 브라우저의 과거 기록으로 작업을 복원하지 않습니다.
 

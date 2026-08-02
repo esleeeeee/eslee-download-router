@@ -23,6 +23,13 @@ public sealed class AgentCommandHandler(
     AppPaths paths,
     ILogger<AgentCommandHandler> logger)
 {
+    /// <summary>
+    /// Records the most recent rejection caused by an unrecognised extension build so the
+    /// app can tell the user to refresh the extension. Counts only, no browser data.
+    /// </summary>
+    private static int unsupportedExtensionRejections;
+    private static long lastUnsupportedExtensionTicks;
+
     public async Task<AgentResponse> HandleAsync(AgentCommand request, CancellationToken cancellationToken)
     {
         if (request.Version != ProtocolConstants.CurrentVersion)
@@ -73,6 +80,11 @@ public sealed class AgentCommandHandler(
                     databaseExists = File.Exists(paths.DatabasePath),
                     protocolVersion = ProtocolConstants.CurrentVersion,
                     processId = Environment.ProcessId,
+                    supportedExtensionBuilds = DownloadRegistrationPolicy.SupportedExtensionBuilds.ToArray(),
+                    unsupportedExtensionRejections = Volatile.Read(ref unsupportedExtensionRejections),
+                    lastUnsupportedExtensionAt = Volatile.Read(ref lastUnsupportedExtensionTicks) == 0
+                        ? null
+                        : new DateTimeOffset(Volatile.Read(ref lastUnsupportedExtensionTicks), TimeSpan.Zero).ToString("O"),
                 }),
                 _ => AgentResponse.Error(request.RequestId, "protocol.command-not-allowed", "The requested command is not allowed."),
             };
@@ -114,6 +126,7 @@ public sealed class AgentCommandHandler(
         }
 
         var existing = await repository.GetJobAsync(browser, payload.DownloadId, cancellationToken).ConfigureAwait(false);
+
         if (existing is not null)
         {
             existing = await UpdateFileNameAsync(
@@ -126,19 +139,37 @@ public sealed class AgentCommandHandler(
         }
 
         // Nothing exists for this download yet, so this request would create a job.
-        // Replayed browser history must never reach that path.
+        // Creation is fail-closed: replayed browser history and unrecognised extension
+        // builds are refused. The browser download itself is never blocked.
         var registration = DownloadRegistrationPolicy.Classify(payload, DateTimeOffset.UtcNow);
         if (registration != DownloadRegistrationDecision.Track)
         {
-            logger.LogInformation(
-                "Ignored a replayed browser download {DownloadId}; reason={Reason}",
-                SanitizeDownloadId(payload.DownloadId),
-                DownloadRegistrationPolicy.DescribeRejection(registration));
+            var reason = DownloadRegistrationPolicy.DescribeRejection(registration);
+            var unsupportedExtension = registration == DownloadRegistrationDecision.RejectUnsupportedExtension;
+            if (unsupportedExtension)
+            {
+                Interlocked.Increment(ref unsupportedExtensionRejections);
+                Interlocked.Exchange(ref lastUnsupportedExtensionTicks, DateTimeOffset.UtcNow.UtcTicks);
+                logger.LogWarning(
+                    "Refused to register download {DownloadId} from an unrecognised extension build; "
+                        + "the browser is likely still running a cached older extension",
+                    SanitizeDownloadId(payload.DownloadId));
+            }
+            else
+            {
+                logger.LogInformation(
+                    "Ignored a replayed browser download {DownloadId}; reason={Reason}",
+                    SanitizeDownloadId(payload.DownloadId),
+                    reason);
+            }
+
             return AgentResponse.Ok(request.RequestId, new
             {
                 tracked = false,
                 failOpen = true,
-                ignored = DownloadRegistrationPolicy.DescribeRejection(registration),
+                ignored = reason,
+                extensionRefreshRequired = unsupportedExtension,
+                message = unsupportedExtension ? DownloadRegistrationPolicy.ExtensionRefreshGuidance : null,
             });
         }
 
@@ -943,6 +974,14 @@ public sealed class AgentCommandHandler(
         var sanitized = new string(value.Where(static character =>
             char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.').Take(64).ToArray());
         return sanitized.Length == 0 ? "invalid" : sanitized;
+    }
+
+    private static string SanitizeReportedState(string? value)
+    {
+        var normalized = value?.Trim().ToLowerInvariant();
+        return normalized is "in_progress" or "complete" or "interrupted" or "cancelled"
+            ? normalized
+            : "unknown";
     }
 
     private static string SanitizeState(string? value)
