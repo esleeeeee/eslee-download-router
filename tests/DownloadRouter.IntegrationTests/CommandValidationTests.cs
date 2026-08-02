@@ -17,6 +17,9 @@ public sealed class CommandValidationTests : IDisposable
     private readonly string root = Path.Combine(Path.GetTempPath(), "download-router-integration-tests", Guid.NewGuid().ToString("N"));
     private readonly string? previousOverride;
 
+    private static readonly string SupportedBuild =
+        DownloadRegistrationPolicy.SupportedExtensionBuilds.First();
+
     public CommandValidationTests()
     {
         previousOverride = Environment.GetEnvironmentVariable("DOWNLOAD_ROUTER_DATA_DIR");
@@ -97,7 +100,10 @@ public sealed class CommandValidationTests : IDisposable
                     "https://example.com/downloads",
                     "https://example.com/example.txt",
                     null,
-                    null),
+                    null,
+                    State: "in_progress",
+                    StartedAt: DateTimeOffset.UtcNow,
+                    ExtensionBuild: SupportedBuild),
                 ProtocolJson.Options));
         var startedResponse = await handler.HandleAsync(started, CancellationToken.None);
 
@@ -864,6 +870,354 @@ public sealed class CommandValidationTests : IDisposable
         Assert.Empty(Directory.EnumerateFiles(destination));
     }
 
+    [Fact]
+    public async Task BrowserStartupHistoryReplayCreatesNoJobsEvenWhenTheDatabaseIsEmpty()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var yesterday = DateTimeOffset.UtcNow.AddDays(-1);
+
+        // Chromium replays onCreated for the whole download history at browser startup.
+        for (var downloadId = 488; downloadId <= 516; downloadId++)
+        {
+            var response = await SendAsync(
+                handler,
+                "download.started",
+                new DownloadStartedPayload(
+                    "Whale",
+                    downloadId.ToString(),
+                    "history.bin",
+                    null,
+                    "https://example.com/downloads",
+                    "https://example.com/history.bin",
+                    null,
+                    null,
+                    State: "complete",
+                    StartedAt: yesterday,
+                    ExtensionBuild: SupportedBuild));
+
+            Assert.True(response.Success, response.Message);
+            Assert.False(response.Data!.Value.GetProperty("tracked").GetBoolean());
+            Assert.Equal("already-finished", response.Data.Value.GetProperty("ignored").GetString());
+        }
+
+        Assert.Empty(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AnUnfinishedHistoryRecordRestoredAtStartupIsNotRegistered()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+
+        var response = await SendAsync(
+            handler,
+            "download.started",
+            new DownloadStartedPayload(
+                "Whale", "900", "resumable.bin", null, "https://example.com/downloads",
+                "https://example.com/resumable.bin", null, null,
+                State: "in_progress",
+                StartedAt: DateTimeOffset.UtcNow.AddDays(-1), ExtensionBuild: SupportedBuild));
+
+        Assert.True(response.Success, response.Message);
+        Assert.False(response.Data!.Value.GetProperty("tracked").GetBoolean());
+        Assert.Equal("started-before-session", response.Data.Value.GetProperty("ignored").GetString());
+        Assert.Empty(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ALiveDownloadIsStillRegisteredAndPromptsExactlyOnce()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+
+        var response = await SendAsync(
+            handler,
+            "download.started",
+            new DownloadStartedPayload(
+                "Whale", "1001", "live.bin", null, "https://example.com/downloads",
+                "https://example.com/live.bin", null, null,
+                State: "in_progress",
+                StartedAt: DateTimeOffset.UtcNow, ExtensionBuild: SupportedBuild));
+
+        Assert.True(response.Success, response.Message);
+        Assert.True(response.Data!.Value.GetProperty("tracked").GetBoolean());
+        var jobId = response.Data.Value.GetProperty("jobId").GetGuid();
+
+        var job = await repository.GetJobAsync(jobId, CancellationToken.None);
+        Assert.Equal(SelectionPromptState.NeverShown, job!.SelectionPromptState);
+        Assert.Single(DownloadJobQueries.AutomaticSelections([job]));
+
+        Assert.True((await SendAsync(
+            handler,
+            "selection.prompt-state",
+            new SelectionPromptStatePayload([jobId], SelectionPromptState.Shown))).Success);
+
+        var afterPrompt = await repository.GetJobAsync(jobId, CancellationToken.None);
+        Assert.Empty(DownloadJobQueries.AutomaticSelections([afterPrompt!]));
+    }
+
+    [Fact]
+    public async Task RepeatedBrowserRestartsNeverGrowTheJobTable()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+
+        // One genuine live download exists before the restarts.
+        var liveJobId = await StartLiveAsync(handler, "2001", "live.bin");
+        Assert.True((await SendAsync(
+            handler,
+            "selection.prompt-state",
+            new SelectionPromptStatePayload([liveJobId], SelectionPromptState.Deferred))).Success);
+
+        for (var restart = 0; restart < 3; restart++)
+        {
+            // Every restart replays the history, including the live download's own record.
+            for (var downloadId = 2001; downloadId <= 2010; downloadId++)
+            {
+                await SendAsync(
+                    handler,
+                    "download.started",
+                    new DownloadStartedPayload(
+                        "Whale", downloadId.ToString(), "history.bin", null,
+                        "https://example.com/downloads", "https://example.com/history.bin", null, null,
+                        State: "complete",
+                        StartedAt: DateTimeOffset.UtcNow.AddDays(-1), ExtensionBuild: SupportedBuild));
+            }
+
+            // Reconciliation of the tracked download must only refresh state.
+            await SendAsync(
+                handler,
+                "download.changed",
+                new DownloadChangedPayload(
+                    "Whale", "2001", "in_progress", null, null, IsReconciliation: true));
+        }
+
+        var jobs = await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None);
+        Assert.Single(jobs);
+        Assert.Equal(liveJobId, jobs[0].Id);
+        Assert.Equal(SelectionPromptState.Deferred, jobs[0].SelectionPromptState);
+        Assert.Empty(DownloadJobQueries.AutomaticSelections(jobs));
+        Assert.Single(DownloadJobQueries.ActiveSelections(jobs));
+    }
+
+    [Fact]
+    public async Task ReplayingTheSameLiveDownloadUpdatesInsteadOfInsertingADuplicate()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartLiveAsync(handler, "3001", "live.bin");
+
+        for (var repeat = 0; repeat < 5; repeat++)
+        {
+            var response = await SendAsync(
+                handler,
+                "download.started",
+                new DownloadStartedPayload(
+                    "Whale", "3001", "live.bin", null, "https://example.com/downloads",
+                    "https://example.com/live.bin", null, null,
+                    State: "in_progress",
+                    StartedAt: DateTimeOffset.UtcNow, ExtensionBuild: SupportedBuild));
+            Assert.True(response.Success, response.Message);
+            Assert.True(response.Data!.Value.GetProperty("existing").GetBoolean());
+            Assert.Equal(jobId, response.Data.Value.GetProperty("jobId").GetGuid());
+        }
+
+        Assert.Single(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task DeletingHistoryDoesNotLetTheBrowserReimportThoseDownloads()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartLiveAsync(handler, "4001", "live.bin");
+
+        Assert.Equal(1, await repository.DeleteJobsAsync([jobId], CancellationToken.None));
+        Assert.Empty(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+
+        // The browser still has the record and replays it on the next startup.
+        var replay = await SendAsync(
+            handler,
+            "download.started",
+            new DownloadStartedPayload(
+                "Whale", "4001", "live.bin", null, "https://example.com/downloads",
+                "https://example.com/live.bin", null, null,
+                State: "complete",
+                StartedAt: DateTimeOffset.UtcNow.AddHours(-2), ExtensionBuild: SupportedBuild));
+
+        Assert.True(replay.Success, replay.Message);
+        Assert.False(replay.Data!.Value.GetProperty("tracked").GetBoolean());
+        Assert.Empty(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ACachedOlderExtensionCannotRegisterAnythingAndAsksForARefresh()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+
+        // The browser kept serving a cached older service worker after the upgrade, so the
+        // payload carries no build identifier and no transfer state. This is exactly the
+        // shape that re-registered the whole download history before.
+        foreach (var downloadId in new[] { "5001", "5002", "5003" })
+        {
+            var response = await SendAsync(
+                handler,
+                "download.started",
+                new DownloadStartedPayload(
+                    "Whale", downloadId, "legacy.bin", null, "https://example.com/downloads",
+                    "https://example.com/legacy.bin", null, null));
+
+            Assert.True(response.Success, response.Message);
+            Assert.False(response.Data!.Value.GetProperty("tracked").GetBoolean());
+            // The browser download itself must keep working.
+            Assert.True(response.Data.Value.GetProperty("failOpen").GetBoolean());
+            Assert.Equal("unsupported-extension-build", response.Data.Value.GetProperty("ignored").GetString());
+            Assert.True(response.Data.Value.GetProperty("extensionRefreshRequired").GetBoolean());
+            Assert.False(string.IsNullOrWhiteSpace(response.Data.Value.GetProperty("message").GetString()));
+        }
+
+        Assert.Empty(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+
+        // The counter is process-wide, so only its growth is meaningful here.
+        var status = await SendAsync(handler, "diagnostics.status", new { });
+        Assert.True(status.Data!.Value.GetProperty("unsupportedExtensionRejections").GetInt32() >= 3);
+        Assert.Contains(
+            SupportedBuild,
+            status.Data.Value.GetProperty("supportedExtensionBuilds").EnumerateArray().Select(v => v.GetString()));
+    }
+
+    [Fact]
+    public async Task TheStartupHandshakeAcceptsASupportedBuild()
+    {
+        var (handler, _) = await CreateHandlerAsync();
+
+        var hello = await SendAsync(
+            handler,
+            "extension.hello",
+            new ExtensionHelloPayload("Whale", SupportedBuild));
+
+        Assert.True(hello.Success, hello.Message);
+        Assert.True(hello.Data!.Value.GetProperty("supported").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, hello.Data.Value.GetProperty("message").ValueKind);
+
+        var status = await SendAsync(handler, "diagnostics.status", new { });
+        Assert.True(status.Data!.Value.GetProperty("extensionBuildSupported").GetBoolean());
+        Assert.Equal(SupportedBuild, status.Data.Value.GetProperty("lastExtensionBuild").GetString());
+    }
+
+    [Fact]
+    public async Task TheStartupHandshakeFlagsAStaleBuildBeforeAnyDownloadHappens()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+
+        var hello = await SendAsync(
+            handler,
+            "extension.hello",
+            new ExtensionHelloPayload("Whale", "1999.01.01"));
+
+        Assert.True(hello.Success, hello.Message);
+        Assert.False(hello.Data!.Value.GetProperty("supported").GetBoolean());
+        Assert.False(string.IsNullOrWhiteSpace(hello.Data.Value.GetProperty("message").GetString()));
+
+        var status = await SendAsync(handler, "diagnostics.status", new { });
+        Assert.False(status.Data!.Value.GetProperty("extensionBuildSupported").GetBoolean());
+        Assert.True(status.Data.Value.GetProperty("extensionRefreshRequired").GetBoolean());
+        // The handshake alone must never create or change any job.
+        Assert.Empty(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AMissingBuildInTheHandshakeIsTreatedAsStale()
+    {
+        var (handler, _) = await CreateHandlerAsync();
+
+        var hello = await SendAsync(
+            handler,
+            "extension.hello",
+            new ExtensionHelloPayload("Whale", null));
+
+        Assert.True(hello.Success, hello.Message);
+        Assert.False(hello.Data!.Value.GetProperty("supported").GetBoolean());
+    }
+
+    [Fact]
+    public async Task AnUnknownExtensionBuildCannotRegisterEvenWhenItClaimsALiveTransfer()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+
+        var response = await SendAsync(
+            handler,
+            "download.started",
+            new DownloadStartedPayload(
+                "Whale", "6001", "future.bin", null, "https://example.com/downloads",
+                "https://example.com/future.bin", null, null,
+                State: "in_progress",
+                StartedAt: DateTimeOffset.UtcNow,
+                ExtensionBuild: "1999.01.01"));
+
+        Assert.True(response.Success, response.Message);
+        Assert.False(response.Data!.Value.GetProperty("tracked").GetBoolean());
+        Assert.Equal("unsupported-extension-build", response.Data.Value.GetProperty("ignored").GetString());
+        Assert.Empty(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ACachedOlderExtensionCanStillUpdateAnExistingJob()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartAsync(handler, "7001", "live.bin");
+
+        // Same download, replayed by a stale extension: it must update, never duplicate.
+        var replay = await SendAsync(
+            handler,
+            "download.started",
+            new DownloadStartedPayload(
+                "Whale", "7001", "live.bin", null, "https://example.com/downloads",
+                "https://example.com/live.bin", null, null));
+
+        Assert.True(replay.Success, replay.Message);
+        Assert.True(replay.Data!.Value.GetProperty("existing").GetBoolean());
+        Assert.Equal(jobId, replay.Data.Value.GetProperty("jobId").GetGuid());
+
+        // Terminal browser events from the same stale extension still reach the job.
+        var completed = await SendAsync(
+            handler,
+            "download.changed",
+            new DownloadChangedPayload("Whale", "7001", "complete", Path.Combine(root, "live.bin"), null));
+        Assert.True(completed.Success, completed.Message);
+        Assert.Single(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+    }
+
+    private static async Task<Guid> StartLiveAsync(
+        AgentCommandHandler handler,
+        string downloadId,
+        string fileName)
+    {
+        var response = await SendAsync(
+            handler,
+            "download.started",
+            new DownloadStartedPayload(
+                "Whale", downloadId, fileName, null, "https://example.com/downloads",
+                $"https://example.com/{fileName}", null, null,
+                State: "in_progress",
+                StartedAt: DateTimeOffset.UtcNow, ExtensionBuild: SupportedBuild));
+        Assert.True(response.Success, response.Message);
+        return response.Data!.Value.GetProperty("jobId").GetGuid();
+    }
+
     private static async Task<DownloadRule> CreateRuleAsync(
         DownloadRouterRepository repository,
         string destination,
@@ -887,7 +1241,10 @@ public sealed class CommandValidationTests : IDisposable
             "download.started",
             new DownloadStartedPayload(
                 "Whale", downloadId, fileName, null, "https://example.com/downloads",
-                $"https://example.com/{fileName}", null, null));
+                $"https://example.com/{fileName}", null, null,
+                State: "in_progress",
+                StartedAt: DateTimeOffset.UtcNow,
+                ExtensionBuild: SupportedBuild));
         Assert.True(response.Success, response.Message);
         return response.Data!.Value.GetProperty("jobId").GetGuid();
     }

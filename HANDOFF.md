@@ -6,7 +6,7 @@
 
 - 저장소: `https://github.com/esleeeeee/eslee-download-router.git`
 - 기본 브랜치: `main`
-- 제품 버전: `1.1.0`
+- 제품 버전: `1.1.1`
 - 최종 개발 PR: [#1](https://github.com/esleeeeee/eslee-download-router/pull/1)
 - .NET SDK: `10.0.302`
 - Node.js: 24 이상
@@ -34,7 +34,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Configu
 - npm audit high 이상 취약점 0건
 - Agent Named Pipe와 Native Host framed ping 성공
 - App, Agent와 Native Host win-x64 self-contained publish 성공
-- App, Agent, Native Host와 Installer 제품 버전 1.1.0 일치
+- App, Agent, Native Host와 Installer 제품 버전 1.1.1 일치
 - Per-Monitor V2, 공통 반응형 폭, 전역 테마와 독립 FolderSelectionWindow
 - Whale Automatic, SelectSubfolder, 취소, FIFO와 영구 `Skipped`
 - 기존 설치 위 업그레이드에서 DB, 규칙, 이력, Pending, 설정, 테마와 자동 시작 보존

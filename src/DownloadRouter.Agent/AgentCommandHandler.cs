@@ -23,6 +23,16 @@ public sealed class AgentCommandHandler(
     AppPaths paths,
     ILogger<AgentCommandHandler> logger)
 {
+    /// <summary>
+    /// Records the most recent rejection caused by an unrecognised extension build so the
+    /// app can tell the user to refresh the extension. Counts only, no browser data.
+    /// </summary>
+    private static int unsupportedExtensionRejections;
+    private static long lastUnsupportedExtensionTicks;
+    private static int lastExtensionBuildSupported = -1;
+    private static long lastExtensionHelloTicks;
+    private static string? lastExtensionBuild;
+
     public async Task<AgentResponse> HandleAsync(AgentCommand request, CancellationToken cancellationToken)
     {
         if (request.Version != ProtocolConstants.CurrentVersion)
@@ -61,6 +71,7 @@ public sealed class AgentCommandHandler(
                 "jobs.list" => AgentResponse.Ok(request.RequestId, await repository.GetRecentJobsAsync(cancellationToken: cancellationToken).ConfigureAwait(false)),
                 "jobs.delete" => await HandleJobsDeleteAsync(request, cancellationToken).ConfigureAwait(false),
                 "downloads.active" => await HandleActiveDownloadsAsync(request, cancellationToken).ConfigureAwait(false),
+                "extension.hello" => HandleExtensionHello(request),
                 "selection.complete" => await HandleSelectionCompletedAsync(request, cancellationToken).ConfigureAwait(false),
                 "selection.skip" => await HandleSelectionSkippedAsync(request, cancellationToken).ConfigureAwait(false),
                 "selection.skip-many" => await HandleSelectionsSkippedAsync(request, cancellationToken).ConfigureAwait(false),
@@ -73,6 +84,23 @@ public sealed class AgentCommandHandler(
                     databaseExists = File.Exists(paths.DatabasePath),
                     protocolVersion = ProtocolConstants.CurrentVersion,
                     processId = Environment.ProcessId,
+                    supportedExtensionBuilds = DownloadRegistrationPolicy.SupportedExtensionBuilds.ToArray(),
+                    unsupportedExtensionRejections = Volatile.Read(ref unsupportedExtensionRejections),
+                    lastUnsupportedExtensionAt = Volatile.Read(ref lastUnsupportedExtensionTicks) == 0
+                        ? null
+                        : new DateTimeOffset(Volatile.Read(ref lastUnsupportedExtensionTicks), TimeSpan.Zero).ToString("O"),
+                    lastExtensionBuild = Volatile.Read(ref lastExtensionBuild),
+                    extensionBuildSupported = Volatile.Read(ref lastExtensionBuildSupported) switch
+                    {
+                        1 => (bool?)true,
+                        0 => false,
+                        _ => null,
+                    },
+                    lastExtensionHelloAt = Volatile.Read(ref lastExtensionHelloTicks) == 0
+                        ? null
+                        : new DateTimeOffset(Volatile.Read(ref lastExtensionHelloTicks), TimeSpan.Zero).ToString("O"),
+                    extensionRefreshRequired = Volatile.Read(ref lastExtensionBuildSupported) == 0
+                        || Volatile.Read(ref unsupportedExtensionRejections) > 0,
                 }),
                 _ => AgentResponse.Error(request.RequestId, "protocol.command-not-allowed", "The requested command is not allowed."),
             };
@@ -114,6 +142,7 @@ public sealed class AgentCommandHandler(
         }
 
         var existing = await repository.GetJobAsync(browser, payload.DownloadId, cancellationToken).ConfigureAwait(false);
+
         if (existing is not null)
         {
             existing = await UpdateFileNameAsync(
@@ -123,6 +152,41 @@ public sealed class AgentCommandHandler(
                 refreshBrowserActivity: false,
                 cancellationToken).ConfigureAwait(false);
             return AgentResponse.Ok(request.RequestId, new { tracked = true, jobId = existing.Id, existing = true });
+        }
+
+        // Nothing exists for this download yet, so this request would create a job.
+        // Creation is fail-closed: replayed browser history and unrecognised extension
+        // builds are refused. The browser download itself is never blocked.
+        var registration = DownloadRegistrationPolicy.Classify(payload, DateTimeOffset.UtcNow);
+        if (registration != DownloadRegistrationDecision.Track)
+        {
+            var reason = DownloadRegistrationPolicy.DescribeRejection(registration);
+            var unsupportedExtension = registration == DownloadRegistrationDecision.RejectUnsupportedExtension;
+            if (unsupportedExtension)
+            {
+                Interlocked.Increment(ref unsupportedExtensionRejections);
+                Interlocked.Exchange(ref lastUnsupportedExtensionTicks, DateTimeOffset.UtcNow.UtcTicks);
+                logger.LogWarning(
+                    "Refused to register download {DownloadId} from an unrecognised extension build; "
+                        + "the browser is likely still running a cached older extension",
+                    SanitizeDownloadId(payload.DownloadId));
+            }
+            else
+            {
+                logger.LogInformation(
+                    "Ignored a replayed browser download {DownloadId}; reason={Reason}",
+                    SanitizeDownloadId(payload.DownloadId),
+                    reason);
+            }
+
+            return AgentResponse.Ok(request.RequestId, new
+            {
+                tracked = false,
+                failOpen = true,
+                ignored = reason,
+                extensionRefreshRequired = unsupportedExtension,
+                message = unsupportedExtension ? DownloadRegistrationPolicy.ExtensionRefreshGuidance : null,
+            });
         }
 
         var trustedFileName = DownloadPresentation.TrustedFileName(payload.FileName)
@@ -715,6 +779,42 @@ public sealed class AgentCommandHandler(
         return AgentResponse.Ok(request.RequestId, JobRouteState(job));
     }
 
+    /// <summary>
+    /// Startup handshake. Lets the app warn about a browser that is still running a cached
+    /// older extension before the user tries to download anything.
+    /// </summary>
+    private AgentResponse HandleExtensionHello(AgentCommand request)
+    {
+        var payload = Deserialize<ExtensionHelloPayload>(request.Payload);
+        var build = payload.ExtensionBuild?.Trim();
+        var supported = !string.IsNullOrEmpty(build)
+            && DownloadRegistrationPolicy.SupportedExtensionBuilds.Contains(build);
+
+        Interlocked.Exchange(ref lastExtensionBuildSupported, supported ? 1 : 0);
+        Interlocked.Exchange(ref lastExtensionHelloTicks, DateTimeOffset.UtcNow.UtcTicks);
+        lastExtensionBuild = supported ? build : "unsupported";
+
+        if (supported)
+        {
+            logger.LogInformation("Extension handshake accepted for build {Build}", build);
+        }
+        else
+        {
+            Interlocked.Increment(ref unsupportedExtensionRejections);
+            Interlocked.Exchange(ref lastUnsupportedExtensionTicks, DateTimeOffset.UtcNow.UtcTicks);
+            logger.LogWarning(
+                "Extension handshake reported an unrecognised build; the browser is likely still "
+                    + "running a cached older extension");
+        }
+
+        return AgentResponse.Ok(request.RequestId, new
+        {
+            supported,
+            supportedExtensionBuilds = DownloadRegistrationPolicy.SupportedExtensionBuilds.ToArray(),
+            message = supported ? null : DownloadRegistrationPolicy.ExtensionRefreshGuidance,
+        });
+    }
+
     private async Task<AgentResponse> HandleActiveDownloadsAsync(
         AgentCommand request,
         CancellationToken cancellationToken)
@@ -926,6 +1026,14 @@ public sealed class AgentCommandHandler(
         var sanitized = new string(value.Where(static character =>
             char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.').Take(64).ToArray());
         return sanitized.Length == 0 ? "invalid" : sanitized;
+    }
+
+    private static string SanitizeReportedState(string? value)
+    {
+        var normalized = value?.Trim().ToLowerInvariant();
+        return normalized is "in_progress" or "complete" or "interrupted" or "cancelled"
+            ? normalized
+            : "unknown";
     }
 
     private static string SanitizeState(string? value)

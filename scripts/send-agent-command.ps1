@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('ping', 'download.started', 'download.metadata', 'download.changed', 'download.cancelled', 'download.interrupted', 'downloads.active', 'rules.list', 'rules.upsert', 'rules.delete', 'jobs.list', 'jobs.delete', 'selection.complete', 'selection.skip', 'selection.skip-many', 'route.change', 'job.retry', 'diagnostics.status')]
+    [ValidateSet('ping', 'download.started', 'download.metadata', 'download.changed', 'download.cancelled', 'download.interrupted', 'downloads.active', 'rules.list', 'rules.upsert', 'rules.delete', 'jobs.list', 'jobs.delete', 'selection.complete', 'selection.skip', 'selection.skip-many', 'selection.prompt-state', 'route.change', 'job.retry', 'diagnostics.status')]
     [string]$Command,
     [Parameter(Mandatory = $true)]
     [string]$PayloadJson,

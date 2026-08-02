@@ -21,6 +21,8 @@ declare namespace chrome {
       incognito: boolean;
       byExtensionId?: string;
       byExtensionName?: string;
+      /** ISO 8601 time the browser started the transfer. Past for history replays. */
+      startTime?: string;
     }
 
     interface StringDelta {

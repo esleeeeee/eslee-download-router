@@ -1,5 +1,6 @@
 using DownloadRouter.Core.Jobs;
 using DownloadRouter.Core.Models;
+using DownloadRouter.Core.Rules;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -21,6 +22,7 @@ public sealed partial class MainWindow
     private int previousAutomaticCount;
     private int shownAutoPromptCount;
     private int sessionAutoPromptTotal;
+    private bool extensionRefreshRequired;
 
     private void InitializeLiveUpdates()
     {
@@ -43,6 +45,7 @@ public sealed partial class MainWindow
             var rulesResponse = await agent.SendAsync("rules.list");
             var jobs = AgentClient.ReadData<List<DownloadJob>>(jobsResponse) ?? [];
             var rules = AgentClient.ReadData<List<DownloadRule>>(rulesResponse) ?? [];
+            extensionRefreshRequired = await ReadExtensionRefreshRequiredAsync();
             RenderDashboard(jobs, rules);
         }
         catch (Exception exception)
@@ -51,9 +54,41 @@ public sealed partial class MainWindow
         }
     }
 
+    /// <summary>
+    /// The browser can keep serving a cached older extension after an upgrade. Until it is
+    /// refreshed the app cannot track new downloads, so this must be impossible to miss.
+    /// </summary>
+    private async Task<bool> ReadExtensionRefreshRequiredAsync()
+    {
+        try
+        {
+            var response = await agent.SendAsync("diagnostics.status");
+            return response.Data is System.Text.Json.JsonElement data
+                && data.TryGetProperty("extensionRefreshRequired", out var value)
+                && value.ValueKind == System.Text.Json.JsonValueKind.True;
+        }
+        catch (Exception exception)
+        {
+            System.Diagnostics.Debug.WriteLine($"Extension status read failed: {exception.GetType().Name}");
+            return false;
+        }
+    }
+
     private void RenderDashboard(IReadOnlyList<DownloadJob> jobs, IReadOnlyList<DownloadRule> rules)
     {
         Prepare("대시보드", "브라우저 전송 상태와 파일 라우팅 상태를 구분해 표시합니다.");
+        if (extensionRefreshRequired)
+        {
+            ContentPanel.Children.Add(new InfoBar
+            {
+                IsOpen = true,
+                IsClosable = false,
+                Severity = InfoBarSeverity.Warning,
+                Title = "브라우저 확장을 새로 고쳐야 합니다",
+                Message = DownloadRegistrationPolicy.ExtensionRefreshGuidance,
+            });
+        }
+
         var counts = DownloadJobQueries.CountDashboard(jobs);
         AddCard("활성 규칙", rules.Count(static rule => rule.IsEnabled).ToString());
         AddCard("다운로드 중", counts.DownloadsInProgress.ToString());

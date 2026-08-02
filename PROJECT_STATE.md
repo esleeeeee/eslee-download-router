@@ -1,11 +1,11 @@
 # 프로젝트 상태
 
-기준일: 2026-08-01 (Asia/Seoul)
+기준일: 2026-08-02 (Asia/Seoul)
 
 ## 요약
 
-- 현재 단계: 1.1.0 후보 개발 중. 자동 팝업 영속 상태, 처리 대기 통합과 사이트 규칙 UI 개선을 로컬 검증 중이며 아직 Release로 게시하지 않았습니다.
-- 직전 정식 버전: 1.0.3 (흰색 아이콘 및 트레이 툴팁 hotfix)
+- 현재 단계: 1.1.1 긴급 수정 후보 개발 중. 브라우저 시작 시 과거 다운로드가 새 작업으로 재등록되던 문제를 확장 필터와 Agent fail-closed 정책으로 수정하고 로컬 검증 중이며 아직 Release로 게시하지 않았습니다.
+- 직전 정식 버전: 1.1.0 (자동 팝업 영속 상태, 처리 대기 통합, 사이트 규칙 UI 개선)
 - 공식 저장소: https://github.com/esleeeeee/eslee-download-router
 - 기본 브랜치: `main`
 - 최종 개발 PR: [#1 Fix pending prompts, Whale cancellation, version, and themes](https://github.com/esleeeeee/eslee-download-router/pull/1)
@@ -15,7 +15,7 @@
 
 ## 정식 버전 구성
 
-- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.1.0` 제품 버전을 사용합니다.
+- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.1.1` 제품 버전을 사용합니다.
 - assembly informational version에는 빌드한 Git commit metadata가 포함됩니다.
 - Extension manifest 버전은 기존 정책에 따라 제품 assembly와 독립 관리합니다.
 - 고정 Extension ID `gilicenlclaemgiijcjjejilikbooggj`와 Native Messaging identity를 유지합니다.
@@ -32,6 +32,7 @@
 - 브라우저 완료 전 선택, 실제 최종 파일명 갱신과 단일 FIFO
 - 다운로드 이력, 경로 변경, 완료 파일 재이동과 실제 파일 비삭제 이력 정리
 - SQLite에 영구 저장하는 자동 팝업 상태(`NeverShown`, `Shown`, `Deferred`, `Resolved`)와 재시작 뒤 팝업 비재현
+- 실시간 `downloads.onCreated`만 새 작업을 만들고, 브라우저 시작 시 재생되는 과거 기록은 확장 필터와 Agent의 fail-closed 등록 정책에서 모두 거부. 인식할 수 없는 확장 빌드는 작업을 만들지 못하며 진단 화면이 확장 새로고침을 안내
 - 다운로드 이력의 `처리 대기` 필터로 통합한 저장 위치 선택 대기 목록과 규칙별 일괄 처리
 - 사용자 문구 기반 사이트 규칙 편집기와 자연어 규칙 요약
 - 개별 `selection.skip`과 일괄 `selection.skip-many`의 영구 terminal `Skipped`
@@ -52,12 +53,12 @@
 |---|---|
 | .NET Debug build | 성공, 경고 0, 오류 0 |
 | .NET Release build | 성공, 경고 0, 오류 0 |
-| .NET tests | 107/107 통과, Core 67, Infrastructure 10, Integration 30 |
-| Extension | ESLint, TypeScript, dist build 성공, Node tests 17/17 |
+| .NET tests | 131/131 통과, Core 82, Infrastructure 10, Integration 39 |
+| Extension | ESLint, TypeScript, dist build 성공, Node tests 27/27 |
 | npm audit | 취약점 0건 |
 | Release publish | App, Agent, Native Host win-x64 self-contained 성공 |
 | 릴리스 개인정보 검사 | `verify-release-privacy.ps1` 통과 |
-| Installer | Inno Setup compile과 기존 1.0.3 설치 위 1.1.0 업그레이드 성공 |
+| Installer | Inno Setup compile과 기존 1.1.0 설치 위 1.1.1 업그레이드 성공 |
 | 사용자 데이터 | SQLite, 규칙, 이력, Pending, 설정과 테마 보존 |
 | 자동 시작 | 기존 HKCU Run 값 보존, 자동 시작 경로 실행 성공 |
 | Native Messaging | 등록 보존, 설치 Native Host와 Agent ping 성공 |

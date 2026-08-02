@@ -1,5 +1,10 @@
 import { detectBrowser } from "./browser.js";
 import {
+  classifyCreatedDownload,
+  extensionBuild,
+  reportableState,
+} from "./download-origin.js";
+import {
   isUserCancelled,
   preferredDownloadError,
   safeDownloadError,
@@ -19,6 +24,16 @@ interface ActiveBrowserDownload {
 }
 
 chrome.downloads.onCreated.addListener((item) => {
+  // Browser startup replays onCreated for the whole download history. Registering those
+  // would recreate jobs for files the user already handled, so only live transfers pass.
+  const decision = classifyCreatedDownload(item, Date.now());
+  if (!decision.track) {
+    console.debug(
+      `[Download Router] onCreated ignored downloadId=${safeDownloadId(item.id)} reason=${decision.reason}`,
+    );
+    return;
+  }
+
   lastErrors.delete(item.id);
   reportedTerminalStates.delete(item.id);
   const metadata = sourceMetadata(item);
@@ -27,6 +42,9 @@ chrome.downloads.onCreated.addListener((item) => {
       browser,
       downloadId: item.id.toString(),
       ...metadata,
+      state: reportableState(item.state),
+      startedAt: item.startTime ?? null,
+      extensionBuild,
     }),
   );
 });
@@ -87,7 +105,24 @@ chrome.downloads.onErased.addListener((downloadId) => {
   reportedTerminalStates.delete(downloadId);
 });
 
+void announceExtensionBuild();
 void reconcileActiveDownloads();
+
+/**
+ * Tells the agent which extension build is running so the app can warn about a browser
+ * that is still serving a cached older service worker, before any download is attempted.
+ */
+async function announceExtensionBuild(): Promise<void> {
+  const response = await sendNative<{ browser: string; extensionBuild: string }, { supported?: boolean }>(
+    createRequest("extension.hello", { browser, extensionBuild }),
+  );
+  if (response?.success && response.data?.supported === false) {
+    console.warn(
+      "[Download Router] This extension build is not supported by the installed app."
+        + " Refresh the extension and restart the browser.",
+    );
+  }
+}
 
 function reportTerminal(
   item: chrome.downloads.DownloadItem,

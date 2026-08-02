@@ -131,6 +131,7 @@ public sealed partial class MainWindow : Window
         try
         {
             var response = await agent.SendAsync("diagnostics.status");
+            AddExtensionRefreshGuidance(response);
             AddCard("현재 진단 상태", response.Data?.GetRawText() ?? "응답 없음");
             var rasterizationScale = ContentPanel.XamlRoot?.RasterizationScale;
             AddCard(
@@ -187,6 +188,31 @@ public sealed partial class MainWindow : Window
             _ = await Launcher.LaunchUriAsync(new Uri("https://github.com/esleeeeee/eslee-download-router"));
         ContentPanel.Children.Add(openGitHub);
         await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// The browser can keep serving a cached older extension after an upgrade. When the
+    /// agent refuses downloads from an unrecognised build, tell the user how to fix it.
+    /// </summary>
+    private void AddExtensionRefreshGuidance(AgentResponse response)
+    {
+        var rejections = 0;
+        if (response.Data is System.Text.Json.JsonElement data
+            && data.TryGetProperty("unsupportedExtensionRejections", out var value))
+        {
+            _ = value.TryGetInt32(out rejections);
+        }
+
+        ContentPanel.Children.Add(new InfoBar
+        {
+            IsOpen = true,
+            IsClosable = false,
+            Severity = rejections > 0 ? InfoBarSeverity.Warning : InfoBarSeverity.Informational,
+            Title = rejections > 0 ? "브라우저 확장을 새로 고쳐야 합니다" : "프로그램을 업데이트한 뒤에는",
+            Message = rejections > 0
+                ? DownloadRouter.Core.Jobs.DownloadRegistrationPolicy.ExtensionRefreshGuidance
+                : "확장 관리 화면에서 eslee Download Router를 새로 고친 뒤 브라우저를 다시 시작하세요. 브라우저는 업데이트된 확장 파일을 자동으로 다시 읽지 않습니다.",
+        });
     }
 
     private void Prepare(string title, string description)

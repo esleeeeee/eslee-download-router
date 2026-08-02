@@ -208,7 +208,13 @@ public sealed record DownloadStartedPayload(
     string? InitiatingPageUrl,
     string? InitialUrl,
     string? FinalUrl,
-    string? ReferrerUrl);
+    string? ReferrerUrl,
+    /// <summary>Browser transfer state at creation. Absent on unsupported extension builds.</summary>
+    string? State = null,
+    /// <summary>Browser-reported start time. Past values indicate a replayed history item.</summary>
+    DateTimeOffset? StartedAt = null,
+    /// <summary>Identifies the extension code that sent this request.</summary>
+    string? ExtensionBuild = null);
 
 public sealed record DownloadChangedPayload(
     string Browser,
@@ -248,6 +254,12 @@ public sealed record RuleDeletePayload(Guid RuleId);
 
 public sealed record ActiveDownloadsPayload(string Browser);
 
+/// <summary>
+/// Sent once when the extension's service worker starts so the agent can warn about a
+/// stale build before the user tries to download anything.
+/// </summary>
+public sealed record ExtensionHelloPayload(string Browser, string? ExtensionBuild);
+
 public sealed record ActiveBrowserDownload(Guid JobId, string DownloadId);
 
 public sealed record DashboardCounts(
@@ -281,6 +293,7 @@ public static class ProtocolConstants
         "jobs.list",
         "jobs.delete",
         "downloads.active",
+        "extension.hello",
         "selection.complete",
         "selection.skip",
         "selection.skip-many",
