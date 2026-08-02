@@ -17,6 +17,9 @@ public sealed class CommandValidationTests : IDisposable
     private readonly string root = Path.Combine(Path.GetTempPath(), "download-router-integration-tests", Guid.NewGuid().ToString("N"));
     private readonly string? previousOverride;
 
+    private static readonly string SupportedBuild =
+        DownloadRegistrationPolicy.SupportedExtensionBuilds.First();
+
     public CommandValidationTests()
     {
         previousOverride = Environment.GetEnvironmentVariable("DOWNLOAD_ROUTER_DATA_DIR");
@@ -97,7 +100,10 @@ public sealed class CommandValidationTests : IDisposable
                     "https://example.com/downloads",
                     "https://example.com/example.txt",
                     null,
-                    null),
+                    null,
+                    State: "in_progress",
+                    StartedAt: DateTimeOffset.UtcNow,
+                    ExtensionBuild: SupportedBuild),
                 ProtocolJson.Options));
         var startedResponse = await handler.HandleAsync(started, CancellationToken.None);
 
@@ -888,7 +894,8 @@ public sealed class CommandValidationTests : IDisposable
                     null,
                     null,
                     State: "complete",
-                    StartedAt: yesterday));
+                    StartedAt: yesterday,
+                    ExtensionBuild: SupportedBuild));
 
             Assert.True(response.Success, response.Message);
             Assert.False(response.Data!.Value.GetProperty("tracked").GetBoolean());
@@ -912,7 +919,7 @@ public sealed class CommandValidationTests : IDisposable
                 "Whale", "900", "resumable.bin", null, "https://example.com/downloads",
                 "https://example.com/resumable.bin", null, null,
                 State: "in_progress",
-                StartedAt: DateTimeOffset.UtcNow.AddDays(-1)));
+                StartedAt: DateTimeOffset.UtcNow.AddDays(-1), ExtensionBuild: SupportedBuild));
 
         Assert.True(response.Success, response.Message);
         Assert.False(response.Data!.Value.GetProperty("tracked").GetBoolean());
@@ -934,7 +941,7 @@ public sealed class CommandValidationTests : IDisposable
                 "Whale", "1001", "live.bin", null, "https://example.com/downloads",
                 "https://example.com/live.bin", null, null,
                 State: "in_progress",
-                StartedAt: DateTimeOffset.UtcNow));
+                StartedAt: DateTimeOffset.UtcNow, ExtensionBuild: SupportedBuild));
 
         Assert.True(response.Success, response.Message);
         Assert.True(response.Data!.Value.GetProperty("tracked").GetBoolean());
@@ -979,7 +986,7 @@ public sealed class CommandValidationTests : IDisposable
                         "Whale", downloadId.ToString(), "history.bin", null,
                         "https://example.com/downloads", "https://example.com/history.bin", null, null,
                         State: "complete",
-                        StartedAt: DateTimeOffset.UtcNow.AddDays(-1)));
+                        StartedAt: DateTimeOffset.UtcNow.AddDays(-1), ExtensionBuild: SupportedBuild));
             }
 
             // Reconciliation of the tracked download must only refresh state.
@@ -1015,7 +1022,7 @@ public sealed class CommandValidationTests : IDisposable
                     "Whale", "3001", "live.bin", null, "https://example.com/downloads",
                     "https://example.com/live.bin", null, null,
                     State: "in_progress",
-                    StartedAt: DateTimeOffset.UtcNow));
+                    StartedAt: DateTimeOffset.UtcNow, ExtensionBuild: SupportedBuild));
             Assert.True(response.Success, response.Message);
             Assert.True(response.Data!.Value.GetProperty("existing").GetBoolean());
             Assert.Equal(jobId, response.Data.Value.GetProperty("jobId").GetGuid());
@@ -1043,7 +1050,7 @@ public sealed class CommandValidationTests : IDisposable
                 "Whale", "4001", "live.bin", null, "https://example.com/downloads",
                 "https://example.com/live.bin", null, null,
                 State: "complete",
-                StartedAt: DateTimeOffset.UtcNow.AddHours(-2)));
+                StartedAt: DateTimeOffset.UtcNow.AddHours(-2), ExtensionBuild: SupportedBuild));
 
         Assert.True(replay.Success, replay.Message);
         Assert.False(replay.Data!.Value.GetProperty("tracked").GetBoolean());
@@ -1051,22 +1058,92 @@ public sealed class CommandValidationTests : IDisposable
     }
 
     [Fact]
-    public async Task AnOlderExtensionWithoutStateStillFailsOpenAndRegisters()
+    public async Task ACachedOlderExtensionCannotRegisterAnythingAndAsksForARefresh()
     {
         var (handler, repository) = await CreateHandlerAsync();
         var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
         await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
 
-        // No State and no StartedAt: the agent keeps the previous behaviour.
+        // The browser kept serving a cached older service worker after the upgrade, so the
+        // payload carries no build identifier and no transfer state. This is exactly the
+        // shape that re-registered the whole download history before.
+        foreach (var downloadId in new[] { "5001", "5002", "5003" })
+        {
+            var response = await SendAsync(
+                handler,
+                "download.started",
+                new DownloadStartedPayload(
+                    "Whale", downloadId, "legacy.bin", null, "https://example.com/downloads",
+                    "https://example.com/legacy.bin", null, null));
+
+            Assert.True(response.Success, response.Message);
+            Assert.False(response.Data!.Value.GetProperty("tracked").GetBoolean());
+            // The browser download itself must keep working.
+            Assert.True(response.Data.Value.GetProperty("failOpen").GetBoolean());
+            Assert.Equal("unsupported-extension-build", response.Data.Value.GetProperty("ignored").GetString());
+            Assert.True(response.Data.Value.GetProperty("extensionRefreshRequired").GetBoolean());
+            Assert.False(string.IsNullOrWhiteSpace(response.Data.Value.GetProperty("message").GetString()));
+        }
+
+        Assert.Empty(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+
+        // The counter is process-wide, so only its growth is meaningful here.
+        var status = await SendAsync(handler, "diagnostics.status", new { });
+        Assert.True(status.Data!.Value.GetProperty("unsupportedExtensionRejections").GetInt32() >= 3);
+        Assert.Contains(
+            SupportedBuild,
+            status.Data.Value.GetProperty("supportedExtensionBuilds").EnumerateArray().Select(v => v.GetString()));
+    }
+
+    [Fact]
+    public async Task AnUnknownExtensionBuildCannotRegisterEvenWhenItClaimsALiveTransfer()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+
         var response = await SendAsync(
             handler,
             "download.started",
             new DownloadStartedPayload(
-                "Whale", "5001", "legacy.bin", null, "https://example.com/downloads",
-                "https://example.com/legacy.bin", null, null));
+                "Whale", "6001", "future.bin", null, "https://example.com/downloads",
+                "https://example.com/future.bin", null, null,
+                State: "in_progress",
+                StartedAt: DateTimeOffset.UtcNow,
+                ExtensionBuild: "1999.01.01"));
 
         Assert.True(response.Success, response.Message);
-        Assert.True(response.Data!.Value.GetProperty("tracked").GetBoolean());
+        Assert.False(response.Data!.Value.GetProperty("tracked").GetBoolean());
+        Assert.Equal("unsupported-extension-build", response.Data.Value.GetProperty("ignored").GetString());
+        Assert.Empty(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ACachedOlderExtensionCanStillUpdateAnExistingJob()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartAsync(handler, "7001", "live.bin");
+
+        // Same download, replayed by a stale extension: it must update, never duplicate.
+        var replay = await SendAsync(
+            handler,
+            "download.started",
+            new DownloadStartedPayload(
+                "Whale", "7001", "live.bin", null, "https://example.com/downloads",
+                "https://example.com/live.bin", null, null));
+
+        Assert.True(replay.Success, replay.Message);
+        Assert.True(replay.Data!.Value.GetProperty("existing").GetBoolean());
+        Assert.Equal(jobId, replay.Data.Value.GetProperty("jobId").GetGuid());
+
+        // Terminal browser events from the same stale extension still reach the job.
+        var completed = await SendAsync(
+            handler,
+            "download.changed",
+            new DownloadChangedPayload("Whale", "7001", "complete", Path.Combine(root, "live.bin"), null));
+        Assert.True(completed.Success, completed.Message);
         Assert.Single(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
     }
 
@@ -1082,7 +1159,7 @@ public sealed class CommandValidationTests : IDisposable
                 "Whale", downloadId, fileName, null, "https://example.com/downloads",
                 $"https://example.com/{fileName}", null, null,
                 State: "in_progress",
-                StartedAt: DateTimeOffset.UtcNow));
+                StartedAt: DateTimeOffset.UtcNow, ExtensionBuild: SupportedBuild));
         Assert.True(response.Success, response.Message);
         return response.Data!.Value.GetProperty("jobId").GetGuid();
     }
@@ -1110,7 +1187,10 @@ public sealed class CommandValidationTests : IDisposable
             "download.started",
             new DownloadStartedPayload(
                 "Whale", downloadId, fileName, null, "https://example.com/downloads",
-                $"https://example.com/{fileName}", null, null));
+                $"https://example.com/{fileName}", null, null,
+                State: "in_progress",
+                StartedAt: DateTimeOffset.UtcNow,
+                ExtensionBuild: SupportedBuild));
         Assert.True(response.Success, response.Message);
         return response.Data!.Value.GetProperty("jobId").GetGuid();
     }

@@ -1,5 +1,9 @@
 import { detectBrowser } from "./browser.js";
-import { classifyCreatedDownload, reportableState } from "./download-origin.js";
+import {
+  classifyCreatedDownload,
+  extensionBuild,
+  reportableState,
+} from "./download-origin.js";
 import {
   isUserCancelled,
   preferredDownloadError,
@@ -40,6 +44,7 @@ chrome.downloads.onCreated.addListener((item) => {
       ...metadata,
       state: reportableState(item.state),
       startedAt: item.startTime ?? null,
+      extensionBuild,
     }),
   );
 });

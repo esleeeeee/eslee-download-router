@@ -4,7 +4,7 @@
 
 ## 요약
 
-- 현재 단계: 1.1.1 긴급 수정 후보 개발 중. 브라우저 시작 시 과거 다운로드가 새 작업으로 재등록되던 문제를 수정하고 로컬 검증 중이며 아직 Release로 게시하지 않았습니다.
+- 현재 단계: 1.1.1 긴급 수정 후보 개발 중. 브라우저 시작 시 과거 다운로드가 새 작업으로 재등록되던 문제를 확장 필터와 Agent fail-closed 정책으로 수정하고 로컬 검증 중이며 아직 Release로 게시하지 않았습니다.
 - 직전 정식 버전: 1.1.0 (자동 팝업 영속 상태, 처리 대기 통합, 사이트 규칙 UI 개선)
 - 공식 저장소: https://github.com/esleeeeee/eslee-download-router
 - 기본 브랜치: `main`
@@ -32,7 +32,7 @@
 - 브라우저 완료 전 선택, 실제 최종 파일명 갱신과 단일 FIFO
 - 다운로드 이력, 경로 변경, 완료 파일 재이동과 실제 파일 비삭제 이력 정리
 - SQLite에 영구 저장하는 자동 팝업 상태(`NeverShown`, `Shown`, `Deferred`, `Resolved`)와 재시작 뒤 팝업 비재현
-- 실시간 `downloads.onCreated`만 새 작업을 만들고 브라우저 시작 시 재생되는 과거 기록은 확장과 Agent 양쪽에서 거부
+- 실시간 `downloads.onCreated`만 새 작업을 만들고, 브라우저 시작 시 재생되는 과거 기록은 확장 필터와 Agent의 fail-closed 등록 정책에서 모두 거부. 인식할 수 없는 확장 빌드는 작업을 만들지 못하며 진단 화면이 확장 새로고침을 안내
 - 다운로드 이력의 `처리 대기` 필터로 통합한 저장 위치 선택 대기 목록과 규칙별 일괄 처리
 - 사용자 문구 기반 사이트 규칙 편집기와 자연어 규칙 요약
 - 개별 `selection.skip`과 일괄 `selection.skip-many`의 영구 terminal `Skipped`
@@ -53,8 +53,8 @@
 |---|---|
 | .NET Debug build | 성공, 경고 0, 오류 0 |
 | .NET Release build | 성공, 경고 0, 오류 0 |
-| .NET tests | 126/126 통과, Core 79, Infrastructure 10, Integration 37 |
-| Extension | ESLint, TypeScript, dist build 성공, Node tests 26/26 |
+| .NET tests | 131/131 통과, Core 82, Infrastructure 10, Integration 39 |
+| Extension | ESLint, TypeScript, dist build 성공, Node tests 27/27 |
 | npm audit | 취약점 0건 |
 | Release publish | App, Agent, Native Host win-x64 self-contained 성공 |
 | 릴리스 개인정보 검사 | `verify-release-privacy.ps1` 통과 |

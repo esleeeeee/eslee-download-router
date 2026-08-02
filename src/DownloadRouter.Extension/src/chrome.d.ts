@@ -23,8 +23,6 @@ declare namespace chrome {
       byExtensionName?: string;
       /** ISO 8601 time the browser started the transfer. Past for history replays. */
       startTime?: string;
-      exists?: boolean;
-      paused?: boolean;
     }
 
     interface StringDelta {
