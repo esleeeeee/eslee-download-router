@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   classifyCreatedDownload,
+  extensionBuild,
   liveDownloadWindowMs,
   parseStartTime,
   reportableState,
@@ -81,13 +82,30 @@ void test("onCreated filters replayed history before asking the agent to track a
     backgroundSource.indexOf("chrome.downloads.onChanged.addListener"),
   );
 
-  const guardIndex = onCreated.indexOf("classifyCreatedDownload(item, Date.now())");
+  const guardIndex = onCreated.search(/classifyCreatedDownload\(item, \w+(\.now\(\))?\)/u);
   const sendIndex = onCreated.indexOf('createRequest("download.started"');
   assert.ok(guardIndex >= 0, "onCreated must classify the item");
   assert.ok(sendIndex > guardIndex, "the guard must run before the agent request");
   assert.match(onCreated, /if \(!decision\.track\) \{[\s\S]*?return;/u);
   assert.match(onCreated, /state: reportableState\(item\.state\)/u);
   assert.match(onCreated, /startedAt: item\.startTime \?\? null/u);
+  // The agent refuses to create jobs for builds it does not recognise.
+  assert.match(onCreated, /extensionBuild,/u);
+});
+
+void test("the build identifier is a concrete value and matches the packaged manifest bump", () => {
+  assert.match(extensionBuild, /^\d{4}\.\d{2}\.\d{2}$/u);
+
+  const manifest = JSON.parse(
+    readFileSync(fileURLToPath(new URL("../../manifest.json", import.meta.url)), "utf8"),
+  ) as { version: string; key: string; name: string };
+
+  // The extension identity must never change with a behaviour fix.
+  assert.equal(manifest.name, "eslee Download Router");
+  assert.ok(manifest.key.length > 0);
+  // A changed registration behaviour requires a packaged version bump so the browser
+  // reloads the unpacked extension instead of serving a cached service worker.
+  assert.notEqual(manifest.version, "0.1.0");
 });
 
 void test("no other code path can send download.started", () => {
