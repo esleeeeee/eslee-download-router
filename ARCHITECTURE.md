@@ -86,6 +86,16 @@ Interrupted                RetryPending
 
 ## 팝업 수명과 테마
 
+## 작업 생성 경계
+
+새 `DownloadJob`은 실시간 `downloads.onCreated`에서 시작한 `download.started`만 만들 수 있습니다. Chromium은 브라우저를 시작할 때 다운로드 기록 전체에 대해 `onCreated`를 다시 발생시키므로, 확장은 `state`가 `in_progress`이고 `startTime`이 이번 세션 범위인 항목만 전달합니다.
+
+브라우저는 프로그램을 업데이트해도 이전에 읽은 확장 코드를 계속 사용할 수 있습니다. 따라서 확장 필터가 동작한다고 가정하지 않고, Agent의 작업 생성은 `DownloadRegistrationPolicy`에서 fail-closed로 판단합니다. 확장 빌드 식별자가 없거나 Agent가 모르는 값이면, 그리고 전송 상태가 없으면 새 작업을 만들지 않습니다. 확장 빌드 식별자는 확장의 `extensionBuild`와 Agent의 `SupportedExtensionBuilds`가 같은 값을 공유하며, 등록 동작을 바꿀 때 `manifest.json` 버전과 함께 올립니다.
+
+거부는 기존 작업 갱신과 브라우저 다운로드에 영향을 주지 않습니다. 인식할 수 없는 확장 빌드가 감지되면 Agent가 횟수를 기록하고 App 진단 화면이 확장 새로고침을 안내합니다.
+
+`downloads.active`, `chrome.downloads.search`, `download.changed`, `download.metadata`는 기존 작업의 상태만 갱신하며 어떤 경우에도 작업을 새로 만들지 않습니다. `DownloadJobs`의 `UNIQUE(Browser, BrowserDownloadId)`가 같은 다운로드의 중복 등록을 막고, 같은 이벤트가 반복되면 insert 대신 기존 작업을 갱신합니다. 사용자가 이력을 삭제해도 브라우저의 과거 기록으로 작업을 복원하지 않습니다.
+
 자동 선택 팝업 대상은 `DownloadJobs.SelectionPromptState`가 결정합니다. 이 값은 브라우저 전송 상태와 분리된 축이며 `NeverShown`, `Shown`, `Deferred`, `Resolved` 순서로만 전진합니다. 자동 큐에는 `NeverShown`이면서 브라우저 record가 stale하지 않은 대기 Job만 들어갑니다. 팝업을 여는 시점보다 먼저 `Shown`을 커밋하므로 앱이 비정상 종료해도 같은 Job이 다음 실행에서 다시 자동 표시되지 않습니다. 하위 폴더 선택 방식이 아닌 규칙의 Job은 생성 시점에 `Resolved`로 시작합니다.
 
 `LastBrowserEventAt`은 전송 상태 확인 용도로만 사용하며 자동 팝업 자격을 되살리지 않습니다. 브라우저 재연결, 시작 재조정, 중복 start와 값이 바뀌지 않은 metadata는 사용자의 팝업 결정을 되돌릴 수 없습니다.
