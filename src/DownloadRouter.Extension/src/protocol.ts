@@ -8,7 +8,8 @@ export type AgentCommandName =
   | "download.changed"
   | "download.cancelled"
   | "download.interrupted"
-  | "downloads.active";
+  | "downloads.active"
+  | "extension.hello";
 
 export interface AgentRequest<TPayload> {
   version: number;
