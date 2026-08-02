@@ -84,6 +84,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-installer.ps
 
 Extension `manifest.json`의 버전은 Chromium 패키지 수명 주기용이며 제품 assembly 버전과 독립 관리합니다. 제품 버전 승격만을 이유로 Extension key, manifest version 또는 identity를 수정하지 마세요.
 
+## Extension 버전 정책
+
+브라우저는 unpacked 확장 파일이 바뀌어도 이전에 읽은 코드를 계속 실행할 수 있습니다. 설치 프로그램이 파일을 교체하고 브라우저를 다시 시작해도 마찬가지입니다. 이 때문에 실제 사고가 발생한 적이 있으므로 다음을 반드시 지킵니다.
+
+- **확장 소스를 변경하면 `manifest.json`의 `version`을 항상 올립니다.** 예외는 없습니다.
+- 다운로드 등록 동작을 바꾸면 `download-origin.ts`의 `extensionBuild`와 Agent의 `DownloadRegistrationPolicy.SupportedExtensionBuilds`를 같은 값으로 함께 올립니다. 두 값이 일치하는지 자동 테스트가 검사합니다.
+- Agent는 인식하지 못하는 빌드의 `download.started`로 **새 작업을 만들지 않습니다**(fail-closed). 구버전 확장이 남아 있으면 새 다운로드가 추적되지 않으므로, 확장 갱신 없이 Agent만 올리는 배포는 하지 않습니다.
+- 확장은 service worker 시작 시 `extension.hello`로 빌드를 알립니다. Agent는 미지원 빌드를 즉시 기록하고 App 대시보드가 경고를 표시합니다.
+- 고정 Extension ID `gilicenlclaemgiijcjjejilikbooggj`와 `key`는 어떤 경우에도 바꾸지 않습니다.
+- 릴리스 노트와 README에 "업데이트 후 확장 새로고침" 안내를 유지합니다.
+
 ## 브랜딩 자산
 
 - 현재 제품용 white master 원본은 `assets/branding/eslee-download-router.png`이며 생성된 `eslee-download-router.ico`와 함께 소스 관리합니다.

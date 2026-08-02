@@ -1096,6 +1096,60 @@ public sealed class CommandValidationTests : IDisposable
     }
 
     [Fact]
+    public async Task TheStartupHandshakeAcceptsASupportedBuild()
+    {
+        var (handler, _) = await CreateHandlerAsync();
+
+        var hello = await SendAsync(
+            handler,
+            "extension.hello",
+            new ExtensionHelloPayload("Whale", SupportedBuild));
+
+        Assert.True(hello.Success, hello.Message);
+        Assert.True(hello.Data!.Value.GetProperty("supported").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, hello.Data.Value.GetProperty("message").ValueKind);
+
+        var status = await SendAsync(handler, "diagnostics.status", new { });
+        Assert.True(status.Data!.Value.GetProperty("extensionBuildSupported").GetBoolean());
+        Assert.Equal(SupportedBuild, status.Data.Value.GetProperty("lastExtensionBuild").GetString());
+    }
+
+    [Fact]
+    public async Task TheStartupHandshakeFlagsAStaleBuildBeforeAnyDownloadHappens()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+
+        var hello = await SendAsync(
+            handler,
+            "extension.hello",
+            new ExtensionHelloPayload("Whale", "1999.01.01"));
+
+        Assert.True(hello.Success, hello.Message);
+        Assert.False(hello.Data!.Value.GetProperty("supported").GetBoolean());
+        Assert.False(string.IsNullOrWhiteSpace(hello.Data.Value.GetProperty("message").GetString()));
+
+        var status = await SendAsync(handler, "diagnostics.status", new { });
+        Assert.False(status.Data!.Value.GetProperty("extensionBuildSupported").GetBoolean());
+        Assert.True(status.Data.Value.GetProperty("extensionRefreshRequired").GetBoolean());
+        // The handshake alone must never create or change any job.
+        Assert.Empty(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AMissingBuildInTheHandshakeIsTreatedAsStale()
+    {
+        var (handler, _) = await CreateHandlerAsync();
+
+        var hello = await SendAsync(
+            handler,
+            "extension.hello",
+            new ExtensionHelloPayload("Whale", null));
+
+        Assert.True(hello.Success, hello.Message);
+        Assert.False(hello.Data!.Value.GetProperty("supported").GetBoolean());
+    }
+
+    [Fact]
     public async Task AnUnknownExtensionBuildCannotRegisterEvenWhenItClaimsALiveTransfer()
     {
         var (handler, repository) = await CreateHandlerAsync();

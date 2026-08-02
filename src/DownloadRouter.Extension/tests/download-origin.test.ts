@@ -108,6 +108,18 @@ void test("the build identifier is a concrete value and matches the packaged man
   assert.notEqual(manifest.version, "0.1.0");
 });
 
+void test("the service worker announces its build before any download is handled", () => {
+  const helloIndex = backgroundSource.indexOf('createRequest("extension.hello"');
+  const listenerIndex = backgroundSource.indexOf("chrome.downloads.onCreated.addListener");
+
+  assert.ok(helloIndex >= 0, "the extension must announce its build at startup");
+  assert.match(backgroundSource, /void announceExtensionBuild\(\);/u);
+  assert.match(backgroundSource, /extensionBuild \}/u);
+  // The handshake is fire-and-forget and must never gate download handling.
+  assert.ok(listenerIndex >= 0);
+  assert.doesNotMatch(backgroundSource, /await announceExtensionBuild/u);
+});
+
 void test("no other code path can send download.started", () => {
   const startedCalls = backgroundSource.match(/createRequest\("download\.started"/gu) ?? [];
   assert.equal(startedCalls.length, 1);

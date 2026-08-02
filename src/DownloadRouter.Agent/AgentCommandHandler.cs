@@ -29,6 +29,9 @@ public sealed class AgentCommandHandler(
     /// </summary>
     private static int unsupportedExtensionRejections;
     private static long lastUnsupportedExtensionTicks;
+    private static int lastExtensionBuildSupported = -1;
+    private static long lastExtensionHelloTicks;
+    private static string? lastExtensionBuild;
 
     public async Task<AgentResponse> HandleAsync(AgentCommand request, CancellationToken cancellationToken)
     {
@@ -68,6 +71,7 @@ public sealed class AgentCommandHandler(
                 "jobs.list" => AgentResponse.Ok(request.RequestId, await repository.GetRecentJobsAsync(cancellationToken: cancellationToken).ConfigureAwait(false)),
                 "jobs.delete" => await HandleJobsDeleteAsync(request, cancellationToken).ConfigureAwait(false),
                 "downloads.active" => await HandleActiveDownloadsAsync(request, cancellationToken).ConfigureAwait(false),
+                "extension.hello" => HandleExtensionHello(request),
                 "selection.complete" => await HandleSelectionCompletedAsync(request, cancellationToken).ConfigureAwait(false),
                 "selection.skip" => await HandleSelectionSkippedAsync(request, cancellationToken).ConfigureAwait(false),
                 "selection.skip-many" => await HandleSelectionsSkippedAsync(request, cancellationToken).ConfigureAwait(false),
@@ -85,6 +89,18 @@ public sealed class AgentCommandHandler(
                     lastUnsupportedExtensionAt = Volatile.Read(ref lastUnsupportedExtensionTicks) == 0
                         ? null
                         : new DateTimeOffset(Volatile.Read(ref lastUnsupportedExtensionTicks), TimeSpan.Zero).ToString("O"),
+                    lastExtensionBuild = Volatile.Read(ref lastExtensionBuild),
+                    extensionBuildSupported = Volatile.Read(ref lastExtensionBuildSupported) switch
+                    {
+                        1 => (bool?)true,
+                        0 => false,
+                        _ => null,
+                    },
+                    lastExtensionHelloAt = Volatile.Read(ref lastExtensionHelloTicks) == 0
+                        ? null
+                        : new DateTimeOffset(Volatile.Read(ref lastExtensionHelloTicks), TimeSpan.Zero).ToString("O"),
+                    extensionRefreshRequired = Volatile.Read(ref lastExtensionBuildSupported) == 0
+                        || Volatile.Read(ref unsupportedExtensionRejections) > 0,
                 }),
                 _ => AgentResponse.Error(request.RequestId, "protocol.command-not-allowed", "The requested command is not allowed."),
             };
@@ -761,6 +777,42 @@ public sealed class AgentCommandHandler(
         }
 
         return AgentResponse.Ok(request.RequestId, JobRouteState(job));
+    }
+
+    /// <summary>
+    /// Startup handshake. Lets the app warn about a browser that is still running a cached
+    /// older extension before the user tries to download anything.
+    /// </summary>
+    private AgentResponse HandleExtensionHello(AgentCommand request)
+    {
+        var payload = Deserialize<ExtensionHelloPayload>(request.Payload);
+        var build = payload.ExtensionBuild?.Trim();
+        var supported = !string.IsNullOrEmpty(build)
+            && DownloadRegistrationPolicy.SupportedExtensionBuilds.Contains(build);
+
+        Interlocked.Exchange(ref lastExtensionBuildSupported, supported ? 1 : 0);
+        Interlocked.Exchange(ref lastExtensionHelloTicks, DateTimeOffset.UtcNow.UtcTicks);
+        lastExtensionBuild = supported ? build : "unsupported";
+
+        if (supported)
+        {
+            logger.LogInformation("Extension handshake accepted for build {Build}", build);
+        }
+        else
+        {
+            Interlocked.Increment(ref unsupportedExtensionRejections);
+            Interlocked.Exchange(ref lastUnsupportedExtensionTicks, DateTimeOffset.UtcNow.UtcTicks);
+            logger.LogWarning(
+                "Extension handshake reported an unrecognised build; the browser is likely still "
+                    + "running a cached older extension");
+        }
+
+        return AgentResponse.Ok(request.RequestId, new
+        {
+            supported,
+            supportedExtensionBuilds = DownloadRegistrationPolicy.SupportedExtensionBuilds.ToArray(),
+            message = supported ? null : DownloadRegistrationPolicy.ExtensionRefreshGuidance,
+        });
     }
 
     private async Task<AgentResponse> HandleActiveDownloadsAsync(
