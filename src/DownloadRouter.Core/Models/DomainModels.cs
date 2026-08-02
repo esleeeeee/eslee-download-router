@@ -254,6 +254,12 @@ public sealed record RuleDeletePayload(Guid RuleId);
 
 public sealed record ActiveDownloadsPayload(string Browser);
 
+/// <summary>
+/// Sent once when the extension's service worker starts so the agent can warn about a
+/// stale build before the user tries to download anything.
+/// </summary>
+public sealed record ExtensionHelloPayload(string Browser, string? ExtensionBuild);
+
 public sealed record ActiveBrowserDownload(Guid JobId, string DownloadId);
 
 public sealed record DashboardCounts(
@@ -287,6 +293,7 @@ public static class ProtocolConstants
         "jobs.list",
         "jobs.delete",
         "downloads.active",
+        "extension.hello",
         "selection.complete",
         "selection.skip",
         "selection.skip-many",

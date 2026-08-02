@@ -105,7 +105,24 @@ chrome.downloads.onErased.addListener((downloadId) => {
   reportedTerminalStates.delete(downloadId);
 });
 
+void announceExtensionBuild();
 void reconcileActiveDownloads();
+
+/**
+ * Tells the agent which extension build is running so the app can warn about a browser
+ * that is still serving a cached older service worker, before any download is attempted.
+ */
+async function announceExtensionBuild(): Promise<void> {
+  const response = await sendNative<{ browser: string; extensionBuild: string }, { supported?: boolean }>(
+    createRequest("extension.hello", { browser, extensionBuild }),
+  );
+  if (response?.success && response.data?.supported === false) {
+    console.warn(
+      "[Download Router] This extension build is not supported by the installed app."
+        + " Refresh the extension and restart the browser.",
+    );
+  }
+}
 
 function reportTerminal(
   item: chrome.downloads.DownloadItem,
