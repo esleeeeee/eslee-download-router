@@ -99,6 +99,12 @@ Firefox, Safari, 모바일과 Windows 이외 운영체제는 지원하지 않습
 5. `압축해제된 확장앱 설치`에서 `%LOCALAPPDATA%\Programs\eslee\DownloadRouter\extension` 폴더를 선택합니다.
 6. 표시된 Extension ID가 `gilicenlclaemgiijcjjejilikbooggj`인지 확인합니다.
 
+### 업데이트한 뒤에는 확장을 새로 고치세요
+
+새 버전을 설치하면 확장 파일도 함께 갱신되지만, **브라우저는 이전에 읽은 확장 코드를 계속 사용할 수 있습니다.** 업데이트 후에는 확장 관리 화면에서 `eslee Download Router`의 새로 고침을 누른 뒤 브라우저를 다시 시작하세요.
+
+새로 고치지 않으면 프로그램이 새 다운로드를 추적하지 않고, 진단 및 문제 해결 화면에 안내가 표시됩니다. 브라우저 다운로드 자체는 항상 정상 동작합니다.
+
 Native Messaging 레지스트리나 manifest를 사용자가 직접 수정할 필요는 없습니다. 브라우저 스토어 자동 설치는 아직 제공하지 않으므로 확장 로드 단계만 수동입니다. Edge, Chrome과 다른 Chromium 브라우저의 관리 주소는 [수동 확장 설치 문서](docs/MANUAL_EXTENSION_INSTALL.md)에 정리되어 있습니다.
 
 설치 파일은 현재 코드 서명되지 않았습니다. Windows가 게시자를 확인할 수 없다는 경고를 표시할 수 있습니다.
