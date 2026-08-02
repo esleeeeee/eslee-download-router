@@ -1,4 +1,5 @@
 import { detectBrowser } from "./browser.js";
+import { classifyCreatedDownload, reportableState } from "./download-origin.js";
 import {
   isUserCancelled,
   preferredDownloadError,
@@ -19,6 +20,16 @@ interface ActiveBrowserDownload {
 }
 
 chrome.downloads.onCreated.addListener((item) => {
+  // Browser startup replays onCreated for the whole download history. Registering those
+  // would recreate jobs for files the user already handled, so only live transfers pass.
+  const decision = classifyCreatedDownload(item, Date.now());
+  if (!decision.track) {
+    console.debug(
+      `[Download Router] onCreated ignored downloadId=${safeDownloadId(item.id)} reason=${decision.reason}`,
+    );
+    return;
+  }
+
   lastErrors.delete(item.id);
   reportedTerminalStates.delete(item.id);
   const metadata = sourceMetadata(item);
@@ -27,6 +38,8 @@ chrome.downloads.onCreated.addListener((item) => {
       browser,
       downloadId: item.id.toString(),
       ...metadata,
+      state: reportableState(item.state),
+      startedAt: item.startTime ?? null,
     }),
   );
 });

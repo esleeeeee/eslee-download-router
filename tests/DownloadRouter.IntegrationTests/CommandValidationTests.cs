@@ -864,6 +864,229 @@ public sealed class CommandValidationTests : IDisposable
         Assert.Empty(Directory.EnumerateFiles(destination));
     }
 
+    [Fact]
+    public async Task BrowserStartupHistoryReplayCreatesNoJobsEvenWhenTheDatabaseIsEmpty()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var yesterday = DateTimeOffset.UtcNow.AddDays(-1);
+
+        // Chromium replays onCreated for the whole download history at browser startup.
+        for (var downloadId = 488; downloadId <= 516; downloadId++)
+        {
+            var response = await SendAsync(
+                handler,
+                "download.started",
+                new DownloadStartedPayload(
+                    "Whale",
+                    downloadId.ToString(),
+                    "history.bin",
+                    null,
+                    "https://example.com/downloads",
+                    "https://example.com/history.bin",
+                    null,
+                    null,
+                    State: "complete",
+                    StartedAt: yesterday));
+
+            Assert.True(response.Success, response.Message);
+            Assert.False(response.Data!.Value.GetProperty("tracked").GetBoolean());
+            Assert.Equal("already-finished", response.Data.Value.GetProperty("ignored").GetString());
+        }
+
+        Assert.Empty(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AnUnfinishedHistoryRecordRestoredAtStartupIsNotRegistered()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+
+        var response = await SendAsync(
+            handler,
+            "download.started",
+            new DownloadStartedPayload(
+                "Whale", "900", "resumable.bin", null, "https://example.com/downloads",
+                "https://example.com/resumable.bin", null, null,
+                State: "in_progress",
+                StartedAt: DateTimeOffset.UtcNow.AddDays(-1)));
+
+        Assert.True(response.Success, response.Message);
+        Assert.False(response.Data!.Value.GetProperty("tracked").GetBoolean());
+        Assert.Equal("started-before-session", response.Data.Value.GetProperty("ignored").GetString());
+        Assert.Empty(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ALiveDownloadIsStillRegisteredAndPromptsExactlyOnce()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+
+        var response = await SendAsync(
+            handler,
+            "download.started",
+            new DownloadStartedPayload(
+                "Whale", "1001", "live.bin", null, "https://example.com/downloads",
+                "https://example.com/live.bin", null, null,
+                State: "in_progress",
+                StartedAt: DateTimeOffset.UtcNow));
+
+        Assert.True(response.Success, response.Message);
+        Assert.True(response.Data!.Value.GetProperty("tracked").GetBoolean());
+        var jobId = response.Data.Value.GetProperty("jobId").GetGuid();
+
+        var job = await repository.GetJobAsync(jobId, CancellationToken.None);
+        Assert.Equal(SelectionPromptState.NeverShown, job!.SelectionPromptState);
+        Assert.Single(DownloadJobQueries.AutomaticSelections([job]));
+
+        Assert.True((await SendAsync(
+            handler,
+            "selection.prompt-state",
+            new SelectionPromptStatePayload([jobId], SelectionPromptState.Shown))).Success);
+
+        var afterPrompt = await repository.GetJobAsync(jobId, CancellationToken.None);
+        Assert.Empty(DownloadJobQueries.AutomaticSelections([afterPrompt!]));
+    }
+
+    [Fact]
+    public async Task RepeatedBrowserRestartsNeverGrowTheJobTable()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+
+        // One genuine live download exists before the restarts.
+        var liveJobId = await StartLiveAsync(handler, "2001", "live.bin");
+        Assert.True((await SendAsync(
+            handler,
+            "selection.prompt-state",
+            new SelectionPromptStatePayload([liveJobId], SelectionPromptState.Deferred))).Success);
+
+        for (var restart = 0; restart < 3; restart++)
+        {
+            // Every restart replays the history, including the live download's own record.
+            for (var downloadId = 2001; downloadId <= 2010; downloadId++)
+            {
+                await SendAsync(
+                    handler,
+                    "download.started",
+                    new DownloadStartedPayload(
+                        "Whale", downloadId.ToString(), "history.bin", null,
+                        "https://example.com/downloads", "https://example.com/history.bin", null, null,
+                        State: "complete",
+                        StartedAt: DateTimeOffset.UtcNow.AddDays(-1)));
+            }
+
+            // Reconciliation of the tracked download must only refresh state.
+            await SendAsync(
+                handler,
+                "download.changed",
+                new DownloadChangedPayload(
+                    "Whale", "2001", "in_progress", null, null, IsReconciliation: true));
+        }
+
+        var jobs = await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None);
+        Assert.Single(jobs);
+        Assert.Equal(liveJobId, jobs[0].Id);
+        Assert.Equal(SelectionPromptState.Deferred, jobs[0].SelectionPromptState);
+        Assert.Empty(DownloadJobQueries.AutomaticSelections(jobs));
+        Assert.Single(DownloadJobQueries.ActiveSelections(jobs));
+    }
+
+    [Fact]
+    public async Task ReplayingTheSameLiveDownloadUpdatesInsteadOfInsertingADuplicate()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartLiveAsync(handler, "3001", "live.bin");
+
+        for (var repeat = 0; repeat < 5; repeat++)
+        {
+            var response = await SendAsync(
+                handler,
+                "download.started",
+                new DownloadStartedPayload(
+                    "Whale", "3001", "live.bin", null, "https://example.com/downloads",
+                    "https://example.com/live.bin", null, null,
+                    State: "in_progress",
+                    StartedAt: DateTimeOffset.UtcNow));
+            Assert.True(response.Success, response.Message);
+            Assert.True(response.Data!.Value.GetProperty("existing").GetBoolean());
+            Assert.Equal(jobId, response.Data.Value.GetProperty("jobId").GetGuid());
+        }
+
+        Assert.Single(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task DeletingHistoryDoesNotLetTheBrowserReimportThoseDownloads()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var jobId = await StartLiveAsync(handler, "4001", "live.bin");
+
+        Assert.Equal(1, await repository.DeleteJobsAsync([jobId], CancellationToken.None));
+        Assert.Empty(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+
+        // The browser still has the record and replays it on the next startup.
+        var replay = await SendAsync(
+            handler,
+            "download.started",
+            new DownloadStartedPayload(
+                "Whale", "4001", "live.bin", null, "https://example.com/downloads",
+                "https://example.com/live.bin", null, null,
+                State: "complete",
+                StartedAt: DateTimeOffset.UtcNow.AddHours(-2)));
+
+        Assert.True(replay.Success, replay.Message);
+        Assert.False(replay.Data!.Value.GetProperty("tracked").GetBoolean());
+        Assert.Empty(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AnOlderExtensionWithoutStateStillFailsOpenAndRegisters()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
+        await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+
+        // No State and no StartedAt: the agent keeps the previous behaviour.
+        var response = await SendAsync(
+            handler,
+            "download.started",
+            new DownloadStartedPayload(
+                "Whale", "5001", "legacy.bin", null, "https://example.com/downloads",
+                "https://example.com/legacy.bin", null, null));
+
+        Assert.True(response.Success, response.Message);
+        Assert.True(response.Data!.Value.GetProperty("tracked").GetBoolean());
+        Assert.Single(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
+    }
+
+    private static async Task<Guid> StartLiveAsync(
+        AgentCommandHandler handler,
+        string downloadId,
+        string fileName)
+    {
+        var response = await SendAsync(
+            handler,
+            "download.started",
+            new DownloadStartedPayload(
+                "Whale", downloadId, fileName, null, "https://example.com/downloads",
+                $"https://example.com/{fileName}", null, null,
+                State: "in_progress",
+                StartedAt: DateTimeOffset.UtcNow));
+        Assert.True(response.Success, response.Message);
+        return response.Data!.Value.GetProperty("jobId").GetGuid();
+    }
+
     private static async Task<DownloadRule> CreateRuleAsync(
         DownloadRouterRepository repository,
         string destination,

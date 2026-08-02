@@ -125,6 +125,23 @@ public sealed class AgentCommandHandler(
             return AgentResponse.Ok(request.RequestId, new { tracked = true, jobId = existing.Id, existing = true });
         }
 
+        // Nothing exists for this download yet, so this request would create a job.
+        // Replayed browser history must never reach that path.
+        var registration = DownloadRegistrationPolicy.Classify(payload, DateTimeOffset.UtcNow);
+        if (registration != DownloadRegistrationDecision.Track)
+        {
+            logger.LogInformation(
+                "Ignored a replayed browser download {DownloadId}; reason={Reason}",
+                SanitizeDownloadId(payload.DownloadId),
+                DownloadRegistrationPolicy.DescribeRejection(registration));
+            return AgentResponse.Ok(request.RequestId, new
+            {
+                tracked = false,
+                failOpen = true,
+                ignored = DownloadRegistrationPolicy.DescribeRejection(registration),
+            });
+        }
+
         var trustedFileName = DownloadPresentation.TrustedFileName(payload.FileName)
             ?? DownloadPresentation.TrustedFileName(payload.FilePath)
             ?? string.Empty;
