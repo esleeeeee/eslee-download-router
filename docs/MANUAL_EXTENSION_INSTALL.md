@@ -12,6 +12,29 @@
 
 사용자가 Native Messaging 레지스트리나 manifest를 직접 수정할 필요는 없습니다. 아래 빌드와 등록 절차는 소스 clone을 사용하는 개발 검증용입니다.
 
+## 브라우저별 확장 관리 주소
+
+| 브라우저 | 주소 | 지원 |
+|---|---|---|
+| 네이버 웨일 | `whale://extensions` | 공식 |
+| Microsoft Edge | `edge://extensions` | 공식 |
+| Google Chrome | `chrome://extensions` | 공식 |
+| Brave | `brave://extensions` | 호환 |
+| Vivaldi | `vivaldi://extensions` | 호환 |
+| Opera | `opera://extensions` | 호환 |
+
+설치 프로그램은 위 여섯 브라우저의 HKCU Native Messaging 등록을 함께 구성합니다. 확장 로드만 브라우저에서 직접 수행합니다.
+
+## 업데이트 뒤 확장 새로 고치기
+
+브라우저는 설치 프로그램이 확장 파일을 교체해도 이전에 읽어 둔 코드를 계속 실행할 수 있습니다. 이 상태에서는 새 다운로드가 앱에 등록되지 않습니다.
+
+1. 확장 관리 주소를 엽니다.
+2. `eslee Download Router`의 새로 고침 버튼을 누릅니다.
+3. 브라우저를 완전히 종료한 뒤 다시 실행합니다.
+
+앱의 대시보드와 진단 및 문제 해결 화면에 확장 새로고침 안내가 표시되면 위 절차를 수행하세요. 브라우저 다운로드 자체는 이 상태에서도 정상 동작합니다.
+
 ## 1. 빌드
 
 ```powershell
