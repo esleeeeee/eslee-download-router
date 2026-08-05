@@ -1,21 +1,21 @@
 # 프로젝트 상태
 
-기준일: 2026-08-02 (Asia/Seoul)
+기준일: 2026-08-05 (Asia/Seoul)
 
 ## 요약
 
-- 현재 단계: 1.1.1 긴급 수정 후보 개발 중. 브라우저 시작 시 과거 다운로드가 새 작업으로 재등록되던 문제를 확장 필터와 Agent fail-closed 정책으로 수정하고 로컬 검증 중이며 아직 Release로 게시하지 않았습니다.
-- 직전 정식 버전: 1.1.0 (자동 팝업 영속 상태, 처리 대기 통합, 사이트 규칙 UI 개선)
+- 현재 단계: 1.1.2 소형 패치 개발 중. 브라우저 연결 화면의 확장 폴더 안내, 로그 문서와 실제 동작의 불일치, 지원 브라우저 문구 중복을 정리했고 로컬 검증까지 마쳤으나 아직 Release로 게시하지 않았습니다.
+- 직전 정식 버전: 1.1.1 (브라우저 시작 시 과거 다운로드 재등록 차단, 확장 빌드 핸드셰이크)
 - 공식 저장소: https://github.com/esleeeeee/eslee-download-router
 - 기본 브랜치: `main`
-- 최종 개발 PR: [#1 Fix pending prompts, Whale cancellation, version, and themes](https://github.com/esleeeeee/eslee-download-router/pull/1)
+- 최종 병합 PR: [#6 Rewrite README as a user guide](https://github.com/esleeeeee/eslee-download-router/pull/6)
 - 최신 정식 Release: [GitHub Releases](https://github.com/esleeeeee/eslee-download-router/releases/latest)
 - 지원 운영체제: Windows 11 x64
 - 격리 환경 수동 검증 브라우저: Naver Whale
 
 ## 정식 버전 구성
 
-- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.1.1` 제품 버전을 사용합니다.
+- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.1.2` 제품 버전을 사용합니다.
 - assembly informational version에는 빌드한 Git commit metadata가 포함됩니다.
 - Extension manifest 버전은 기존 정책에 따라 제품 assembly와 독립 관리합니다.
 - 고정 Extension ID `gilicenlclaemgiijcjjejilikbooggj`와 Native Messaging identity를 유지합니다.
@@ -46,6 +46,9 @@
 - 동일 볼륨 move, 교차 볼륨 copy, 크기와 SHA-256 검증, 확정 뒤 원본 삭제
 - 기존 대상 덮어쓰기 금지와 중복 이름 보존
 - 사용자 DB, 규칙, 이력과 설정을 지우지 않는 설치, 업그레이드와 제거 정책
+- 브라우저 연결 화면이 실행 중인 프로그램 위치에서 실제 확장 폴더를 찾아 안내하고 경로 복사와 폴더 열기를 제공
+- 지원 브라우저 목록과 사용자 문구를 `BrowserSupportCatalog` 한 곳에서 생성하고 등록 스크립트와의 일치를 테스트로 고정
+- 로그 파일별 기록 범위, 치환 한계와 issue 첨부 전 확인 항목을 `SECURITY.md`에 실제 동작대로 문서화
 
 ## 최종 검증 기준
 
@@ -53,12 +56,12 @@
 |---|---|
 | .NET Debug build | 성공, 경고 0, 오류 0 |
 | .NET Release build | 성공, 경고 0, 오류 0 |
-| .NET tests | 131/131 통과, Core 82, Infrastructure 10, Integration 39 |
-| Extension | ESLint, TypeScript, dist build 성공, Node tests 27/27 |
+| .NET tests | 151/151 통과, Core 99, Infrastructure 10, Integration 42 |
+| Extension | ESLint, TypeScript, dist build 성공, Node tests 28/28 |
 | npm audit | 취약점 0건 |
 | Release publish | App, Agent, Native Host win-x64 self-contained 성공 |
 | 릴리스 개인정보 검사 | `verify-release-privacy.ps1` 통과 |
-| Installer | Inno Setup compile과 기존 1.1.0 설치 위 1.1.1 업그레이드 성공 |
+| Installer | Inno Setup compile과 기존 1.1.1 설치 위 1.1.2 업그레이드 성공 |
 | 사용자 데이터 | SQLite, 규칙, 이력, Pending, 설정과 테마 보존 |
 | 자동 시작 | 기존 HKCU Run 값 보존, 자동 시작 경로 실행 성공 |
 | Native Messaging | 등록 보존, 설치 Native Host와 Agent ping 성공 |
@@ -97,6 +100,8 @@
 - 자동 저장 위치 선택 팝업은 작업당 한 번만 표시합니다. 이후에는 다운로드 이력의 `처리 대기` 목록에서 처리합니다.
 - 트레이 아이콘은 단일 왼쪽 클릭으로 창을 열지 않습니다. 더블 클릭 또는 오른쪽 클릭 메뉴를 사용합니다.
 - 다운로드 시작 탭 URL은 Chromium API가 신뢰할 수 있는 필드로 제공하지 않으므로 활성 탭을 추측하지 않습니다.
+- Agent JSONL 로그에는 다운로드 파일 이름이 남을 수 있고, `app-unhandled.log`에는 치환이 적용되지 않습니다. 로그를 공개하기 전에 직접 확인해야 합니다.
+- 1.0.1 시기에 설치된 환경에는 설치 폴더에 과거 `.pdb` 파일이 남아 있을 수 있습니다. 현재 설치 파일은 `.pdb`를 포함하지 않습니다.
 
 ## 유지보수 기준
 

@@ -273,6 +273,13 @@ public static class ProtocolConstants
 {
     public const int CurrentVersion = 1;
     public const int MaximumMessageBytes = 1024 * 1024;
+
+    /// <summary>
+    /// Fixed Chromium extension ID. It is part of the local messaging identity and must
+    /// never change; it is declared once here so every surface shows the same value.
+    /// </summary>
+    public const string ExtensionId = "gilicenlclaemgiijcjjejilikbooggj";
+
     public const string AgentPipeName = "eslee.download-router.agent.v1";
     public const string AppMutexName = "Local\\eslee.DownloadRouter.App";
     public const string AppActivationEventName = "Local\\eslee.DownloadRouter.App.Activate";
