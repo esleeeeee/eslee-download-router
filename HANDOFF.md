@@ -6,8 +6,8 @@
 
 - 저장소: `https://github.com/esleeeeee/eslee-download-router.git`
 - 기본 브랜치: `main`
-- 제품 버전: `1.1.1`
-- 최종 개발 PR: [#1](https://github.com/esleeeeee/eslee-download-router/pull/1)
+- 제품 버전: `1.1.2`
+- 최종 병합 PR: [#6](https://github.com/esleeeeee/eslee-download-router/pull/6)
 - .NET SDK: `10.0.302`
 - Node.js: 24 이상
 - npm: 11 이상
@@ -29,12 +29,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Configu
 ## 정식 정상 기준
 
 - Debug와 Release build 성공, 경고 0, 오류 0
-- .NET tests 81/81 이상
-- Extension tests 13/13 이상
+- .NET tests 151/151 이상
+- Extension tests 28/28 이상
 - npm audit high 이상 취약점 0건
 - Agent Named Pipe와 Native Host framed ping 성공
 - App, Agent와 Native Host win-x64 self-contained publish 성공
-- App, Agent, Native Host와 Installer 제품 버전 1.1.1 일치
+- App, Agent, Native Host와 Installer 제품 버전 1.1.2 일치
 - Per-Monitor V2, 공통 반응형 폭, 전역 테마와 독립 FolderSelectionWindow
 - Whale Automatic, SelectSubfolder, 취소, FIFO와 영구 `Skipped`
 - 기존 설치 위 업그레이드에서 DB, 규칙, 이력, Pending, 설정, 테마와 자동 시작 보존
@@ -44,7 +44,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Configu
 
 Release 설치본은 `%LOCALAPPDATA%\Programs\eslee\DownloadRouter\extension`에 Extension을 설치합니다. Whale의 `whale://extensions`에서 개발자 모드를 켜고 이 폴더를 압축 해제된 확장으로 로드합니다. Native Messaging 등록은 Installer가 처리하므로 사용자가 레지스트리를 직접 수정하지 않습니다.
 
-개발 clone에서는 `src\DownloadRouter.Extension\dist`를 로드합니다. 자세한 브라우저별 주소와 절차는 [docs/MANUAL_EXTENSION_INSTALL.md](docs/MANUAL_EXTENSION_INSTALL.md)를 따릅니다.
+개발 clone에서는 `src\DownloadRouter.Extension\dist`를 로드합니다. 어느 쪽이든 앱의 브라우저 연결 화면이 실행 위치를 기준으로 실제 폴더를 찾아 보여 주므로 경로를 직접 입력할 필요는 없습니다. 자세한 브라우저별 주소와 절차는 [docs/MANUAL_EXTENSION_INSTALL.md](docs/MANUAL_EXTENSION_INSTALL.md)를 따릅니다.
 
 ## PC별로 다시 지정할 항목
 
