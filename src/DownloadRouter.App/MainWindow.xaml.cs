@@ -177,7 +177,10 @@ public sealed partial class MainWindow : Window
 
     private async Task ShowDiagnosticsAsync()
     {
-        Prepare("진단 및 문제 해결", "민감 URL과 다운로드 파일을 포함하지 않는 로컬 진단 정보만 표시합니다.");
+        Prepare(
+            "진단 및 문제 해결",
+            "다운로드 주소와 파일 이름은 표시하지 않습니다. 다만 데이터 저장 위치에는 Windows 계정 이름이 들어가므로, "
+                + "이 화면을 캡처해 공유하기 전에 확인해 주세요.");
         var test = new Button { Content = "Agent 연결 테스트" };
         test.Click += async (_, _) =>
         {

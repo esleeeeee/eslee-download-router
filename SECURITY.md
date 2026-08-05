@@ -58,7 +58,9 @@ Extension 입력, Native Messaging stdin, Named Pipe 요청, 규칙 DB의 경로
 
 ### 로그를 첨부하기 전에 확인할 것
 
-공개 issue에 로그를 첨부하기 전에 다음을 직접 확인하고 필요한 부분을 지워 주세요.
+공개 issue에 로그나 진단 화면 캡처를 첨부하기 전에 다음을 직접 확인하고 필요한 부분을 지워 주세요.
+
+- 진단 화면의 `dataDirectory` 값 — Windows 계정 이름이 포함된 전체 경로입니다
 
 - `download-router.jsonl`의 `File move completed for ...` 줄에 남은 다운로드 파일 이름
 - `app-unhandled.log` 전체 — 경로, 파일 이름, 사용자 이름이 그대로 있을 수 있습니다
