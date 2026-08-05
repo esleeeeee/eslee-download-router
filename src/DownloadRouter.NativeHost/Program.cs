@@ -4,7 +4,7 @@ using System.Text.Json;
 using DownloadRouter.Core.Ipc;
 using DownloadRouter.Core.Models;
 
-const string allowedExtensionId = "gilicenlclaemgiijcjjejilikbooggj";
+const string allowedExtensionId = ProtocolConstants.ExtensionId;
 var cancellationToken = CancellationToken.None;
 
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))

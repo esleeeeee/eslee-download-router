@@ -107,8 +107,72 @@ public sealed partial class MainWindow : Window
             });
         }
 
-        AddMuted("설치 순서: 개발자 모드 켜기 → 압축 해제된 확장 로드 → src/DownloadRouter.Extension/dist 선택 → Native Host 등록 → 연결 테스트");
+        AddExtensionFolderGuidance();
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Shows the extension folder that actually exists on this machine. An installed build
+    /// points at its own folder; a source clone points at the development build output.
+    /// </summary>
+    private void AddExtensionFolderGuidance()
+    {
+        var location = ExtensionFolderLocator.Locate(AppContext.BaseDirectory);
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = "확장 연결 순서",
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = "1. 브라우저의 확장 관리 페이지를 엽니다.\n"
+                + "2. 개발자 모드를 켭니다.\n"
+                + "3. 압축 해제된 확장 로드를 선택합니다.\n"
+                + "4. 아래 폴더를 지정합니다.",
+            TextWrapping = TextWrapping.Wrap,
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = ExtensionFolderLocator.DescribeForUser(location),
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+        });
+
+        if (location.Exists && location.Path is string folder)
+        {
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            var copy = new Button { Content = "폴더 경로 복사" };
+            copy.Click += (_, _) =>
+            {
+                var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
+                package.SetText(folder);
+                Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
+            };
+            actions.Children.Add(copy);
+
+            var open = new Button { Content = "폴더 열기" };
+            open.Click += async (_, _) =>
+            {
+                try
+                {
+                    var storageFolder = await StorageFolder.GetFolderFromPathAsync(folder);
+                    _ = await Launcher.LaunchFolderAsync(storageFolder);
+                }
+                catch (Exception exception)
+                {
+                    await ShowMessageAsync("폴더를 열지 못했습니다: " + exception.Message);
+                }
+            };
+            actions.Children.Add(open);
+            panel.Children.Add(actions);
+        }
+
+        panel.Children.Add(CreateHelpText(
+            "확장을 불러온 뒤 표시된 ID가 "
+                + $"{ProtocolConstants.ExtensionId} 인지 확인하세요. "
+                + "프로그램을 업데이트한 뒤에는 같은 화면에서 확장을 새로 고치고 브라우저를 다시 시작해야 합니다."));
+        ContentPanel.Children.Add(CreateCard(panel));
     }
 
     private async Task ShowDiagnosticsAsync()
@@ -154,7 +218,7 @@ public sealed partial class MainWindow : Window
         AddCard("빌드", $"{version.BuildDescription} · {version.InformationalVersion}");
         AddCard("배포 형태", version.DistributionDescription);
         AddCard("개인정보", "서버 전송, 텔레메트리, 광고 SDK가 없습니다. 다운로드 처리에 필요한 최소 정보만 로컬에 저장합니다.");
-        AddCard("지원 범위", "Windows 11 x64 · Whale / Edge / Chrome 공식 지원 · Brave / Vivaldi / Opera 호환 지원 · Firefox 제외");
+        AddCard("지원 범위", BrowserSupportCatalog.SupportSummary);
         AddCard("프로토콜", $"Native Messaging ↔ 현재 사용자 Named Pipe v{ProtocolConstants.CurrentVersion} ↔ 단일 Agent");
 
         var openData = new Button
