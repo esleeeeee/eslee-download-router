@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using DownloadRouter.Core.Ipc;
 using DownloadRouter.Core.Models;
 using DownloadRouter.Core.Settings;
 using Microsoft.UI.Windowing;
@@ -12,6 +13,7 @@ public sealed partial class MainWindow
     private AppPreferences preferences;
     private AppWindow? appWindow;
     private TrayIconHost? trayIcon;
+    private TrayFolderLink? trayFolderLink;
     private bool exitRequested;
     private Action? exitCallback;
 
@@ -29,8 +31,30 @@ public sealed partial class MainWindow
             () => NavigateFromTray("pending"),
             () => NavigateFromTray("settings"),
             ExitFromTray);
+        trayFolderLink = new TrayFolderLink(
+            TrayFolderLink.BuildDefaultPipeName(),
+            "eslee.downloadrouter",
+            "eslee Download Router",
+            Environment.ProcessId,
+            visible => RunOnUiAsync(() =>
+            {
+                trayIcon?.SetIconVisible(visible);
+                return true;
+            }),
+            () => RunOnUiAsync(() =>
+            {
+                ShowFromTray();
+                return true;
+            }),
+            () => RunOnUiAsync(BuildTrayFolderMenuItems),
+            actionId => RunOnUiAsync(() => TryStartTrayFolderMenuAction(actionId)),
+            (eventName, message) => WriteAppDiagnostic($"tray-host {eventName}: {message}"),
+            (eventName, message) => WriteAppDiagnostic($"tray-host error {eventName}: {message}"));
+        trayFolderLink.Start();
         Closed += (_, _) =>
         {
+            trayFolderLink?.Dispose();
+            trayFolderLink = null;
             trayIcon?.Dispose();
             exitCallback?.Invoke();
         };
@@ -39,6 +63,58 @@ public sealed partial class MainWindow
         {
             ShowFromTray();
         }
+    }
+
+    private IReadOnlyList<TrayFolderMenuItem> BuildTrayFolderMenuItems() =>
+    [
+        TrayFolderMenuItem.Action("open-app", "eslee Download Router 열기"),
+        TrayFolderMenuItem.Action("open-pending", "저장 위치 선택 대기 열기"),
+        TrayFolderMenuItem.Action("open-settings", "일반 설정"),
+        TrayFolderMenuItem.Separator,
+        TrayFolderMenuItem.Action("exit-app", "종료"),
+    ];
+
+    private bool TryStartTrayFolderMenuAction(string actionId)
+    {
+        switch (actionId)
+        {
+            case "open-app":
+                ShowFromTray();
+                return true;
+            case "open-pending":
+                NavigateFromTray("pending");
+                return true;
+            case "open-settings":
+                NavigateFromTray("settings");
+                return true;
+            case "exit-app":
+                _ = DispatcherQueue.TryEnqueue(ExitFromExternalRequest);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private Task<T> RunOnUiAsync<T>(Func<T> callback)
+    {
+        var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var queued = DispatcherQueue.TryEnqueue(() =>
+        {
+            try
+            {
+                completion.TrySetResult(callback());
+            }
+            catch (Exception exception)
+            {
+                completion.TrySetException(exception);
+            }
+        });
+        if (!queued)
+        {
+            completion.TrySetCanceled();
+        }
+
+        return completion.Task;
     }
 
     public void ShowFromTray()
