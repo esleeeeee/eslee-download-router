@@ -40,6 +40,7 @@ public sealed class TrayIconHost : IDisposable
     private nint windowHandle;
     private nint menuHandle;
     private nint trayIconHandle;
+    private bool iconVisible;
     private bool disposed;
 
     public TrayIconHost(
@@ -61,11 +62,44 @@ public sealed class TrayIconHost : IDisposable
 
     public void ShowSelectionNotification(int pendingCount)
     {
+        if (!iconVisible)
+        {
+            // Tray Folder Hosted 모드로 아이콘이 숨겨진 동안에는 풍선을 표시할 수 없습니다.
+            return;
+        }
+
         var data = CreateIconData(NifInfo);
         data.InfoTitle = "저장 위치 선택 대기";
         data.Info = $"선택을 기다리는 다운로드가 {pendingCount}개 있습니다.";
         data.InfoFlags = 0x00000001;
         _ = ShellNotifyIcon(NimModify, ref data);
+    }
+
+    /// <summary>
+    /// Tray Folder Hosted 모드 전환용 아이콘 표시 제어입니다. 아이콘만 추가/제거되며
+    /// 메시지 창과 다운로드 라우팅 동작은 그대로 유지됩니다. UI 스레드에서 호출하세요.
+    /// </summary>
+    public void SetIconVisible(bool visible)
+    {
+        if (disposed || visible == iconVisible)
+        {
+            return;
+        }
+
+        if (visible)
+        {
+            var data = CreateIconData(NifMessage | NifIcon | NifTip);
+            data.CallbackMessage = TrayMessage;
+            data.Icon = trayIconHandle;
+            data.Tip = "eslee Download Router";
+            iconVisible = ShellNotifyIcon(NimAdd, ref data);
+        }
+        else
+        {
+            var data = CreateIconData(0);
+            _ = ShellNotifyIcon(NimDelete, ref data);
+            iconVisible = false;
+        }
     }
 
     public void Dispose()
@@ -169,6 +203,8 @@ public sealed class TrayIconHost : IDisposable
             trayIconHandle = 0;
             throw new InvalidOperationException("The system tray icon could not be created.");
         }
+
+        iconVisible = true;
     }
 
     private NotifyIconData CreateIconData(uint flags)
