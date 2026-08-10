@@ -1,21 +1,21 @@
 # 프로젝트 상태
 
-기준일: 2026-08-05 (Asia/Seoul)
+기준일: 2026-08-10 (Asia/Seoul)
 
 ## 요약
 
-- 현재 단계: 1.1.2 소형 패치 개발 중. 브라우저 연결 화면의 확장 폴더 안내, 로그 문서와 실제 동작의 불일치, 지원 브라우저 문구 중복을 정리했고 로컬 검증까지 마쳤으나 아직 Release로 게시하지 않았습니다.
-- 직전 정식 버전: 1.1.1 (브라우저 시작 시 과거 다운로드 재등록 차단, 확장 빌드 핸드셰이크)
+- 현재 단계: 1.1.4 배포 준비. 정보 화면의 현재 버전 표시 옆에 GitHub 최신 정식 Release와 비교하는 업데이트 확인을 추가했습니다.
+- 직전 정식 버전: 1.1.3 (Tray Folder 호스트 연동)
 - 공식 저장소: https://github.com/esleeeeee/eslee-download-router
 - 기본 브랜치: `main`
-- 최종 병합 PR: [#6 Rewrite README as a user guide](https://github.com/esleeeeee/eslee-download-router/pull/6)
+- 최종 병합 PR: [#7 Fix extension folder guidance, browser support wording, and log disclosure](https://github.com/esleeeeee/eslee-download-router/pull/7). v1.1.3과 v1.1.4는 사용자 지시로 main에 직접 커밋했습니다.
 - 최신 정식 Release: [GitHub Releases](https://github.com/esleeeeee/eslee-download-router/releases/latest)
 - 지원 운영체제: Windows 11 x64
 - 격리 환경 수동 검증 브라우저: Naver Whale
 
 ## 정식 버전 구성
 
-- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.1.2` 제품 버전을 사용합니다.
+- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.1.4` 제품 버전을 사용합니다.
 - assembly informational version에는 빌드한 Git commit metadata가 포함됩니다.
 - Extension manifest 버전은 기존 정책에 따라 제품 assembly와 독립 관리합니다.
 - 고정 Extension ID `gilicenlclaemgiijcjjejilikbooggj`와 Native Messaging identity를 유지합니다.
@@ -49,6 +49,8 @@
 - 브라우저 연결 화면이 실행 중인 프로그램 위치에서 실제 확장 폴더를 찾아 안내하고 경로 복사와 폴더 열기를 제공
 - 지원 브라우저 목록과 사용자 문구를 `BrowserSupportCatalog` 한 곳에서 생성하고 등록 스크립트와의 일치를 테스트로 고정
 - 로그 파일별 기록 범위, 치환 한계와 issue 첨부 전 확인 항목을 `SECURITY.md`에 실제 동작대로 문서화
+- Tray Folder 호스트 연동: hosted 모드에서 트레이 아이콘만 Tray Folder로 이동하고 다운로드 감시와 분류는 그대로 동작
+- 정보 화면의 업데이트 확인: GitHub 최신 정식 Release(draft/prerelease 제외)와 비교, 하루 1회 자동 확인, 수동 확인과 Release 페이지 열기, 실패해도 다운로드 기능에 영향 없음. 열리는 URL은 이 저장소 경로로 고정 검증
 
 ## 최종 검증 기준
 
@@ -56,12 +58,12 @@
 |---|---|
 | .NET Debug build | 성공, 경고 0, 오류 0 |
 | .NET Release build | 성공, 경고 0, 오류 0 |
-| .NET tests | 151/151 통과, Core 99, Infrastructure 10, Integration 42 |
+| .NET tests | 192/192 통과, Core 140, Infrastructure 10, Integration 42 |
 | Extension | ESLint, TypeScript, dist build 성공, Node tests 28/28 |
 | npm audit | 취약점 0건 |
 | Release publish | App, Agent, Native Host win-x64 self-contained 성공 |
 | 릴리스 개인정보 검사 | `verify-release-privacy.ps1` 통과 |
-| Installer | Inno Setup compile과 기존 1.1.1 설치 위 1.1.2 업그레이드 성공 |
+| Installer | Inno Setup compile과 기존 1.1.3 설치 위 1.1.4 업그레이드 성공 |
 | 사용자 데이터 | SQLite, 규칙, 이력, Pending, 설정과 테마 보존 |
 | 자동 시작 | 기존 HKCU Run 값 보존, 자동 시작 경로 실행 성공 |
 | Native Messaging | 등록 보존, 설치 Native Host와 Agent ping 성공 |
