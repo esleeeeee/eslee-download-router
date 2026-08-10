@@ -218,9 +218,13 @@ public sealed partial class MainWindow : Window
         var version = ProductVersionInfo.Read(typeof(App).Assembly, AppContext.BaseDirectory);
         Prepare(version.ProductName, "Chromium 다운로드를 사이트 규칙에 따라 안전하게 정리하는 로컬 Windows 프로그램입니다.");
         AddCard("현재 버전", version.DisplayVersion);
+        AddUpdateCard(version);
         AddCard("빌드", $"{version.BuildDescription} · {version.InformationalVersion}");
         AddCard("배포 형태", version.DistributionDescription);
-        AddCard("개인정보", "서버 전송, 텔레메트리, 광고 SDK가 없습니다. 다운로드 처리에 필요한 최소 정보만 로컬에 저장합니다.");
+        AddCard(
+            "개인정보",
+            "텔레메트리, 광고 SDK, 계정 가입이 없습니다. 다운로드 처리에 필요한 최소 정보만 로컬에 저장합니다. "
+                + "네트워크 요청은 업데이트 확인 하나뿐이며, GitHub의 공개 배포 정보만 읽고 개인 정보를 보내지 않습니다.");
         AddCard("지원 범위", BrowserSupportCatalog.SupportSummary);
         AddCard("프로토콜", $"Native Messaging ↔ 현재 사용자 Named Pipe v{ProtocolConstants.CurrentVersion} ↔ 단일 Agent");
 

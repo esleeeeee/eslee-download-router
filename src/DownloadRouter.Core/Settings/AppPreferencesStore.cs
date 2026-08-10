@@ -6,7 +6,10 @@ namespace DownloadRouter.Core.Settings;
 
 public sealed record AppPreferences(
     WindowCloseBehavior CloseBehavior = WindowCloseBehavior.MinimizeToTray,
-    string Theme = "System")
+    string Theme = "System",
+    string? LastUpdateCheckAt = null,
+    string? LastKnownLatestVersion = null,
+    string? LastKnownReleaseUrl = null)
 {
     public AppThemePreference ThemePreference => AppThemePolicy.Parse(Theme);
 }
@@ -48,19 +51,40 @@ public sealed class AppPreferencesStore
 
     public AppPreferences Load()
     {
+        // Each field is read on its own so one wrong-typed value (the file is shared with
+        // the agent and user-editable) cannot silently reset the others to defaults.
         try
         {
-            var loaded = File.Exists(configPath)
-                ? JsonSerializer.Deserialize<AppPreferences>(File.ReadAllText(configPath), ProtocolJson.Options)
-                    ?? new AppPreferences()
-                : new AppPreferences();
-            return loaded with { Theme = AppThemePolicy.ToStorageValue(loaded.ThemePreference) };
+            if (File.Exists(configPath)
+                && JsonNode.Parse(File.ReadAllText(configPath)) is JsonObject document)
+            {
+                var loaded = new AppPreferences(
+                    CloseBehavior: ReadCloseBehavior(document),
+                    Theme: ReadString(document, "theme") ?? "System",
+                    LastUpdateCheckAt: ReadString(document, "lastUpdateCheckAt"),
+                    LastKnownLatestVersion: ReadString(document, "lastKnownLatestVersion"),
+                    LastKnownReleaseUrl: ReadString(document, "lastKnownReleaseUrl"));
+                return loaded with { Theme = AppThemePolicy.ToStorageValue(loaded.ThemePreference) };
+            }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
-            return new AppPreferences();
         }
+
+        return new AppPreferences();
     }
+
+    private static string? ReadString(JsonObject document, string key)
+        => document[key] is JsonValue value && value.TryGetValue<string>(out var text)
+            ? text
+            : null;
+
+    private static WindowCloseBehavior ReadCloseBehavior(JsonObject document)
+        => document["closeBehavior"] is JsonValue value
+            && value.TryGetValue<int>(out var stored)
+            && Enum.IsDefined((WindowCloseBehavior)stored)
+                ? (WindowCloseBehavior)stored
+                : WindowCloseBehavior.MinimizeToTray;
 
     public void Save(AppPreferences preferences)
     {
@@ -85,8 +109,23 @@ public sealed class AppPreferencesStore
 
         document["closeBehavior"] = (int)normalized.CloseBehavior;
         document["theme"] = normalized.Theme;
+        WriteOrRemove(document, "lastUpdateCheckAt", normalized.LastUpdateCheckAt);
+        WriteOrRemove(document, "lastKnownLatestVersion", normalized.LastKnownLatestVersion);
+        WriteOrRemove(document, "lastKnownReleaseUrl", normalized.LastKnownReleaseUrl);
         var temporary = configPath + ".tmp";
         File.WriteAllText(temporary, document.ToJsonString(ProtocolJson.Options));
         File.Move(temporary, configPath, overwrite: true);
+    }
+
+    private static void WriteOrRemove(JsonObject document, string key, string? value)
+    {
+        if (value is null)
+        {
+            document.Remove(key);
+        }
+        else
+        {
+            document[key] = value;
+        }
     }
 }

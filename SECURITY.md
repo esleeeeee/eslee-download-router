@@ -17,7 +17,8 @@ Extension 입력, Native Messaging stdin, Named Pipe 요청, 규칙 DB의 경로
 - 교차 볼륨 복사 검증 성공 전 원본 삭제 금지
 - URL 저장 시 사용자 정보, query, fragment 제거
 - Agent JSONL 로그에서 http/https URL, 드라이브 또는 UNC로 시작하는 절대 경로, 토큰 표식 치환 (아래 「로그에 기록되는 정보」 참고)
-- 서버 전송, 텔레메트리, 광고 SDK, 전체 방문 기록 권한 없음
+- 텔레메트리, 광고 SDK, 전체 방문 기록 권한 없음
+- 네트워크 요청은 업데이트 확인 하나뿐: 앱이 GitHub의 공개 최신 Release 정보(`api.github.com`)를 HTTPS로 읽기만 하며, 사용자·다운로드·규칙에 관한 어떤 값도 보내지 않음. 자동 확인은 하루 1회로 제한되고 실패해도 다운로드 감시와 분류에는 영향이 없음. Agent와 Native Host, 확장은 네트워크 요청을 하지 않음
 
 ## 데이터 보존
 

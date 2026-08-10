@@ -59,6 +59,7 @@ public sealed partial class MainWindow
             exitCallback?.Invoke();
         };
         _ = EnsureAgentForHostAsync();
+        StartUpdateChecks();
         if (!background)
         {
             ShowFromTray();
