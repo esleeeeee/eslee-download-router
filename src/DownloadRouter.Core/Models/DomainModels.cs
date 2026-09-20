@@ -147,7 +147,9 @@ public sealed record DownloadJob(
     DateTimeOffset? CompletedAt,
     DateTimeOffset? LastBrowserEventAt = null,
     bool IsBrowserRecordStale = false,
-    SelectionPromptState SelectionPromptState = SelectionPromptState.NeverShown)
+    SelectionPromptState SelectionPromptState = SelectionPromptState.NeverShown,
+    string? SelectedDestinationFolder = null,
+    string? SelectedFileName = null)
 {
     public DownloadJobStatus Status
         => BrowserState switch
@@ -233,7 +235,9 @@ public sealed record DownloadMetadataChangedPayload(
 
 public sealed record SelectionCompletedPayload(
     IReadOnlyList<Guid> JobIds,
-    string RelativeFolder);
+    string RelativeFolder,
+    string? DestinationFolder = null,
+    string? FileName = null);
 
 public sealed record SelectionSkippedPayload(Guid JobId);
 

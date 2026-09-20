@@ -32,6 +32,8 @@ public sealed class FolderTreePicker : UserControl
     private readonly Dictionary<TreeViewNode, FolderTreeEntry> entries = [];
     private readonly HashSet<TreeViewNode> loadedNodes = [];
     private string storageRoot = string.Empty;
+    private readonly Button parentButton = new() { Content = "상위 폴더로", Visibility = Visibility.Collapsed };
+    public bool AllowParentNavigation { get; set; }
 
     public event EventHandler? SelectionChanged;
 
@@ -53,6 +55,17 @@ public sealed class FolderTreePicker : UserControl
             HorizontalAlignment = HorizontalAlignment.Left,
         };
         refresh.Click += async (_, _) => await RefreshSelectedAsync();
+        parentButton.Click += async (_, _) =>
+        {
+            var parent = Directory.GetParent(SelectedFullPath);
+            if (parent is null) return;
+            try { await InitializeAsync(SelectionDestination.ValidateFolder(parent.FullName)); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                nodeError.Text = "상위 폴더에 접근할 수 없습니다.";
+                nodeError.Visibility = Visibility.Visible;
+            }
+        };
         tree.Expanding += Tree_Expanding;
         tree.SelectionChanged += Tree_SelectionChanged;
 
@@ -74,8 +87,11 @@ public sealed class FolderTreePicker : UserControl
         panel.Children.Add(nodeError);
         Grid.SetRow(tree, 3);
         panel.Children.Add(tree);
-        Grid.SetRow(refresh, 4);
-        panel.Children.Add(refresh);
+        var navigation = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        navigation.Children.Add(parentButton);
+        navigation.Children.Add(refresh);
+        Grid.SetRow(navigation, 4);
+        panel.Children.Add(navigation);
         Content = panel;
     }
 
@@ -100,6 +116,8 @@ public sealed class FolderTreePicker : UserControl
         CancellationToken cancellationToken = default)
     {
         storageRoot = Path.GetFullPath(root);
+        parentButton.Visibility = AllowParentNavigation ? Visibility.Visible : Visibility.Collapsed;
+        parentButton.IsEnabled = Directory.GetParent(storageRoot) is not null;
         entries.Clear();
         loadedNodes.Clear();
         tree.RootNodes.Clear();
@@ -178,6 +196,7 @@ public sealed class FolderTreePicker : UserControl
         selectedPath.Text = entry.IsAccessible
             ? $"선택 위치: {entry.FullPath}"
             : entry.ErrorMessage ?? "이 폴더에 접근할 수 없습니다.";
+        parentButton.IsEnabled = Directory.GetParent(entry.FullPath) is not null;
         SelectionChanged?.Invoke(this, EventArgs.Empty);
     }
 

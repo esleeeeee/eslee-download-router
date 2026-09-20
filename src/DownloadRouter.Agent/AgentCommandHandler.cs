@@ -516,6 +516,12 @@ public sealed class AgentCommandHandler(
         }
 
         var results = new List<object>();
+        var destinationFolder = payload.DestinationFolder is null
+            ? null : SelectionDestination.ValidateFolder(payload.DestinationFolder);
+        var selectedFileName = payload.FileName is null
+            ? null : SelectionDestination.ValidateFileName(payload.FileName);
+        if (selectedFileName is not null && payload.JobIds.Count != 1)
+            return AgentResponse.Error(request.RequestId, "selection.rename-single", "파일 이름은 한 파일씩 변경하세요.");
         foreach (var jobId in payload.JobIds.Distinct())
         {
             var job = await repository.GetJobAsync(jobId, cancellationToken).ConfigureAwait(false);
@@ -527,12 +533,15 @@ public sealed class AgentCommandHandler(
             var rule = await repository.GetRuleAsync(job.RuleId, cancellationToken).ConfigureAwait(false)
                 ?? throw new InvalidOperationException("The matched rule no longer exists.");
             var root = pathTokenResolver.Resolve(rule.StorageRoot);
-            _ = boundaryValidator.ValidateRelativeFolder(root, payload.RelativeFolder);
+            if (destinationFolder is null)
+                _ = boundaryValidator.ValidateRelativeFolder(root, payload.RelativeFolder);
 
             stateMachine.EnsureCanTransition(job.RoutingState, RoutingState.SelectionReady);
             job = job with
             {
                 SelectedRelativeFolder = payload.RelativeFolder,
+                SelectedDestinationFolder = destinationFolder,
+                SelectedFileName = selectedFileName,
                 RoutingState = RoutingState.SelectionReady,
                 SelectionPromptState = SelectionPromptState.Resolved,
                 ErrorCode = null,
@@ -748,6 +757,8 @@ public sealed class AgentCommandHandler(
             {
                 OriginalPath = job.FinalPath,
                 SelectedRelativeFolder = payload.RelativeFolder,
+                SelectedDestinationFolder = null,
+                SelectedFileName = null,
                 ErrorCode = null,
                 ErrorMessage = null,
             };
@@ -764,6 +775,8 @@ public sealed class AgentCommandHandler(
         job = job with
         {
             SelectedRelativeFolder = payload.RelativeFolder,
+            SelectedDestinationFolder = null,
+            SelectedFileName = null,
             SelectionPromptState = SelectionPromptState.Resolved,
             ErrorCode = null,
             ErrorMessage = null,
@@ -877,13 +890,17 @@ public sealed class AgentCommandHandler(
         job = job with { RoutingState = RoutingState.Moving };
         await repository.UpdateJobAsync(job, "file.move-started", cancellationToken).ConfigureAwait(false);
 
-        var root = pathTokenResolver.Resolve(rule.StorageRoot);
+        var root = job.SelectedDestinationFolder is null
+            ? pathTokenResolver.Resolve(rule.StorageRoot)
+            : job.SelectedDestinationFolder;
         var result = await fileMoveService.MoveAsync(
             job.OriginalPath,
             root,
-            job.SelectedRelativeFolder,
+            job.SelectedDestinationFolder is null ? job.SelectedRelativeFolder : string.Empty,
             browserReportedComplete: true,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            selectedFileName: job.SelectedFileName,
+            validateSelectedRoot: job.SelectedDestinationFolder is not null).ConfigureAwait(false);
         var next = result.Success
             ? RoutingState.Completed
             : result.CanRetry ? RoutingState.RetryPending : RoutingState.Failed;

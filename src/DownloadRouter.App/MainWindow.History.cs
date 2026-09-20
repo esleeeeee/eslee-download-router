@@ -165,13 +165,14 @@ public sealed partial class MainWindow
                 selectedRelativeFolder: null,
                 $"{rule.Name} 규칙의 대기 파일 {jobs.Count}개에 같은 하위 폴더를 적용합니다.",
                 allowLater: false,
-                allowSkip: false);
+                allowSkip: false,
+                allowParentNavigation: true);
             if (result.Action != FolderSelectionAction.Apply)
             {
                 return;
             }
 
-            await ApplySelectionAsync(jobs.Select(static job => job.Id).ToArray(), result.RelativeFolder);
+            await ApplySelectionAsync(jobs.Select(static job => job.Id).ToArray(), result.RelativeFolder, result.DestinationFolder);
         };
         panel.Children.Add(applyGroup);
 
@@ -230,7 +231,7 @@ public sealed partial class MainWindow
 
         panel.Children.Add(new TextBlock
         {
-            Text = $"출처 호스트: {GetSourceHost(job)}\n브라우저: {job.Browser}\n다운로드 시작: {job.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}\n현재 선택 폴더: {DisplayFolder(job.SelectedRelativeFolder)}",
+            Text = $"출처 호스트: {GetSourceHost(job)}\n브라우저: {job.Browser}\n다운로드 시작: {job.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}\n현재 선택 폴더: {job.SelectedDestinationFolder ?? DisplayFolder(job.SelectedRelativeFolder)}",
             TextWrapping = TextWrapping.Wrap,
         });
 
@@ -242,10 +243,12 @@ public sealed partial class MainWindow
                 job.SelectedRelativeFolder,
                 $"파일: {DownloadPresentation.DisplayFileName(job)}\n현재 선택: {DisplayFolder(job.SelectedRelativeFolder)}",
                 allowLater: true,
-                allowSkip: true);
+                allowSkip: true,
+                allowParentNavigation: true,
+                fileName: DownloadPresentation.DisplayFileName(job));
             if (result.Action == FolderSelectionAction.Apply)
             {
-                await ApplySelectionAsync([job.Id], result.RelativeFolder);
+                await ApplySelectionAsync([job.Id], result.RelativeFolder, result.DestinationFolder, result.FileName);
             }
             else if (result.Action == FolderSelectionAction.Skip)
             {
@@ -335,10 +338,11 @@ public sealed partial class MainWindow
                     selectedRelativeFolder: null,
                     $"{rule.Name} 규칙의 선택한 파일 {selectedVisible.Length}개에 같은 하위 폴더를 적용합니다.",
                     allowLater: false,
-                    allowSkip: false);
+                    allowSkip: false,
+                    allowParentNavigation: true);
                 if (result.Action == FolderSelectionAction.Apply)
                 {
-                    await ApplySelectionAsync(selectedVisible, result.RelativeFolder);
+                    await ApplySelectionAsync(selectedVisible, result.RelativeFolder, result.DestinationFolder);
                 }
             };
             panel.Children.Add(applySelected);
@@ -399,12 +403,13 @@ public sealed partial class MainWindow
         return CreateCard(panel);
     }
 
-    private async Task ApplySelectionAsync(IReadOnlyList<Guid> jobIds, string displayedFolder)
+    private async Task ApplySelectionAsync(IReadOnlyList<Guid> jobIds, string displayedFolder,
+        string? destinationFolder = null, string? fileName = null)
     {
         var relativeFolder = displayedFolder == "." ? string.Empty : displayedFolder;
         var response = await agent.SendAsync(
             "selection.complete",
-            new SelectionCompletedPayload(jobIds, relativeFolder));
+            new SelectionCompletedPayload(jobIds, relativeFolder, destinationFolder, fileName));
         if (!response.Success)
         {
             await ShowMessageAsync(response.Message ?? "선택 적용에 실패했습니다.");
@@ -686,7 +691,7 @@ public sealed partial class MainWindow
 
     private static string CreateHistorySnapshot(IEnumerable<DownloadJob> jobs)
         => string.Join('|', jobs.Select(static job =>
-            $"{job.Id:N}:{job.CurrentFileName}:{job.BrowserState}:{job.RoutingState}:{job.SelectionPromptState}:{job.SelectedRelativeFolder}:{job.FinalPath}:{job.CompletedAt:O}:{job.ErrorCode}"));
+            $"{job.Id:N}:{job.CurrentFileName}:{job.BrowserState}:{job.RoutingState}:{job.SelectionPromptState}:{job.SelectedRelativeFolder}:{job.SelectedDestinationFolder}:{job.SelectedFileName}:{job.FinalPath}:{job.CompletedAt:O}:{job.ErrorCode}"));
 
     private static string DescribeStatus(DownloadJob job)
         => job.BrowserState switch

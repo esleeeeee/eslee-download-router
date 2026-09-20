@@ -6,7 +6,7 @@ namespace DownloadRouter.Infrastructure.Storage;
 
 public sealed class DownloadRouterRepository(AppPaths paths)
 {
-    private const int CurrentSchemaVersion = 5;
+    private const int CurrentSchemaVersion = 6;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -214,13 +214,13 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 InitiatingPageUrl, InitialUrl, FinalUrl, ReferrerUrl, SanitizedSource,
                 RuleId, OriginalPath, FinalPath, SelectedRelativeFolder, Status,
                 BrowserState, RoutingState, ErrorCode, ErrorMessage, CreatedAt, CompletedAt,
-                LastBrowserEventAt, IsBrowserRecordStale, SelectionPromptState)
+                LastBrowserEventAt, IsBrowserRecordStale, SelectionPromptState, SelectedDestinationFolder, SelectedFileName)
             VALUES(
                 $id, $browser, $browserDownloadId, $originalFileName, $currentFileName,
                 $initiatingPageUrl, $initialUrl, $finalUrl, $referrerUrl, $sanitizedSource,
                 $ruleId, $originalPath, $finalPath, $selectedRelativeFolder, $status,
                 $browserState, $routingState, $errorCode, $errorMessage, $createdAt, $completedAt,
-                $lastBrowserEventAt, $isBrowserRecordStale, $selectionPromptState);
+                $lastBrowserEventAt, $isBrowserRecordStale, $selectionPromptState, $selectedDestinationFolder, $selectedFileName);
             """;
         AddJobParameters(command, job);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -302,7 +302,9 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 CompletedAt = $completedAt,
                 LastBrowserEventAt = $lastBrowserEventAt,
                 IsBrowserRecordStale = $isBrowserRecordStale,
-                SelectionPromptState = $selectionPromptState
+                SelectionPromptState = $selectionPromptState,
+                SelectedDestinationFolder = $selectedDestinationFolder,
+                SelectedFileName = $selectedFileName
             WHERE Id = $id;
             """;
         AddJobParameters(command, job);
@@ -481,7 +483,7 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                InitiatingPageUrl, InitialUrl, FinalUrl, ReferrerUrl, SanitizedSource,
                RuleId, OriginalPath, FinalPath, SelectedRelativeFolder, Status,
                BrowserState, RoutingState, ErrorCode, ErrorMessage, CreatedAt, CompletedAt,
-               LastBrowserEventAt, IsBrowserRecordStale, SelectionPromptState
+               LastBrowserEventAt, IsBrowserRecordStale, SelectionPromptState, SelectedDestinationFolder, SelectedFileName
         FROM DownloadJobs
         """;
 
@@ -641,7 +643,17 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             cancellationToken,
             transaction).ConfigureAwait(false);
 
-        if (CurrentSchemaVersion != 5)
+        foreach (var column in new[] { "SelectedDestinationFolder", "SelectedFileName" })
+        {
+            if (!columns.Contains(column))
+                await ExecuteAsync(connection, $"ALTER TABLE DownloadJobs ADD COLUMN {column} TEXT NULL;",
+                    cancellationToken, transaction).ConfigureAwait(false);
+        }
+        await ExecuteAsync(connection,
+            "INSERT OR IGNORE INTO MigrationHistory(Version, AppliedAt) VALUES (6, CURRENT_TIMESTAMP);",
+            cancellationToken, transaction).ConfigureAwait(false);
+
+        if (CurrentSchemaVersion != 6)
         {
             throw new InvalidOperationException("Repository migration version is inconsistent.");
         }
@@ -723,7 +735,9 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             reader.GetBoolean(22),
             Enum.TryParse<SelectionPromptState>(reader.GetString(23), out var promptState)
                 ? promptState
-                : SelectionPromptState.NeverShown);
+                : SelectionPromptState.NeverShown,
+            GetNullableString(reader, 24),
+            GetNullableString(reader, 25));
 
     private static string? GetNullableString(SqliteDataReader reader, int ordinal)
         => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
@@ -760,6 +774,8 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         command.Parameters.AddWithValue("$originalPath", Db(job.OriginalPath));
         command.Parameters.AddWithValue("$finalPath", Db(job.FinalPath));
         command.Parameters.AddWithValue("$selectedRelativeFolder", Db(job.SelectedRelativeFolder));
+        command.Parameters.AddWithValue("$selectedDestinationFolder", Db(job.SelectedDestinationFolder));
+        command.Parameters.AddWithValue("$selectedFileName", Db(job.SelectedFileName));
         command.Parameters.AddWithValue("$status", job.Status.ToString());
         command.Parameters.AddWithValue("$browserState", job.BrowserState.ToString());
         command.Parameters.AddWithValue("$routingState", job.RoutingState.ToString());
