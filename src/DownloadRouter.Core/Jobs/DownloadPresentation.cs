@@ -7,7 +7,8 @@ public static class DownloadPresentation
     public const string PendingFileName = "파일 이름 확인 중…";
 
     public static string DisplayFileName(DownloadJob job)
-        => TrustedFileName(job.CurrentFileName) ?? PendingFileName;
+        => (job.RoutingState == RoutingState.Completed ? Path.GetFileName(job.FinalPath) : null)
+            ?? job.SelectedFileName ?? TrustedFileName(job.CurrentFileName) ?? PendingFileName;
 
     public static string? TrustedFileName(string? value)
     {

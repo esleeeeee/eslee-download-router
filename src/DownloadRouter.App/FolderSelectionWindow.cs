@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using DownloadRouter.Core.Jobs;
+using DownloadRouter.Core.Paths;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -19,7 +20,9 @@ public enum FolderSelectionAction
 
 public sealed record FolderSelectionResult(
     FolderSelectionAction Action,
-    string RelativeFolder);
+    string RelativeFolder,
+    string? DestinationFolder = null,
+    string? FileName = null);
 
 public sealed class FolderSelectionWindow(
     ThemeManager themeManager,
@@ -30,6 +33,19 @@ public sealed class FolderSelectionWindow(
     private const int DefaultHeightDip = 760;
     private readonly Window window = new();
     private readonly FolderTreePicker picker = new();
+    private readonly TextBox fileNameInput = new() { Header = "파일 이름 (확장자 포함)", MaxLength = 255 };
+    private readonly TextBlock fileNameError = new() { TextWrapping = TextWrapping.Wrap };
+    private string? defaultFileName;
+    private bool fileNameEdited;
+
+    public void UpdateFileName(string name)
+    {
+        if (!fileNameEdited)
+        {
+            defaultFileName = name;
+            fileNameInput.Text = name;
+        }
+    }
     private readonly TextBlock details = new()
     {
         TextWrapping = TextWrapping.Wrap,
@@ -52,8 +68,16 @@ public sealed class FolderSelectionWindow(
         bool allowLater,
         bool allowSkip,
         CancellationToken cancellationToken = default,
-        bool allowSkipAll = false)
+        bool allowSkipAll = false,
+        bool allowParentNavigation = false,
+        string? fileName = null)
     {
+        picker.AllowParentNavigation = allowParentNavigation;
+        defaultFileName = fileName;
+        fileNameInput.Text = fileName ?? string.Empty;
+        fileNameInput.Visibility = fileName is null ? Visibility.Collapsed : Visibility.Visible;
+        fileNameInput.TextChanged += (_, _) =>
+            fileNameEdited = !string.Equals(fileNameInput.Text, defaultFileName, StringComparison.Ordinal);
         window.Title = "다운로드 저장 위치 선택";
         window.Content = CreateContent(description, allowLater, allowSkip, allowSkipAll);
         themeManager.RegisterWindow(window);
@@ -95,15 +119,19 @@ public sealed class FolderSelectionWindow(
         var detailsScroll = new ScrollViewer
         {
             Content = details,
-            MaxHeight = 150,
+            MaxHeight = 100,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
         };
-        root.Children.Add(detailsScroll);
+        var header = new StackPanel { Spacing = 8 };
+        header.Children.Add(fileNameInput);
+        header.Children.Add(fileNameError);
+        header.Children.Add(detailsScroll);
+        root.Children.Add(header);
 
         picker.HorizontalAlignment = HorizontalAlignment.Stretch;
         picker.VerticalAlignment = VerticalAlignment.Stretch;
-        picker.MinHeight = 240;
+        picker.MinHeight = 80;
         Grid.SetRow(picker, 1);
         root.Children.Add(picker);
 
@@ -179,6 +207,11 @@ public sealed class FolderSelectionWindow(
 
     private void Complete(FolderSelectionAction action)
     {
+        if (action == FolderSelectionAction.Apply && fileNameEdited)
+        {
+            try { SelectionDestination.ValidateFileName(fileNameInput.Text); }
+            catch (ArgumentException exception) { fileNameError.Text = exception.Message; return; }
+        }
         if (CompleteWithoutClosing(action))
         {
             window.Close();
@@ -196,7 +229,9 @@ public sealed class FolderSelectionWindow(
         foregroundRetryTimer?.Stop();
         foregroundRetryTimer = null;
         diagnosticWriter?.Invoke($"selection-window completion action={action}");
-        completion.TrySetResult(new FolderSelectionResult(action, picker.SelectedRelativeFolder));
+        completion.TrySetResult(new FolderSelectionResult(action, picker.SelectedRelativeFolder,
+            picker.AllowParentNavigation ? picker.SelectedFullPath : null,
+            fileNameEdited ? fileNameInput.Text : null));
         return true;
     }
 
