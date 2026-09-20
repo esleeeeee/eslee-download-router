@@ -4,6 +4,14 @@
 
 ## 자동 검증
 
+### 1.2.0 검증
+
+- .NET 199/199, Extension 28/28, lint 통과, npm audit 취약점 0. Debug/Release 빌드와 self-contained 설치본 생성 통과.
+- 설치본 선택창에서 기본 파일명 표시, 상위 폴더 버튼, 한글 파일명 입력을 직접 조작했습니다. Agent 재시작 후 완료 이벤트를 주입해 선택한 상위 폴더에 변경 이름으로 저장되고 내용이 동일함을 확인했습니다.
+- 새 회귀 테스트 7건: 재시작 후 경로·이름 유지 및 충돌 이름 보존, 잘못된 이름 5종 거부, 대상 폴더 삭제 시 원본 보존. 기존 DB migration 테스트는 nullable 열 기본값 및 migration 6 기록을 확인합니다.
+- 업그레이드 후 기존 DB 모든 테이블의 원래 열/행을 백업과 비교해 보존을 확인했습니다. 사용자 설정 파일도 변경되지 않았습니다. Native Host ping 및 백그라운드 실행 통과.
+- 이번 UI 검증은 격리 DB와 Native Messaging 이벤트를 사용했습니다. 실제 Whale 네트워크 다운로드와 모든 DPI 조합을 재검증한 결과는 아닙니다.
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1
