@@ -1201,6 +1201,79 @@ public sealed class CommandValidationTests : IDisposable
         Assert.Single(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
     }
 
+    [Fact]
+    public async Task ParentDestinationAndRenameSurviveRestartAndBrowserCompletion()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var configured = Directory.CreateDirectory(Path.Combine(root, "parent", "configured")).FullName;
+        var parent = Directory.GetParent(configured)!.FullName;
+        await CreateRuleAsync(repository, configured, StorageMode.SelectSubfolder);
+        var id = await StartAsync(handler, "rename-parent", "browser.txt");
+        var selected = await SendAsync(handler, "selection.complete",
+            new SelectionCompletedPayload([id], string.Empty, parent, "사용자 이름.txt"));
+        Assert.True(selected.Success, selected.Message);
+        var (restarted, reloaded) = await CreateHandlerAsync();
+        var saved = (await reloaded.GetJobAsync(id, CancellationToken.None))!;
+        Assert.Equal(parent, saved.SelectedDestinationFolder);
+        Assert.Equal("사용자 이름.txt", saved.SelectedFileName);
+        Assert.Equal(RoutingState.SelectionReady, saved.RoutingState);
+        var source = Path.Combine(root, "browser-final.txt");
+        await File.WriteAllTextAsync(source, "renamed content", CancellationToken.None);
+        await File.WriteAllTextAsync(Path.Combine(parent, "사용자 이름.txt"), "existing", CancellationToken.None);
+        var complete = await SendAsync(restarted, "download.changed",
+            new DownloadChangedPayload("Whale", "rename-parent", "complete", source, null));
+        Assert.True(complete.Success, complete.Message);
+        saved = (await reloaded.GetJobAsync(id, CancellationToken.None))!;
+        Assert.Equal(RoutingState.Completed, saved.RoutingState);
+        Assert.Equal(Path.Combine(parent, "사용자 이름 (1).txt"), saved.FinalPath);
+        Assert.Equal("사용자 이름 (1).txt", DownloadPresentation.DisplayFileName(saved));
+        Assert.Equal("existing", await File.ReadAllTextAsync(Path.Combine(parent, "사용자 이름.txt"), CancellationToken.None));
+        Assert.Equal("renamed content", await File.ReadAllTextAsync(saved.FinalPath!, CancellationToken.None));
+        Assert.False(File.Exists(source));
+    }
+
+    [Theory]
+    [InlineData("../escape.txt")]
+    [InlineData("CON.txt")]
+    [InlineData("bad:name.txt")]
+    [InlineData("name.")]
+    [InlineData(" ")]
+    public async Task InvalidRenameDoesNotChangePendingJob(string name)
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var folder = Directory.CreateDirectory(Path.Combine(root, "destination")).FullName;
+        await CreateRuleAsync(repository, folder, StorageMode.SelectSubfolder);
+        var id = await StartAsync(handler, "invalid-name", "original.txt");
+        var response = await SendAsync(handler, "selection.complete",
+            new SelectionCompletedPayload([id], string.Empty, folder, name));
+        Assert.False(response.Success);
+        var job = (await repository.GetJobAsync(id, CancellationToken.None))!;
+        Assert.Equal(RoutingState.WaitingForSelection, job.RoutingState);
+        Assert.Null(job.SelectedFileName);
+        Assert.Null(job.SelectedDestinationFolder);
+    }
+
+    [Fact]
+    public async Task RemovedSelectedFolderFailsSafelyWithoutLosingOriginal()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var configured = Directory.CreateDirectory(Path.Combine(root, "configured")).FullName;
+        var selected = Directory.CreateDirectory(Path.Combine(root, "selected")).FullName;
+        await CreateRuleAsync(repository, configured, StorageMode.SelectSubfolder);
+        var id = await StartAsync(handler, "removed-folder", "original.txt");
+        Assert.True((await SendAsync(handler, "selection.complete",
+            new SelectionCompletedPayload([id], string.Empty, selected, "renamed.txt"))).Success);
+        Directory.Delete(selected);
+        var source = Path.Combine(root, "original.txt");
+        await File.WriteAllTextAsync(source, "preserve", CancellationToken.None);
+        await SendAsync(handler, "download.changed",
+            new DownloadChangedPayload("Whale", "removed-folder", "complete", source, null));
+        var job = (await repository.GetJobAsync(id, CancellationToken.None))!;
+        Assert.NotEqual(RoutingState.Moving, job.RoutingState);
+        Assert.NotEqual(RoutingState.Completed, job.RoutingState);
+        Assert.True(File.Exists(source));
+    }
+
     private static async Task<Guid> StartLiveAsync(
         AgentCommandHandler handler,
         string downloadId,

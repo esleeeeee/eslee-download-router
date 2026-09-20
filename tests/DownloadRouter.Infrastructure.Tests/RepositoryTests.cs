@@ -85,6 +85,8 @@ public sealed class RepositoryTests : IDisposable
         Assert.NotNull(migrated);
         Assert.Equal(BrowserTransferState.InProgress, migrated.BrowserState);
         Assert.Equal(RoutingState.WaitingForSelection, migrated.RoutingState);
+        Assert.Null(migrated.SelectedDestinationFolder);
+        Assert.Null(migrated.SelectedFileName);
 
         await using var verification = new SqliteConnection($"Data Source={paths.DatabasePath}");
         await verification.OpenAsync(CancellationToken.None);
@@ -96,6 +98,8 @@ public sealed class RepositoryTests : IDisposable
         versionCommand.CommandText = "SELECT COUNT(*) FROM MigrationHistory WHERE Version = 4;";
         Assert.Equal(1L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
         versionCommand.CommandText = "SELECT COUNT(*) FROM MigrationHistory WHERE Version = 5;";
+        Assert.Equal(1L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
+        versionCommand.CommandText = "SELECT COUNT(*) FROM MigrationHistory WHERE Version = 6;";
         Assert.Equal(1L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
         Assert.NotNull(migrated.LastBrowserEventAt);
         Assert.False(migrated.IsBrowserRecordStale);

@@ -1,11 +1,13 @@
 # 프로젝트 상태
 
-기준일: 2026-08-10 (Asia/Seoul)
+기준일: 2026-09-20 (Asia/Seoul)
 
 ## 요약
 
-- 현재 단계: 1.1.4 배포 준비. 정보 화면의 현재 버전 표시 옆에 GitHub 최신 정식 Release와 비교하는 업데이트 확인을 추가했습니다.
-- 직전 정식 버전: 1.1.3 (Tray Folder 호스트 연동)
+- 1.2.0: 선택창의 상위 폴더 탐색과 개별 파일명 변경. 설치본 UI에서 상위 폴더 선택·이름 입력을 조작하고, 격리 이벤트로 재시작 후 실제 파일 저장과 내용 보존을 검증했습니다.
+
+- 현재 단계: 1.2.0 설치본 업그레이드 검증 통과, PR #8을 통해 정식 배포 진행.
+- 직전 정식 버전: 1.1.4
 - 공식 저장소: https://github.com/esleeeeee/eslee-download-router
 - 기본 브랜치: `main`
 - 최종 병합 PR: [#7 Fix extension folder guidance, browser support wording, and log disclosure](https://github.com/esleeeeee/eslee-download-router/pull/7). v1.1.3과 v1.1.4는 사용자 지시로 main에 직접 커밋했습니다.
@@ -15,7 +17,7 @@
 
 ## 정식 버전 구성
 
-- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.1.4` 제품 버전을 사용합니다.
+- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.2.0` 제품 버전을 사용합니다.
 - assembly informational version에는 빌드한 Git commit metadata가 포함됩니다.
 - Extension manifest 버전은 기존 정책에 따라 제품 assembly와 독립 관리합니다.
 - 고정 Extension ID `gilicenlclaemgiijcjjejilikbooggj`와 Native Messaging identity를 유지합니다.

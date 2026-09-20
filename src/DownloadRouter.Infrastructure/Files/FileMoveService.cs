@@ -23,7 +23,9 @@ public sealed class FileMoveService(
         string storageRoot,
         string? selectedRelativeFolder,
         bool browserReportedComplete,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? selectedFileName = null,
+        bool validateSelectedRoot = false)
     {
         try
         {
@@ -43,6 +45,8 @@ public sealed class FileMoveService(
                 return Failure("file.temporary-extension", "The browser is still using a temporary download extension.", true);
             }
 
+            if (validateSelectedRoot)
+                SelectionDestination.ValidateFolder(storageRoot);
             var destinationDirectory = boundaryValidator.ValidateRelativeFolder(storageRoot, selectedRelativeFolder ?? string.Empty);
             if (!Directory.Exists(destinationDirectory))
             {
@@ -54,7 +58,9 @@ public sealed class FileMoveService(
                 return Failure("file.locked-or-changing", "The file is still changing or locked by another process.", true);
             }
 
-            var safeFileName = ValidateFileName(Path.GetFileName(sourceFull));
+            var safeFileName = selectedFileName is null
+                ? ValidateFileName(Path.GetFileName(sourceFull))
+                : SelectionDestination.ValidateFileName(selectedFileName);
             var gate = DestinationLocks.GetOrAdd(destinationDirectory, static _ => new SemaphoreSlim(1, 1));
             await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try

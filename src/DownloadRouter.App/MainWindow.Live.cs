@@ -196,6 +196,7 @@ public sealed partial class MainWindow
                 currentSelectionSnapshot = updatedSnapshot;
                 if (currentSelectionRule is not null)
                 {
+                    currentSelectionWindow?.UpdateFileName(DownloadPresentation.DisplayFileName(currentJob));
                     currentSelectionWindow?.UpdateDescription(
                         CreateSelectionDescription(
                             currentJob,
@@ -328,7 +329,9 @@ public sealed partial class MainWindow
                 allowLater: true,
                 allowSkip: true,
                 cancellationToken: currentSelectionCancellation.Token,
-                allowSkipAll: true);
+                allowSkipAll: true,
+                allowParentNavigation: true,
+                fileName: DownloadPresentation.DisplayFileName(job));
 
             if (currentSelectionInvalidated)
             {
@@ -339,7 +342,7 @@ public sealed partial class MainWindow
             {
                 var response = await agent.SendAsync(
                     "selection.complete",
-                    new SelectionCompletedPayload([job.Id], result.RelativeFolder));
+                    new SelectionCompletedPayload([job.Id], result.RelativeFolder, result.DestinationFolder, result.FileName));
                 if (!response.Success)
                 {
                     await ShowMessageAsync(response.Message ?? "선택 적용에 실패했습니다.");
