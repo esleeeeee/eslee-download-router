@@ -75,6 +75,8 @@ public sealed class AgentCommandHandler(
                 "downloads.active" => await HandleActiveDownloadsAsync(request, cancellationToken).ConfigureAwait(false),
                 "extension.hello" => HandleExtensionHello(request),
                 "selection.complete" => await HandleSelectionCompletedAsync(request, cancellationToken).ConfigureAwait(false),
+                "temporary-folder.list" => await HandleTemporaryFoldersAsync(request, cancellationToken).ConfigureAwait(false),
+                "temporary-folder.cancel" => await HandleTemporaryFolderCancelAsync(request, cancellationToken).ConfigureAwait(false),
                 "selection.skip" => await HandleSelectionSkippedAsync(request, cancellationToken).ConfigureAwait(false),
                 "selection.skip-many" => await HandleSelectionsSkippedAsync(request, cancellationToken).ConfigureAwait(false),
                 "selection.prompt-state" => await HandleSelectionPromptStateAsync(request, cancellationToken).ConfigureAwait(false),
@@ -520,6 +522,27 @@ public sealed class AgentCommandHandler(
         return deleted
             ? AgentResponse.Ok(request.RequestId, new { ruleId = payload.RuleId, jobsDeleted = 0, filesDeleted = 0 })
             : AgentResponse.Error(request.RequestId, "rule.not-found", "The rule was not found or was already deleted.");
+    }
+
+    private async Task<AgentResponse> HandleTemporaryFoldersAsync(AgentCommand request, CancellationToken cancellationToken)
+    {
+        var rules = await repository.GetRulesAsync(cancellationToken).ConfigureAwait(false);
+        var choices = await repository.GetTemporaryFoldersAsync(cancellationToken).ConfigureAwait(false);
+        var now = clock.GetUtcNow();
+        var active = rules
+            .Where(rule => choices.TryGetValue(rule.Id, out var choice) && choice.IsActive(rule, now))
+            .Select(rule => new ActiveTemporaryFolder(rule.Id, rule.Name, choices[rule.Id].DestinationFolder, choices[rule.Id].ExpiresAt))
+            .ToArray();
+        return AgentResponse.Ok(request.RequestId, active);
+    }
+
+    private async Task<AgentResponse> HandleTemporaryFolderCancelAsync(AgentCommand request, CancellationToken cancellationToken)
+    {
+        var payload = Deserialize<TemporaryFolderCancelPayload>(request.Payload);
+        if (payload.RuleId == Guid.Empty)
+            return AgentResponse.Error(request.RequestId, "temporary-folder.invalid-rule", "사이트 규칙을 지정하세요.");
+        var cancelled = await repository.CancelTemporaryFolderAsync(payload.RuleId, cancellationToken).ConfigureAwait(false);
+        return AgentResponse.Ok(request.RequestId, new { cancelled });
     }
 
     private async Task<AgentResponse> HandleSelectionCompletedAsync(

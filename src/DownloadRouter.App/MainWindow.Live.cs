@@ -46,6 +46,7 @@ public sealed partial class MainWindow
             var jobs = AgentClient.ReadData<List<DownloadJob>>(jobsResponse) ?? [];
             var rules = AgentClient.ReadData<List<DownloadRule>>(rulesResponse) ?? [];
             extensionRefreshRequired = await ReadExtensionRefreshRequiredAsync();
+            await ReadTemporaryFoldersAsync();
             RenderDashboard(jobs, rules);
         }
         catch (Exception exception)
@@ -77,6 +78,7 @@ public sealed partial class MainWindow
     private void RenderDashboard(IReadOnlyList<DownloadJob> jobs, IReadOnlyList<DownloadRule> rules)
     {
         Prepare("대시보드", "브라우저 전송 상태와 파일 라우팅 상태를 구분해 표시합니다.");
+        AddTemporaryFoldersCard();
         if (extensionRefreshRequired)
         {
             ContentPanel.Children.Add(new InfoBar
@@ -418,14 +420,20 @@ public sealed partial class MainWindow
             return;
         }
 
-        var snapshot = CreateHistorySnapshot(jobs);
+        var tag = (Navigation.SelectedItem as NavigationViewItem)?.Tag as string;
+        if (tag == "dashboard")
+            await ReadTemporaryFoldersAsync();
+        if (tag != ((Navigation.SelectedItem as NavigationViewItem)?.Tag as string))
+            return;
+        var snapshot = CreateHistorySnapshot(jobs) + (tag == "dashboard"
+            ? System.Text.Json.JsonSerializer.Serialize(activeTemporaryFolders)
+            : string.Empty);
         if (string.Equals(livePageSnapshot, snapshot, StringComparison.Ordinal))
         {
             return;
         }
 
         livePageSnapshot = snapshot;
-        var tag = (Navigation.SelectedItem as NavigationViewItem)?.Tag as string;
         switch (tag)
         {
             case "dashboard":
