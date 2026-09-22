@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using DownloadRouter.Core.Models;
 using Microsoft.Data.Sqlite;
 
@@ -277,7 +278,20 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         return jobs;
     }
 
-    public async Task UpdateJobAsync(DownloadJob job, string eventType, CancellationToken cancellationToken = default)
+    public async Task<TemporaryFolderChoice?> GetTemporaryFolderAsync(Guid ruleId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Value FROM AppSettings WHERE Key = $key;";
+        command.Parameters.AddWithValue("$key", $"temporary-folder:{ruleId:N}");
+        var value = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as string;
+        try { return value is null ? null : JsonSerializer.Deserialize<TemporaryFolderChoice>(value, ProtocolJson.Options); }
+        catch (JsonException) { return null; }
+    }
+
+    public async Task UpdateJobAsync(DownloadJob job, string eventType, CancellationToken cancellationToken = default,
+        TemporaryFolderChoice? temporaryFolder = null)
     {
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
@@ -315,6 +329,19 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         }
 
         await AppendEventAsync(connection, job.Id, eventType, job.Status.ToString(), cancellationToken, (SqliteTransaction)transaction).ConfigureAwait(false);
+        if (temporaryFolder is not null)
+        {
+            await using var setting = connection.CreateCommand();
+            setting.Transaction = (SqliteTransaction)transaction;
+            setting.CommandText = """
+                INSERT INTO AppSettings(Key, Value, UpdatedAt) VALUES($key, $value, $now)
+                ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value, UpdatedAt = excluded.UpdatedAt;
+                """;
+            setting.Parameters.AddWithValue("$key", $"temporary-folder:{job.RuleId:N}");
+            setting.Parameters.AddWithValue("$value", JsonSerializer.Serialize(temporaryFolder, ProtocolJson.Options));
+            setting.Parameters.AddWithValue("$now", temporaryFolder.CreatedAt.ToString("O"));
+            await setting.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 

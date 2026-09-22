@@ -237,7 +237,23 @@ public sealed record SelectionCompletedPayload(
     IReadOnlyList<Guid> JobIds,
     string RelativeFolder,
     string? DestinationFolder = null,
-    string? FileName = null);
+    string? FileName = null,
+    bool UseForTenMinutes = false);
+
+public sealed record TemporaryFolderChoice(
+    string DestinationFolder,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset ExpiresAt,
+    DateTimeOffset RuleUpdatedAt)
+{
+    public static readonly TimeSpan Duration = TimeSpan.FromMinutes(10);
+
+    public bool IsActive(DownloadRule rule, DateTimeOffset now)
+        => rule.IsEnabled && rule.StorageMode == StorageMode.SelectSubfolder
+            && rule.UpdatedAt == RuleUpdatedAt
+            && now >= CreatedAt && now < ExpiresAt
+            && ExpiresAt - CreatedAt == Duration;
+}
 
 public sealed record SelectionSkippedPayload(Guid JobId);
 
