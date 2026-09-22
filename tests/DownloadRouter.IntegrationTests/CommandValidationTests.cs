@@ -1289,7 +1289,14 @@ public sealed class CommandValidationTests : IDisposable
         var expiry = (await repository.GetTemporaryFolderAsync(rule.Id))!.ExpiresAt;
         clock.Now += TimeSpan.FromMinutes(9);
         var (restarted, reloaded) = await CreateHandlerAsync(clock);
-        var next = await StartAsync(restarted, "remember-next", "next.txt");
+        var response = await SendAsync(restarted, "download.started",
+            new DownloadStartedPayload("Whale", "remember-next", "next.txt", null,
+                "https://example.com/downloads", "https://example.com/next.txt", null, null,
+                State: "in_progress", StartedAt: DateTimeOffset.UtcNow, ExtensionBuild: SupportedBuild));
+        Assert.True(response.Success, response.Message);
+        Assert.False(response.Data!.Value.GetProperty("requiresSelection").GetBoolean());
+        Assert.False(response.Data.Value.GetProperty("selectionUiRequested").GetBoolean());
+        var next = response.Data.Value.GetProperty("jobId").GetGuid();
         var job = (await reloaded.GetJobAsync(next))!;
         Assert.Equal(RoutingState.SelectionReady, job.RoutingState);
         Assert.Equal(SelectionPromptState.Resolved, job.SelectionPromptState);
