@@ -1386,6 +1386,83 @@ public sealed class CommandValidationTests : IDisposable
         Assert.Equal(RoutingState.Skipped, (await repository.GetJobAsync(second))!.RoutingState);
     }
 
+    [Fact]
+    public async Task CancellingTenMinuteFolderSurvivesRestartAndPreservesAlreadyAssignedJobs()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var folder = Directory.CreateDirectory(Path.Combine(root, "chosen")).FullName;
+        var rule = await CreateRuleAsync(repository, folder, StorageMode.SelectSubfolder);
+        var first = await StartAsync(handler, "cancel-choice-first", "first.txt");
+        await SendAsync(handler, "selection.complete",
+            new SelectionCompletedPayload([first], "", folder, UseForTenMinutes: true));
+        var assigned = await StartAsync(handler, "already-assigned", "assigned.txt");
+        var beforeCancel = await repository.GetJobAsync(assigned);
+        var listed = await SendAsync(handler, "temporary-folder.list", new { });
+        var active = listed.Data!.Value.Deserialize<List<ActiveTemporaryFolder>>(ProtocolJson.Options)!;
+        Assert.Equal(rule.Id, Assert.Single(active).RuleId);
+        Assert.Equal(folder, active[0].DestinationFolder);
+
+        var cancelled = await SendAsync(handler, "temporary-folder.cancel", new TemporaryFolderCancelPayload(rule.Id));
+        Assert.True(cancelled.Success, cancelled.Message);
+        Assert.True(cancelled.Data!.Value.GetProperty("cancelled").GetBoolean());
+        var repeated = await SendAsync(handler, "temporary-folder.cancel", new TemporaryFolderCancelPayload(rule.Id));
+        Assert.True(repeated.Success);
+        Assert.False(repeated.Data!.Value.GetProperty("cancelled").GetBoolean());
+        Assert.Equal(beforeCancel, await repository.GetJobAsync(assigned));
+        var (restarted, reloaded) = await CreateHandlerAsync();
+        Assert.Null(await reloaded.GetTemporaryFolderAsync(rule.Id));
+        var next = await StartAsync(restarted, "ask-after-cancel", "next.txt");
+        Assert.Equal(RoutingState.WaitingForSelection, (await reloaded.GetJobAsync(next))!.RoutingState);
+        Assert.Empty((await SendAsync(restarted, "temporary-folder.list", new { })).Data!.Value.EnumerateArray());
+        var source = Path.Combine(root, "assigned.txt");
+        await File.WriteAllTextAsync(source, "already chosen", CancellationToken.None);
+        await SendAsync(restarted, "download.changed",
+            new DownloadChangedPayload("Whale", "already-assigned", "complete", source, null));
+        Assert.Equal("already chosen", await File.ReadAllTextAsync(Path.Combine(folder, "assigned.txt"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task CancellingTenMinuteFolderDoesNotChangeAnotherRulesChoice()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var folder = Directory.CreateDirectory(Path.Combine(root, "chosen")).FullName;
+        var rule = await CreateRuleAsync(repository, folder, StorageMode.SelectSubfolder);
+        var first = await StartAsync(handler, "scope-a", "a.txt");
+        await SendAsync(handler, "selection.complete",
+            new SelectionCompletedPayload([first], "", folder, UseForTenMinutes: true));
+        var otherRule = rule with { Id = Guid.NewGuid(), MatchValue = "other.example", Name = "other rule" };
+        await repository.UpsertRuleAsync(otherRule);
+        var started = await SendAsync(handler, "download.started",
+            new DownloadStartedPayload("Whale", "scope-b", "b.txt", null, "https://other.example/page",
+                "https://other.example/b.txt", null, null, State: "in_progress",
+                StartedAt: DateTimeOffset.UtcNow, ExtensionBuild: SupportedBuild));
+        var otherId = started.Data!.Value.GetProperty("jobId").GetGuid();
+        await SendAsync(handler, "selection.complete",
+            new SelectionCompletedPayload([otherId], "", folder, UseForTenMinutes: true));
+        var before = await repository.GetTemporaryFolderAsync(otherRule.Id);
+        await SendAsync(handler, "temporary-folder.cancel", new TemporaryFolderCancelPayload(rule.Id));
+        Assert.Equal(before, await repository.GetTemporaryFolderAsync(otherRule.Id));
+        var active = (await SendAsync(handler, "temporary-folder.list", new { })).Data!.Value
+            .Deserialize<List<ActiveTemporaryFolder>>(ProtocolJson.Options)!;
+        Assert.Equal(otherRule.Id, Assert.Single(active).RuleId);
+        Assert.False((await SendAsync(handler, "temporary-folder.cancel", new TemporaryFolderCancelPayload(Guid.Empty))).Success);
+    }
+
+    [Fact]
+    public async Task TenMinuteDashboardListDropsExpiredChoicesWithoutNewDownloads()
+    {
+        var clock = new SelectionTestClock();
+        var (handler, repository) = await CreateHandlerAsync(clock);
+        var folder = Directory.CreateDirectory(Path.Combine(root, "chosen")).FullName;
+        await CreateRuleAsync(repository, folder, StorageMode.SelectSubfolder);
+        var first = await StartAsync(handler, "expiry-list", "first.txt");
+        await SendAsync(handler, "selection.complete",
+            new SelectionCompletedPayload([first], "", folder, UseForTenMinutes: true));
+        Assert.Single((await SendAsync(handler, "temporary-folder.list", new { })).Data!.Value.EnumerateArray());
+        clock.Now += TemporaryFolderChoice.Duration;
+        Assert.Empty((await SendAsync(handler, "temporary-folder.list", new { })).Data!.Value.EnumerateArray());
+    }
+
     private sealed class SelectionTestClock : TimeProvider
     {
         public DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;

@@ -4,22 +4,24 @@
 
 ## 요약
 
+- 1.3.1: 대시보드에서 규칙별 10분 자동 저장 취소 지원. 설정 해제는 DB에 즉시 반영하며 기존 Job·파일은 변경하지 않습니다. Debug 빌드와 관련 통합 테스트 3건 통과.
+
 - 1.3.0: 같은 규칙에 10분 동안 선택 경로를 재사용하는 버튼 추가. 기존 AppSettings에 만료 시각과 규칙 갱신 시각을 기록하며 DB 스키마 변경은 없습니다. 사용자 동작 확인 후 추가 검증을 중단하고 정식 릴리즈합니다.
 
 - 1.2.0: 선택창의 상위 폴더 탐색과 개별 파일명 변경. 설치본 UI에서 상위 폴더 선택·이름 입력을 조작하고, 격리 이벤트로 재시작 후 실제 파일 저장과 내용 보존을 검증했습니다.
 
-- 현재 단계: 1.3.0 정식 릴리즈 (PR #9).
-- 직전 정식 버전: 1.2.0
+- 현재 단계: 1.3.1 정식 릴리즈.
+- 직전 정식 버전: 1.3.0
 - 공식 저장소: https://github.com/esleeeeee/eslee-download-router
 - 기본 브랜치: `main`
-- 최종 병합 PR: [#7 Fix extension folder guidance, browser support wording, and log disclosure](https://github.com/esleeeeee/eslee-download-router/pull/7). v1.1.3과 v1.1.4는 사용자 지시로 main에 직접 커밋했습니다.
+- 변경 기록: [GitHub Pull Requests](https://github.com/esleeeeee/eslee-download-router/pulls?q=is%3Apr+is%3Amerged)
 - 최신 정식 Release: [GitHub Releases](https://github.com/esleeeeee/eslee-download-router/releases/latest)
 - 지원 운영체제: Windows 11 x64
 - 격리 환경 수동 검증 브라우저: Naver Whale
 
 ## 정식 버전 구성
 
-- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.3.0` 제품 버전을 사용합니다.
+- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.3.1` 제품 버전을 사용합니다.
 - assembly informational version에는 빌드한 Git commit metadata가 포함됩니다.
 - Extension manifest 버전은 기존 정책에 따라 제품 assembly와 독립 관리합니다.
 - 고정 Extension ID `gilicenlclaemgiijcjjejilikbooggj`와 Native Messaging identity를 유지합니다.

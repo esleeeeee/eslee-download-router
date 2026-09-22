@@ -290,6 +290,38 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         catch (JsonException) { return null; }
     }
 
+    public async Task<IReadOnlyDictionary<Guid, TemporaryFolderChoice>> GetTemporaryFoldersAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Key, Value FROM AppSettings WHERE Key LIKE 'temporary-folder:%';";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        var choices = new Dictionary<Guid, TemporaryFolderChoice>();
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (!Guid.TryParse(reader.GetString(0)["temporary-folder:".Length..], out var ruleId))
+                continue;
+            try
+            {
+                var choice = JsonSerializer.Deserialize<TemporaryFolderChoice>(reader.GetString(1), ProtocolJson.Options);
+                if (choice is not null) choices[ruleId] = choice;
+            }
+            catch (JsonException) { }
+        }
+        return choices;
+    }
+
+    public async Task<bool> CancelTemporaryFolderAsync(Guid ruleId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM AppSettings WHERE Key = $key;";
+        command.Parameters.AddWithValue("$key", $"temporary-folder:{ruleId:N}");
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
+    }
+
     public async Task UpdateJobAsync(DownloadJob job, string eventType, CancellationToken cancellationToken = default,
         TemporaryFolderChoice? temporaryFolder = null)
     {
