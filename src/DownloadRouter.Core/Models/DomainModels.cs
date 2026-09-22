@@ -240,6 +240,10 @@ public sealed record SelectionCompletedPayload(
     string? FileName = null,
     bool UseForTenMinutes = false);
 
+public sealed record TemporaryFolderCancelPayload(Guid RuleId);
+
+public sealed record ActiveTemporaryFolder(Guid RuleId, string RuleName, string DestinationFolder, DateTimeOffset ExpiresAt);
+
 public sealed record TemporaryFolderChoice(
     string DestinationFolder,
     DateTimeOffset CreatedAt,
@@ -322,6 +326,8 @@ public static class ProtocolConstants
         "downloads.active",
         "extension.hello",
         "selection.complete",
+        "temporary-folder.list",
+        "temporary-folder.cancel",
         "selection.skip",
         "selection.skip-many",
         "selection.prompt-state",
