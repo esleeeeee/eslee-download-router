@@ -1274,6 +1274,124 @@ public sealed class CommandValidationTests : IDisposable
         Assert.True(File.Exists(source));
     }
 
+    [Fact]
+    public async Task TenMinuteFolderSurvivesRestartAndDoesNotShareFileNameOrExtendExpiry()
+    {
+        var clock = new SelectionTestClock();
+        var (handler, repository) = await CreateHandlerAsync(clock);
+        var destination = Directory.CreateDirectory(Path.Combine(root, "configured")).FullName;
+        var selected = Directory.CreateDirectory(Path.Combine(root, "chosen")).FullName;
+        var rule = await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
+        var first = await StartAsync(handler, "remember-first", "first.txt");
+        var olderPending = await StartAsync(handler, "older-pending", "older.txt");
+        Assert.True((await SendAsync(handler, "selection.complete",
+            new SelectionCompletedPayload([first], "", selected, "renamed-first.txt", true))).Success);
+        var expiry = (await repository.GetTemporaryFolderAsync(rule.Id))!.ExpiresAt;
+        clock.Now += TimeSpan.FromMinutes(9);
+        var (restarted, reloaded) = await CreateHandlerAsync(clock);
+        var response = await SendAsync(restarted, "download.started",
+            new DownloadStartedPayload("Whale", "remember-next", "next.txt", null,
+                "https://example.com/downloads", "https://example.com/next.txt", null, null,
+                State: "in_progress", StartedAt: DateTimeOffset.UtcNow, ExtensionBuild: SupportedBuild));
+        Assert.True(response.Success, response.Message);
+        Assert.False(response.Data!.Value.GetProperty("requiresSelection").GetBoolean());
+        Assert.False(response.Data.Value.GetProperty("selectionUiRequested").GetBoolean());
+        var next = response.Data.Value.GetProperty("jobId").GetGuid();
+        var job = (await reloaded.GetJobAsync(next))!;
+        Assert.Equal(RoutingState.SelectionReady, job.RoutingState);
+        Assert.Equal(SelectionPromptState.Resolved, job.SelectionPromptState);
+        Assert.Equal(selected, job.SelectedDestinationFolder);
+        Assert.Null(job.SelectedFileName);
+        Assert.False(job.IsSelectionPending);
+        Assert.Equal(RoutingState.WaitingForSelection, (await reloaded.GetJobAsync(olderPending))!.RoutingState);
+        Assert.Equal(expiry, (await reloaded.GetTemporaryFolderAsync(rule.Id))!.ExpiresAt);
+        clock.Now = expiry;
+        var after = await StartAsync(restarted, "after-expiry", "later.txt");
+        Assert.Equal(RoutingState.WaitingForSelection, (await reloaded.GetJobAsync(after))!.RoutingState);
+        // Downloads accepted before expiry keep their chosen destination when completion is later.
+        var source = Path.Combine(root, "next.txt");
+        await File.WriteAllTextAsync(source, "content", CancellationToken.None);
+        Assert.True((await SendAsync(restarted, "download.changed",
+            new DownloadChangedPayload("Whale", "remember-next", "complete", source, null))).Success);
+        Assert.Equal("content", await File.ReadAllTextAsync(Path.Combine(selected, "next.txt"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task TenMinuteFolderIsScopedToRuleAndDoesNotOverrideAutomaticOrCancellation()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var configured = Directory.CreateDirectory(Path.Combine(root, "configured")).FullName;
+        var selected = Directory.CreateDirectory(Path.Combine(root, "chosen")).FullName;
+        var rule = await CreateRuleAsync(repository, configured, StorageMode.SelectSubfolder);
+        var first = await StartAsync(handler, "scoped-first", "first.txt");
+        Assert.True((await SendAsync(handler, "selection.complete",
+            new SelectionCompletedPayload([first], "", selected, UseForTenMinutes: true))).Success);
+        var next = await StartAsync(handler, "scoped-cancel", "cancel.txt");
+        await SendAsync(handler, "download.cancelled",
+            new DownloadChangedPayload("Whale", "scoped-cancel", "cancelled", null, "USER_CANCELED"));
+        var cancelled = (await repository.GetJobAsync(next))!;
+        Assert.Equal(BrowserTransferState.Cancelled, cancelled.BrowserState);
+        Assert.Equal(RoutingState.NotRequired, cancelled.RoutingState);
+        Assert.True(DownloadPresentation.IsCancelled(cancelled));
+
+        // Same destination or hostname must not leak a choice into a different matched rule.
+        await repository.UpsertRuleAsync(rule with { IsEnabled = false });
+        var otherRule = await CreateRuleAsync(repository, configured, StorageMode.SelectSubfolder);
+        var other = await StartAsync(handler, "different-rule", "other.txt");
+        Assert.Equal(otherRule.Id, (await repository.GetJobAsync(other))!.RuleId);
+        Assert.Equal(RoutingState.WaitingForSelection, (await repository.GetJobAsync(other))!.RoutingState);
+        await repository.UpsertRuleAsync(otherRule with { IsEnabled = false });
+        await repository.UpsertRuleAsync(rule with { StorageMode = StorageMode.Automatic });
+        var automatic = await StartAsync(handler, "automatic-unaffected", "auto.txt");
+        var automaticJob = (await repository.GetJobAsync(automatic))!;
+        Assert.Equal(RoutingState.NotRequired, automaticJob.RoutingState);
+        Assert.Null(automaticJob.SelectedDestinationFolder);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task TenMinuteFolderFallsBackWhenRuleChangesOrFolderDisappears(bool changeRule)
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var configured = Directory.CreateDirectory(Path.Combine(root, "configured")).FullName;
+        var selected = Directory.CreateDirectory(Path.Combine(root, "chosen")).FullName;
+        var rule = await CreateRuleAsync(repository, configured, StorageMode.SelectSubfolder);
+        var first = await StartAsync(handler, "fallback-first", "first.txt");
+        Assert.True((await SendAsync(handler, "selection.complete",
+            new SelectionCompletedPayload([first], "", selected, UseForTenMinutes: true))).Success);
+        if (changeRule)
+            await repository.UpsertRuleAsync(rule with { UpdatedAt = rule.UpdatedAt.AddSeconds(1) });
+        else
+            Directory.Delete(selected);
+        var next = await StartAsync(handler, "fallback-next", "next.txt");
+        Assert.Equal(RoutingState.WaitingForSelection, (await repository.GetJobAsync(next))!.RoutingState);
+    }
+
+    [Fact]
+    public async Task OrdinarySelectionDoesNotRememberFolderAndSkippedJobCannotSetPreference()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        var folder = Directory.CreateDirectory(Path.Combine(root, "configured")).FullName;
+        var rule = await CreateRuleAsync(repository, folder, StorageMode.SelectSubfolder);
+        var first = await StartAsync(handler, "ordinary", "first.txt");
+        await SendAsync(handler, "selection.complete", new SelectionCompletedPayload([first], "", folder));
+        Assert.Null(await repository.GetTemporaryFolderAsync(rule.Id));
+        var second = await StartAsync(handler, "skip-before-remember", "second.txt");
+        Assert.Equal(RoutingState.WaitingForSelection, (await repository.GetJobAsync(second))!.RoutingState);
+        await SendAsync(handler, "selection.skip", new SelectionSkippedPayload(second));
+        await SendAsync(handler, "selection.complete",
+            new SelectionCompletedPayload([second], "", folder, UseForTenMinutes: true));
+        Assert.Null(await repository.GetTemporaryFolderAsync(rule.Id));
+        Assert.Equal(RoutingState.Skipped, (await repository.GetJobAsync(second))!.RoutingState);
+    }
+
+    private sealed class SelectionTestClock : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
     private static async Task<Guid> StartLiveAsync(
         AgentCommandHandler handler,
         string downloadId,
@@ -1334,7 +1452,7 @@ public sealed class CommandValidationTests : IDisposable
                 JsonSerializer.SerializeToElement(payload, ProtocolJson.Options)),
             CancellationToken.None);
 
-    private async Task<(AgentCommandHandler Handler, DownloadRouterRepository Repository)> CreateHandlerAsync()
+    private async Task<(AgentCommandHandler Handler, DownloadRouterRepository Repository)> CreateHandlerAsync(TimeProvider? clock = null)
     {
         var paths = AppPaths.CreateDefault();
         var repository = new DownloadRouterRepository(paths);
@@ -1350,7 +1468,8 @@ public sealed class CommandValidationTests : IDisposable
             new FileMoveService(boundary, NullLogger<FileMoveService>.Instance),
             new NoOpSelectionUiLauncher(),
             paths,
-            NullLogger<AgentCommandHandler>.Instance);
+            NullLogger<AgentCommandHandler>.Instance,
+            clock);
         return (handler, repository);
     }
 
