@@ -21,8 +21,10 @@ public sealed class AgentCommandHandler(
     FileMoveService fileMoveService,
     ISelectionUiLauncher selectionUiLauncher,
     AppPaths paths,
-    ILogger<AgentCommandHandler> logger)
+    ILogger<AgentCommandHandler> logger,
+    TimeProvider? timeProvider = null)
 {
+    private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
     /// <summary>
     /// Records the most recent rejection caused by an unrecognised extension build so the
     /// app can tell the user to refresh the extension. Counts only, no browser data.
@@ -213,10 +215,24 @@ public sealed class AgentCommandHandler(
             return AgentResponse.Ok(request.RequestId, new { tracked = false, failOpen = true });
         }
 
-        var requiresSelection = matched.Rule.StorageMode == StorageMode.SelectSubfolder;
+        string? temporaryDestination = null;
+        if (matched.Rule.StorageMode == StorageMode.SelectSubfolder)
+        {
+            var choice = await repository.GetTemporaryFolderAsync(matched.Rule.Id, cancellationToken).ConfigureAwait(false);
+            if (choice?.IsActive(matched.Rule, clock.GetUtcNow()) == true)
+            {
+                try { temporaryDestination = SelectionDestination.ValidateFolder(choice.DestinationFolder); }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+                {
+                    // An unavailable remembered folder must return to normal selection, never lose a download.
+                    logger.LogInformation("Temporary destination unavailable for rule {RuleId}", matched.Rule.Id);
+                }
+            }
+        }
+        var requiresSelection = matched.Rule.StorageMode == StorageMode.SelectSubfolder && temporaryDestination is null;
         var routingState = requiresSelection
             ? RoutingState.WaitingForSelection
-            : RoutingState.NotRequired;
+            : temporaryDestination is not null ? RoutingState.SelectionReady : RoutingState.NotRequired;
         // Automatic rules never open the selection window, so they start already resolved.
         var promptState = requiresSelection
             ? SelectionPromptState.NeverShown
@@ -244,7 +260,8 @@ public sealed class AgentCommandHandler(
             null,
             DateTimeOffset.UtcNow,
             false,
-            promptState);
+            promptState,
+            SelectedDestinationFolder: temporaryDestination);
 
         await repository.CreateJobAsync(job, cancellationToken).ConfigureAwait(false);
         var selectionUiRequested = requiresSelection && selectionUiLauncher.RequestSelectionUi();
@@ -516,6 +533,8 @@ public sealed class AgentCommandHandler(
         }
 
         var results = new List<object>();
+        if (payload.UseForTenMinutes && payload.JobIds.Count != 1)
+            return AgentResponse.Error(request.RequestId, "selection.temporary-single", "10분 저장은 개별 파일 선택창에서 설정하세요.");
         var destinationFolder = payload.DestinationFolder is null
             ? null : SelectionDestination.ValidateFolder(payload.DestinationFolder);
         var selectedFileName = payload.FileName is null
@@ -536,6 +555,17 @@ public sealed class AgentCommandHandler(
             if (destinationFolder is null)
                 _ = boundaryValidator.ValidateRelativeFolder(root, payload.RelativeFolder);
 
+            TemporaryFolderChoice? temporaryFolder = null;
+            if (payload.UseForTenMinutes)
+            {
+                if (!rule.IsEnabled || rule.StorageMode != StorageMode.SelectSubfolder)
+                    return AgentResponse.Error(request.RequestId, "selection.temporary-rule", "활성 폴더 선택 규칙에서만 사용할 수 있습니다.");
+                var folder = SelectionDestination.ValidateFolder(destinationFolder
+                    ?? boundaryValidator.ValidateRelativeFolder(root, payload.RelativeFolder));
+                var now = clock.GetUtcNow();
+                temporaryFolder = new TemporaryFolderChoice(folder, now, now + TemporaryFolderChoice.Duration, rule.UpdatedAt);
+            }
+
             stateMachine.EnsureCanTransition(job.RoutingState, RoutingState.SelectionReady);
             job = job with
             {
@@ -547,7 +577,7 @@ public sealed class AgentCommandHandler(
                 ErrorCode = null,
                 ErrorMessage = null,
             };
-            await repository.UpdateJobAsync(job, "selection.completed", cancellationToken).ConfigureAwait(false);
+            await repository.UpdateJobAsync(job, "selection.completed", cancellationToken, temporaryFolder).ConfigureAwait(false);
 
             if (job.BrowserState == BrowserTransferState.Complete && job.OriginalPath is not null)
             {

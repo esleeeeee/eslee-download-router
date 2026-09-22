@@ -4,6 +4,11 @@
 
 ## 자동 검증
 
+### 미배포: 10분 경로 재사용
+
+- 통합 테스트 5건 추가: 재시작 후 유지·만료 경계·만료 뒤 완료, 규칙별 격리·취소·Automatic, 규칙 변경/폴더 소실 fallback, 일반 선택·Skipped 재처리 방지.
+- .NET 204/204, Extension 28/28 통과. 실제 설치본 UI/Whale 검증은 아직 수행하지 않았습니다.
+
 ### 1.2.0 검증
 
 - .NET 199/199, Extension 28/28, lint 통과, npm audit 취약점 0. Debug/Release 빌드와 self-contained 설치본 생성 통과.

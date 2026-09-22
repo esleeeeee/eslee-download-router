@@ -245,10 +245,11 @@ public sealed partial class MainWindow
                 allowLater: true,
                 allowSkip: true,
                 allowParentNavigation: true,
-                fileName: DownloadPresentation.DisplayFileName(job));
+                fileName: DownloadPresentation.DisplayFileName(job),
+                allowTenMinuteFolder: true);
             if (result.Action == FolderSelectionAction.Apply)
             {
-                await ApplySelectionAsync([job.Id], result.RelativeFolder, result.DestinationFolder, result.FileName);
+                await ApplySelectionAsync([job.Id], result.RelativeFolder, result.DestinationFolder, result.FileName, result.UseForTenMinutes);
             }
             else if (result.Action == FolderSelectionAction.Skip)
             {
@@ -404,12 +405,12 @@ public sealed partial class MainWindow
     }
 
     private async Task ApplySelectionAsync(IReadOnlyList<Guid> jobIds, string displayedFolder,
-        string? destinationFolder = null, string? fileName = null)
+        string? destinationFolder = null, string? fileName = null, bool useForTenMinutes = false)
     {
         var relativeFolder = displayedFolder == "." ? string.Empty : displayedFolder;
         var response = await agent.SendAsync(
             "selection.complete",
-            new SelectionCompletedPayload(jobIds, relativeFolder, destinationFolder, fileName));
+            new SelectionCompletedPayload(jobIds, relativeFolder, destinationFolder, fileName, useForTenMinutes));
         if (!response.Success)
         {
             await ShowMessageAsync(response.Message ?? "선택 적용에 실패했습니다.");
