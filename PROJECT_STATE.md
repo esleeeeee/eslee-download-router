@@ -1,15 +1,15 @@
 # 프로젝트 상태
 
-기준일: 2026-09-20 (Asia/Seoul)
+기준일: 2026-09-22 (Asia/Seoul)
 
 ## 요약
 
-- 미배포 후속 기능: 같은 규칙에 10분 동안 선택 경로를 재사용하는 버튼 추가. 기존 AppSettings에 만료 시각과 규칙 갱신 시각을 기록하며 DB 스키마 변경은 없습니다.
+- 1.3.0: 같은 규칙에 10분 동안 선택 경로를 재사용하는 버튼 추가. 기존 AppSettings에 만료 시각과 규칙 갱신 시각을 기록하며 DB 스키마 변경은 없습니다. 사용자 동작 확인 후 추가 검증을 중단하고 정식 릴리즈합니다.
 
 - 1.2.0: 선택창의 상위 폴더 탐색과 개별 파일명 변경. 설치본 UI에서 상위 폴더 선택·이름 입력을 조작하고, 격리 이벤트로 재시작 후 실제 파일 저장과 내용 보존을 검증했습니다.
 
-- 현재 단계: 1.2.0 설치본 업그레이드 검증 통과, PR #8을 통해 정식 배포 진행.
-- 직전 정식 버전: 1.1.4
+- 현재 단계: 1.3.0 정식 릴리즈 (PR #9).
+- 직전 정식 버전: 1.2.0
 - 공식 저장소: https://github.com/esleeeeee/eslee-download-router
 - 기본 브랜치: `main`
 - 최종 병합 PR: [#7 Fix extension folder guidance, browser support wording, and log disclosure](https://github.com/esleeeeee/eslee-download-router/pull/7). v1.1.3과 v1.1.4는 사용자 지시로 main에 직접 커밋했습니다.
@@ -19,7 +19,7 @@
 
 ## 정식 버전 구성
 
-- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.2.0` 제품 버전을 사용합니다.
+- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.3.0` 제품 버전을 사용합니다.
 - assembly informational version에는 빌드한 Git commit metadata가 포함됩니다.
 - Extension manifest 버전은 기존 정책에 따라 제품 assembly와 독립 관리합니다.
 - 고정 Extension ID `gilicenlclaemgiijcjjejilikbooggj`와 Native Messaging identity를 유지합니다.
