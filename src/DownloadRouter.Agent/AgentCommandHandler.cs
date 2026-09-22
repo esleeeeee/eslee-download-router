@@ -275,7 +275,7 @@ public sealed class AgentCommandHandler(
             tracked = true,
             jobId = job.Id,
             storageMode = matched.Rule.StorageMode.ToString(),
-            requiresSelection = matched.Rule.StorageMode == StorageMode.SelectSubfolder,
+            requiresSelection,
             selectionUiRequested,
         });
     }
