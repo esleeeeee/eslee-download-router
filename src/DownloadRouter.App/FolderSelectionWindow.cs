@@ -22,7 +22,8 @@ public sealed record FolderSelectionResult(
     FolderSelectionAction Action,
     string RelativeFolder,
     string? DestinationFolder = null,
-    string? FileName = null);
+    string? FileName = null,
+    bool UseForTenMinutes = false);
 
 public sealed class FolderSelectionWindow(
     ThemeManager themeManager,
@@ -37,6 +38,7 @@ public sealed class FolderSelectionWindow(
     private readonly TextBlock fileNameError = new() { TextWrapping = TextWrapping.Wrap };
     private string? defaultFileName;
     private bool fileNameEdited;
+    private bool useForTenMinutes;
 
     public void UpdateFileName(string name)
     {
@@ -70,7 +72,8 @@ public sealed class FolderSelectionWindow(
         CancellationToken cancellationToken = default,
         bool allowSkipAll = false,
         bool allowParentNavigation = false,
-        string? fileName = null)
+        string? fileName = null,
+        bool allowTenMinuteFolder = false)
     {
         picker.AllowParentNavigation = allowParentNavigation;
         defaultFileName = fileName;
@@ -79,7 +82,7 @@ public sealed class FolderSelectionWindow(
         fileNameInput.TextChanged += (_, _) =>
             fileNameEdited = !string.Equals(fileNameInput.Text, defaultFileName, StringComparison.Ordinal);
         window.Title = "다운로드 저장 위치 선택";
-        window.Content = CreateContent(description, allowLater, allowSkip, allowSkipAll);
+        window.Content = CreateContent(description, allowLater, allowSkip, allowSkipAll, allowTenMinuteFolder);
         themeManager.RegisterWindow(window);
         window.Closed += (_, _) =>
         {
@@ -100,7 +103,7 @@ public sealed class FolderSelectionWindow(
         return await completion.Task;
     }
 
-    private UIElement CreateContent(string description, bool allowLater, bool allowSkip, bool allowSkipAll)
+    private UIElement CreateContent(string description, bool allowLater, bool allowSkip, bool allowSkipAll, bool allowTenMinuteFolder)
     {
         var root = new Grid
         {
@@ -150,6 +153,19 @@ public sealed class FolderSelectionWindow(
         picker.SelectionChanged += (_, _) => apply.IsEnabled = picker.IsSelectionAccessible;
         buttons.Children.Add(apply);
 
+        if (allowTenMinuteFolder)
+        {
+            var remember = new Button
+            {
+                Content = "앞으로 10분간 이 경로로 저장",
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+            };
+            ToolTipService.SetToolTip(remember, "현재 파일과 이후 10분 동안 같은 사이트 규칙의 새 다운로드에 적용합니다. 파일명은 재사용하지 않습니다.");
+            picker.SelectionChanged += (_, _) => remember.IsEnabled = picker.IsSelectionAccessible;
+            remember.Click += (_, _) => Complete(FolderSelectionAction.Apply, rememberFolder: true);
+            buttons.Children.Add(remember);
+        }
+
         if (allowLater)
         {
             var later = new Button
@@ -192,8 +208,15 @@ public sealed class FolderSelectionWindow(
         };
         close.Click += (_, _) => Complete(FolderSelectionAction.Closed);
         buttons.Children.Add(close);
-        Grid.SetRow(buttons, 2);
-        root.Children.Add(buttons);
+        var buttonScroll = new ScrollViewer
+        {
+            Content = buttons,
+            MaxHeight = 320,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
+        Grid.SetRow(buttonScroll, 2);
+        root.Children.Add(buttonScroll);
         return root;
     }
 
@@ -205,13 +228,14 @@ public sealed class FolderSelectionWindow(
             TextWrapping = TextWrapping.Wrap,
         };
 
-    private void Complete(FolderSelectionAction action)
+    private void Complete(FolderSelectionAction action, bool rememberFolder = false)
     {
         if (action == FolderSelectionAction.Apply && fileNameEdited)
         {
             try { SelectionDestination.ValidateFileName(fileNameInput.Text); }
             catch (ArgumentException exception) { fileNameError.Text = exception.Message; return; }
         }
+        useForTenMinutes = action == FolderSelectionAction.Apply && rememberFolder;
         if (CompleteWithoutClosing(action))
         {
             window.Close();
@@ -231,7 +255,7 @@ public sealed class FolderSelectionWindow(
         diagnosticWriter?.Invoke($"selection-window completion action={action}");
         completion.TrySetResult(new FolderSelectionResult(action, picker.SelectedRelativeFolder,
             picker.AllowParentNavigation ? picker.SelectedFullPath : null,
-            fileNameEdited ? fileNameInput.Text : null));
+            fileNameEdited ? fileNameInput.Text : null, useForTenMinutes));
         return true;
     }
 

@@ -331,7 +331,8 @@ public sealed partial class MainWindow
                 cancellationToken: currentSelectionCancellation.Token,
                 allowSkipAll: true,
                 allowParentNavigation: true,
-                fileName: DownloadPresentation.DisplayFileName(job));
+                fileName: DownloadPresentation.DisplayFileName(job),
+                allowTenMinuteFolder: true);
 
             if (currentSelectionInvalidated)
             {
@@ -342,7 +343,7 @@ public sealed partial class MainWindow
             {
                 var response = await agent.SendAsync(
                     "selection.complete",
-                    new SelectionCompletedPayload([job.Id], result.RelativeFolder, result.DestinationFolder, result.FileName));
+                    new SelectionCompletedPayload([job.Id], result.RelativeFolder, result.DestinationFolder, result.FileName, result.UseForTenMinutes));
                 if (!response.Success)
                 {
                     await ShowMessageAsync(response.Message ?? "선택 적용에 실패했습니다.");
