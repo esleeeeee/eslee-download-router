@@ -135,9 +135,18 @@ public sealed class FolderTreePicker : UserControl
         selectedPath.Text = $"선택 위치: {storageRoot}";
         ToolTipService.SetToolTip(selectedPath, selectedPath.Text);
 
+        // Show the first level immediately without recursively scanning the tree.
+        await EnsureChildrenLoadedAsync(rootNode, cancellationToken);
+        rootNode.IsExpanded = true;
+
         if (!string.IsNullOrWhiteSpace(selectedRelativeFolder))
         {
             await SelectRelativePathAsync(selectedRelativeFolder, cancellationToken);
+            if (tree.SelectedNode is { } selectedNode && selectedNode != rootNode)
+            {
+                await EnsureChildrenLoadedAsync(selectedNode, cancellationToken);
+                selectedNode.IsExpanded = true;
+            }
         }
     }
 

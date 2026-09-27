@@ -4,6 +4,8 @@
 
 ## 요약
 
+- 1.3.3: 폴더 선택창에서 기본 폴더와 복원된 선택 폴더를 한 단계 펼쳐 표시. 저장 동작·DB·Extension은 변경하지 않습니다.
+
 - 1.3.2: 저장 위치 선택창을 720×820 DIP 기본 크기와 가변 크기로 변경. 버튼 2행 및 상세 정보 메뉴로 폴더 트리 공간 확보, 긴 선택 경로는 2행과 전체 경로 툴팁 사용. App Debug 빌드 경고·오류 0. 추가 수동 UI 검증 없이 배포하며 기능 로직과 DB 스키마는 유지합니다.
 
 - 1.3.1: 대시보드에서 규칙별 10분 자동 저장 취소 지원. 설정 해제는 DB에 즉시 반영하며 기존 Job·파일은 변경하지 않습니다. Debug 빌드와 관련 통합 테스트 3건 통과.
@@ -12,8 +14,8 @@
 
 - 1.2.0: 선택창의 상위 폴더 탐색과 개별 파일명 변경. 설치본 UI에서 상위 폴더 선택·이름 입력을 조작하고, 격리 이벤트로 재시작 후 실제 파일 저장과 내용 보존을 검증했습니다.
 
-- 현재 단계: 1.3.2 릴리즈.
-- 직전 정식 버전: 1.3.1
+- 현재 단계: 1.3.3 릴리즈.
+- 직전 정식 버전: 1.3.2
 - 공식 저장소: https://github.com/esleeeeee/eslee-download-router
 - 기본 브랜치: `main`
 - 변경 기록: [GitHub Pull Requests](https://github.com/esleeeeee/eslee-download-router/pulls?q=is%3Apr+is%3Amerged)
@@ -23,7 +25,7 @@
 
 ## 정식 버전 구성
 
-- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.3.2` 제품 버전을 사용합니다.
+- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.3.3` 제품 버전을 사용합니다.
 - assembly informational version에는 빌드한 Git commit metadata가 포함됩니다.
 - Extension manifest 버전은 기존 정책에 따라 제품 assembly와 독립 관리합니다.
 - 고정 Extension ID `gilicenlclaemgiijcjjejilikbooggj`와 Native Messaging identity를 유지합니다.
