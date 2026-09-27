@@ -16,6 +16,8 @@ public sealed class FolderTreePicker : UserControl
     private readonly TextBlock selectedPath = new()
     {
         TextWrapping = TextWrapping.Wrap,
+        MaxLines = 2,
+        TextTrimming = TextTrimming.CharacterEllipsis,
         Opacity = 0.75,
     };
     private readonly TextBlock nodeError = new()
@@ -44,16 +46,20 @@ public sealed class FolderTreePicker : UserControl
             <DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
               <TextBlock Text="{Binding}"
                          TextWrapping="Wrap"
-                         MaxWidth="380"
                          HorizontalAlignment="Stretch"
                          ToolTipService.ToolTip="{Binding}" />
             </DataTemplate>
             """);
+        tree.ItemContainerStyle = new Style(typeof(TreeViewItem));
+        tree.ItemContainerStyle.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
+        ScrollViewer.SetHorizontalScrollBarVisibility(tree, ScrollBarVisibility.Disabled);
+        ScrollViewer.SetHorizontalScrollMode(tree, ScrollMode.Disabled);
         var refresh = new Button
         {
-            Content = "선택한 폴더 새로 고침",
+            Content = "새로 고침",
             HorizontalAlignment = HorizontalAlignment.Left,
         };
+        ToolTipService.SetToolTip(refresh, "선택한 폴더 새로 고침");
         refresh.Click += async (_, _) => await RefreshSelectedAsync();
         parentButton.Click += async (_, _) =>
         {
@@ -76,22 +82,18 @@ public sealed class FolderTreePicker : UserControl
             RowSpacing = 8,
         };
         panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        panel.Children.Add(selectedPath);
-        Grid.SetRow(loading, 1);
-        panel.Children.Add(loading);
-        Grid.SetRow(nodeError, 2);
-        panel.Children.Add(nodeError);
-        Grid.SetRow(tree, 3);
-        panel.Children.Add(tree);
         var navigation = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         navigation.Children.Add(parentButton);
         navigation.Children.Add(refresh);
-        Grid.SetRow(navigation, 4);
-        panel.Children.Add(navigation);
+        navigation.Children.Add(loading);
+        var toolbar = new StackPanel { Spacing = 8 };
+        toolbar.Children.Add(navigation);
+        toolbar.Children.Add(selectedPath);
+        toolbar.Children.Add(nodeError);
+        panel.Children.Add(toolbar);
+        Grid.SetRow(tree, 1);
+        panel.Children.Add(tree);
         Content = panel;
     }
 
@@ -131,6 +133,7 @@ public sealed class FolderTreePicker : UserControl
         tree.RootNodes.Add(rootNode);
         tree.SelectedNode = rootNode;
         selectedPath.Text = $"선택 위치: {storageRoot}";
+        ToolTipService.SetToolTip(selectedPath, selectedPath.Text);
 
         if (!string.IsNullOrWhiteSpace(selectedRelativeFolder))
         {
@@ -196,6 +199,7 @@ public sealed class FolderTreePicker : UserControl
         selectedPath.Text = entry.IsAccessible
             ? $"선택 위치: {entry.FullPath}"
             : entry.ErrorMessage ?? "이 폴더에 접근할 수 없습니다.";
+        ToolTipService.SetToolTip(selectedPath, selectedPath.Text);
         parentButton.IsEnabled = Directory.GetParent(entry.FullPath) is not null;
         SelectionChanged?.Invoke(this, EventArgs.Empty);
     }

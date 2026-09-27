@@ -30,12 +30,12 @@ public sealed class FolderSelectionWindow(
     nint mainWindowHandle,
     Action<string>? diagnosticWriter = null)
 {
-    private const int DefaultWidthDip = 560;
-    private const int DefaultHeightDip = 760;
+    private const int DefaultWidthDip = 720;
+    private const int DefaultHeightDip = 820;
     private readonly Window window = new();
     private readonly FolderTreePicker picker = new();
     private readonly TextBox fileNameInput = new() { Header = "파일 이름 (확장자 포함)", MaxLength = 255 };
-    private readonly TextBlock fileNameError = new() { TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock fileNameError = new() { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
     private string? defaultFileName;
     private bool fileNameEdited;
     private bool useForTenMinutes;
@@ -52,7 +52,12 @@ public sealed class FolderSelectionWindow(
     {
         TextWrapping = TextWrapping.Wrap,
         HorizontalAlignment = HorizontalAlignment.Stretch,
-        MaxWidth = DefaultWidthDip - 40,
+        MaxWidth = 440,
+    };
+    private readonly TextBlock descriptionSummary = new()
+    {
+        TextTrimming = TextTrimming.CharacterEllipsis,
+        VerticalAlignment = VerticalAlignment.Center,
     };
     private readonly TaskCompletionSource<FolderSelectionResult> completion = new(
         TaskCreationOptions.RunContinuationsAsynchronously);
@@ -61,7 +66,10 @@ public sealed class FolderSelectionWindow(
     private bool completed;
 
     public void UpdateDescription(string description)
-        => details.Text = description;
+    {
+        details.Text = description;
+        descriptionSummary.Text = description.Split('\n')[0].Trim();
+    }
 
     public async Task<FolderSelectionResult> ShowAsync(
         string storageRoot,
@@ -107,10 +115,8 @@ public sealed class FolderSelectionWindow(
     {
         var root = new Grid
         {
-            Padding = new Thickness(20),
+            Padding = new Thickness(16),
             RowSpacing = 12,
-            MinWidth = 420,
-            MaxWidth = DefaultWidthDip,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Stretch,
         };
@@ -118,31 +124,48 @@ public sealed class FolderSelectionWindow(
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        details.Text = description;
-        var detailsScroll = new ScrollViewer
+        UpdateDescription(description);
+        var info = new Button
         {
-            Content = details,
-            MaxHeight = 100,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = "다운로드 정보",
+            Flyout = new Flyout
+            {
+                Content = new ScrollViewer
+                {
+                    Content = details,
+                    MaxHeight = 320,
+                    HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                },
+            },
         };
+        var summaryRow = new Grid { ColumnSpacing = 12 };
+        summaryRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        summaryRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        summaryRow.Children.Add(descriptionSummary);
+        Grid.SetColumn(info, 1);
+        summaryRow.Children.Add(info);
         var header = new StackPanel { Spacing = 8 };
+        header.Children.Add(summaryRow);
         header.Children.Add(fileNameInput);
         header.Children.Add(fileNameError);
-        header.Children.Add(detailsScroll);
         root.Children.Add(header);
 
         picker.HorizontalAlignment = HorizontalAlignment.Stretch;
         picker.VerticalAlignment = VerticalAlignment.Stretch;
-        picker.MinHeight = 80;
         Grid.SetRow(picker, 1);
         root.Children.Add(picker);
 
-        var buttons = new StackPanel
+        var buttons = new Grid
         {
-            Spacing = 8,
+            RowSpacing = 8,
+            ColumnSpacing = 8,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
+        buttons.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        buttons.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         var apply = new Button
         {
             Content = "이 위치로 보내기",
@@ -157,37 +180,40 @@ public sealed class FolderSelectionWindow(
         {
             var remember = new Button
             {
-                Content = "앞으로 10분간 이 경로로 저장",
+                Content = "10분간 이 위치로 저장",
                 HorizontalAlignment = HorizontalAlignment.Stretch,
             };
             ToolTipService.SetToolTip(remember, "현재 파일과 이후 10분 동안 같은 사이트 규칙의 새 다운로드에 적용합니다. 파일명은 재사용하지 않습니다.");
             picker.SelectionChanged += (_, _) => remember.IsEnabled = picker.IsSelectionAccessible;
             remember.Click += (_, _) => Complete(FolderSelectionAction.Apply, rememberFolder: true);
+            Grid.SetColumn(remember, 1);
             buttons.Children.Add(remember);
         }
+        else
+        {
+            Grid.SetColumnSpan(apply, 2);
+        }
 
+        var otherActions = new MenuFlyout();
         if (allowLater)
         {
-            var later = new Button
+            var later = new MenuFlyoutItem
             {
-                Content = "대기 목록에 남기기",
-                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Text = "대기 목록에 남기기",
             };
+            ToolTipService.SetToolTip(later, "자동 팝업은 다시 표시하지 않으며, 다운로드 이력의 처리 대기에서 나중에 처리할 수 있습니다.");
             later.Click += (_, _) => Complete(FolderSelectionAction.Later);
-            buttons.Children.Add(later);
-            buttons.Children.Add(CreateHint(
-                "자동 팝업은 다시 표시하지 않으며, 다운로드 이력의 처리 대기에서 나중에 처리할 수 있습니다."));
+            otherActions.Items.Add(later);
         }
 
         if (allowSkipAll)
         {
-            var skipAll = new Button
+            var skipAll = new MenuFlyoutItem
             {
-                Content = "대기 중인 파일 모두 이동하지 않기",
-                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Text = "대기 중인 파일 모두 이동하지 않기",
             };
             skipAll.Click += (_, _) => Complete(FolderSelectionAction.SkipAll);
-            buttons.Children.Add(skipAll);
+            otherActions.Items.Add(skipAll);
         }
 
         if (allowSkip)
@@ -198,42 +224,42 @@ public sealed class FolderSelectionWindow(
                 HorizontalAlignment = HorizontalAlignment.Stretch,
             };
             skip.Click += (_, _) => Complete(FolderSelectionAction.Skip);
+            Grid.SetRow(skip, 1);
             buttons.Children.Add(skip);
         }
 
-        var close = new Button
+        var close = new MenuFlyoutItem
         {
-            Content = allowLater ? "닫고 대기 목록에 남기기" : "창 닫기",
-            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Text = allowLater ? "닫고 대기 목록에 남기기" : "창 닫기",
         };
         close.Click += (_, _) => Complete(FolderSelectionAction.Closed);
-        buttons.Children.Add(close);
-        var buttonScroll = new ScrollViewer
+        otherActions.Items.Add(close);
+        var more = new DropDownButton
         {
-            Content = buttons,
-            MaxHeight = 320,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Content = "다른 작업",
+            Flyout = otherActions,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
         };
-        Grid.SetRow(buttonScroll, 2);
-        root.Children.Add(buttonScroll);
+        Grid.SetRow(more, 1);
+        Grid.SetColumn(more, allowSkip ? 1 : 0);
+        Grid.SetColumnSpan(more, allowSkip ? 1 : 2);
+        buttons.Children.Add(more);
+        Grid.SetRow(buttons, 2);
+        root.Children.Add(buttons);
         return root;
     }
-
-    private static TextBlock CreateHint(string text)
-        => new()
-        {
-            Text = text,
-            Opacity = 0.75,
-            TextWrapping = TextWrapping.Wrap,
-        };
 
     private void Complete(FolderSelectionAction action, bool rememberFolder = false)
     {
         if (action == FolderSelectionAction.Apply && fileNameEdited)
         {
             try { SelectionDestination.ValidateFileName(fileNameInput.Text); }
-            catch (ArgumentException exception) { fileNameError.Text = exception.Message; return; }
+            catch (ArgumentException exception)
+            {
+                fileNameError.Text = exception.Message;
+                fileNameError.Visibility = Visibility.Visible;
+                return;
+            }
         }
         useForTenMinutes = action == FolderSelectionAction.Apply && rememberFolder;
         if (CompleteWithoutClosing(action))
@@ -277,8 +303,8 @@ public sealed class FolderSelectionWindow(
             workArea.Y + Math.Max(0, (workArea.Height - height) / 2)));
         if (appWindow.Presenter is OverlappedPresenter presenter)
         {
-            presenter.IsResizable = false;
-            presenter.IsMaximizable = false;
+            presenter.IsResizable = true;
+            presenter.IsMaximizable = true;
             presenter.IsAlwaysOnTop = true;
         }
     }
