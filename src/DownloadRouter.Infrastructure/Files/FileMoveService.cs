@@ -82,9 +82,7 @@ public sealed class FileMoveService(
                     await CopyAcrossVolumesAsync(sourceFull, destination, cancellationToken).ConfigureAwait(false);
                 }
 
-                logger.LogInformation(
-                    "File move completed for {SourceFileName}",
-                    Path.GetFileName(sourceFull));
+                logger.LogInformation("File move completed");
                 return new FileMoveResult(true, destination, null, null, false);
             }
             finally

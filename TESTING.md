@@ -4,6 +4,13 @@
 
 ## 자동 검증
 
+### 1.3.4: 다운로드 번호 재사용
+
+- Core 141건, Infrastructure 10건, Agent 통합 62건 통과. 완료·취소·Skipped 기록과 같은 번호의 새 작업 분리, 동시 중복 등록, restart, 잘못된 시각의 취소·metadata, legacy 이력 보존, 특정 Job만 stale 처리하는 회귀 시나리오 포함.
+- 마이그레이션 시 기존 Job ID·이벤트·설정 보존 및 foreign_key_check 확인.
+- Extension 31건 및 lint/build 통과. 실제 background 모듈을 모의 Chrome API에 연결해 등록보다 완료가 먼저 전송되지 않는지, ID 재사용 후 USER_CANCELED와 재조정이 각각 올바른 시작 시각/Job을 가리키는지 확인.
+- 사용자 DB에 테스트 다운로드를 만들지 않습니다. 설치 후 확장 build 2026.09.30 로드가 필요하며 사용자 실제 다운로드 확인은 별도입니다.
+
 ### 1.3.3: 기본 폴더 펼침
 
 - App Debug 빌드 경고·오류 0. 루트와 복원된 선택 폴더의 직계 하위 항목만 로드하며 기존 선택값을 유지합니다.

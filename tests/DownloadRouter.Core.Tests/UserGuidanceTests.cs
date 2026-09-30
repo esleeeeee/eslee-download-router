@@ -259,8 +259,9 @@ public sealed class UserGuidanceTests
             Assert.Contains(marker, security, StringComparison.Ordinal);
         }
 
-        // The documented example must be a log template that really exists.
-        Assert.Contains("File move completed for {SourceFileName}", fileMove, StringComparison.Ordinal);
+        // New logs omit filenames; the security document still warns about old logs.
+        Assert.Contains("File move completed", fileMove, StringComparison.Ordinal);
+        Assert.DoesNotContain("{SourceFileName}", fileMove, StringComparison.Ordinal);
 
         // The jsonl line carries the exception type only, which is what the document promises.
         Assert.Contains("exception = exception?.GetType().Name", logger, StringComparison.Ordinal);

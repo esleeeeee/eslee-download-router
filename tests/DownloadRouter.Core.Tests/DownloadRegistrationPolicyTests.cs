@@ -54,6 +54,11 @@ public sealed class DownloadRegistrationPolicyTests
             DownloadRegistrationPolicy.Classify(Payload("in_progress", Now.AddSeconds(-2)), Now));
 
     [Fact]
+    public void MissingStartTimeCannotIdentifyANewDownload()
+        => Assert.Equal(DownloadRegistrationDecision.RejectMissingIdentity,
+            DownloadRegistrationPolicy.Classify(Payload("in_progress", null), Now));
+
+    [Fact]
     public void TheLiveWindowBoundaryIsInclusive()
     {
         var edge = Now - DownloadRegistrationPolicy.LiveDownloadWindow;

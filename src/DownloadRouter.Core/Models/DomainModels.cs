@@ -149,7 +149,8 @@ public sealed record DownloadJob(
     bool IsBrowserRecordStale = false,
     SelectionPromptState SelectionPromptState = SelectionPromptState.NeverShown,
     string? SelectedDestinationFolder = null,
-    string? SelectedFileName = null)
+    string? SelectedFileName = null,
+    DateTimeOffset? BrowserStartedAt = null)
 {
     public DownloadJobStatus Status
         => BrowserState switch
@@ -225,13 +226,16 @@ public sealed record DownloadChangedPayload(
     string? FilePath,
     string? Error,
     string? FileName = null,
-    bool IsReconciliation = false);
+    bool IsReconciliation = false,
+    DateTimeOffset? StartedAt = null,
+    Guid? JobId = null);
 
 public sealed record DownloadMetadataChangedPayload(
     string Browser,
     string DownloadId,
     string? FilePath,
-    string? FileName);
+    string? FileName,
+    DateTimeOffset? StartedAt = null);
 
 public sealed record SelectionCompletedPayload(
     IReadOnlyList<Guid> JobIds,
@@ -284,7 +288,7 @@ public sealed record ActiveDownloadsPayload(string Browser);
 /// </summary>
 public sealed record ExtensionHelloPayload(string Browser, string? ExtensionBuild);
 
-public sealed record ActiveBrowserDownload(Guid JobId, string DownloadId);
+public sealed record ActiveBrowserDownload(Guid JobId, string DownloadId, DateTimeOffset? StartedAt = null);
 
 public sealed record DashboardCounts(
     int DownloadsInProgress,

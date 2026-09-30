@@ -70,6 +70,13 @@ public sealed class RepositoryTests : IDisposable
                     $jobId, 'Whale', 'legacy-1', 'legacy.txt', 'legacy.txt',
                     NULL, NULL, NULL, NULL, 'https://example.com', $ruleId,
                     NULL, NULL, NULL, 'WaitingForSelection', NULL, NULL, $created, NULL);
+                CREATE TABLE DownloadEvents (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT, JobId TEXT NOT NULL,
+                    EventType TEXT NOT NULL, Detail TEXT NULL, CreatedAt TEXT NOT NULL,
+                    FOREIGN KEY(JobId) REFERENCES DownloadJobs(Id));
+                INSERT INTO DownloadEvents VALUES (42, $jobId, 'job.created', 'fixture', $created);
+                CREATE TABLE AppSettings (Key TEXT PRIMARY KEY, Value TEXT NOT NULL, UpdatedAt TEXT NOT NULL);
+                INSERT INTO AppSettings VALUES ('fixture.setting', 'preserved', $created);
                 """;
             command.Parameters.AddWithValue("$ruleId", ruleId.ToString("D"));
             command.Parameters.AddWithValue("$jobId", jobId.ToString("D"));
@@ -103,6 +110,15 @@ public sealed class RepositoryTests : IDisposable
         Assert.Equal(1L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
         Assert.NotNull(migrated.LastBrowserEventAt);
         Assert.False(migrated.IsBrowserRecordStale);
+        Assert.Null(migrated.BrowserStartedAt);
+        versionCommand.CommandText = "SELECT COUNT(*) FROM MigrationHistory WHERE Version = 7;";
+        Assert.Equal(1L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        versionCommand.CommandText = "SELECT COUNT(*) FROM DownloadEvents WHERE Id = 42 AND EventType = 'job.created';";
+        Assert.Equal(1L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        versionCommand.CommandText = "SELECT Value FROM AppSettings WHERE Key = 'fixture.setting';";
+        Assert.Equal("preserved", await versionCommand.ExecuteScalarAsync());
+        versionCommand.CommandText = "PRAGMA foreign_key_check;";
+        Assert.Null(await versionCommand.ExecuteScalarAsync());
         // An existing waiting job must never replay its automatic prompt after upgrading.
         Assert.Equal(SelectionPromptState.Deferred, migrated.SelectionPromptState);
     }
