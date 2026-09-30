@@ -88,7 +88,7 @@ void test("onCreated filters replayed history before asking the agent to track a
   assert.ok(sendIndex > guardIndex, "the guard must run before the agent request");
   assert.match(onCreated, /if \(!decision\.track\) \{[\s\S]*?return;/u);
   assert.match(onCreated, /state: reportableState\(item\.state\)/u);
-  assert.match(onCreated, /startedAt: item\.startTime \?\? null/u);
+  assert.match(onCreated, /startedAt: instanceStart\(item\)/u);
   // The agent refuses to create jobs for builds it does not recognise.
   assert.match(onCreated, /extensionBuild,/u);
 });

@@ -14,7 +14,7 @@
  * Bump this together with `manifest.json` whenever the download registration behaviour
  * changes, and keep it in sync with `ExtensionBuildCompatibility` on the agent side.
  */
-export const extensionBuild = "2026.08.02";
+export const extensionBuild = "2026.09.30";
 
 /** A newly started transfer reaches the listener within milliseconds. */
 export const liveDownloadWindowMs = 5 * 60 * 1000;

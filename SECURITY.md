@@ -39,7 +39,7 @@ Extension 입력, Native Messaging stdin, Named Pipe 요청, 규칙 DB의 경로
 
 ### 파일 이름이 기록될 수 있는지
 
-기록될 수 있습니다. `download-router.jsonl`의 파일 이동 성공 로그는 `File move completed for {SourceFileName}` 형식으로 **다운로드한 파일 이름을 그대로 남깁니다.** 치환 규칙은 드라이브 문자나 UNC로 시작하는 경로만 대상으로 하므로 경로 없는 파일 이름은 치환되지 않습니다. `app-unhandled.log`의 예외 메시지에도 파일 이름이 포함될 수 있습니다.
+기록될 수 있습니다. 1.3.3 이전 `download-router.jsonl`의 `File move completed for {SourceFileName}` 로그에는 다운로드한 파일 이름이 남아 있습니다. 1.3.4부터 새 이동 성공 로그는 `File move completed`만 기록하며 파일 이름을 추가하지 않습니다. 기존 로그는 자동 삭제하지 않습니다. `app-unhandled.log`의 예외 메시지에도 파일 이름이 포함될 수 있습니다.
 
 ### 전체 경로가 기록되는지
 

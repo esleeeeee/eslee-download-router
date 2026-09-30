@@ -25,6 +25,7 @@ public sealed class AgentCommandHandler(
     TimeProvider? timeProvider = null)
 {
     private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
+    private static readonly SemaphoreSlim registrationGate = new(1, 1);
     /// <summary>
     /// Records the most recent rejection caused by an unrecognised extension build so the
     /// app can tell the user to refresh the extension. Counts only, no browser data.
@@ -62,7 +63,7 @@ public sealed class AgentCommandHandler(
                     protocolVersion = ProtocolConstants.CurrentVersion,
                     timestamp = DateTimeOffset.UtcNow,
                 }),
-                "download.started" => await HandleDownloadStartedAsync(request, cancellationToken).ConfigureAwait(false),
+                "download.started" => await HandleDownloadRegistrationAsync(request, cancellationToken).ConfigureAwait(false),
                 "download.metadata" => await HandleDownloadMetadataAsync(request, cancellationToken).ConfigureAwait(false),
                 "download.changed" => await HandleDownloadChangedAsync(request, cancellationToken).ConfigureAwait(false),
                 "download.cancelled" => await HandleDownloadChangedAsync(request, cancellationToken, "cancelled").ConfigureAwait(false),
@@ -134,6 +135,13 @@ public sealed class AgentCommandHandler(
         }
     }
 
+    private async Task<AgentResponse> HandleDownloadRegistrationAsync(AgentCommand request, CancellationToken cancellationToken)
+    {
+        await registrationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { return await HandleDownloadStartedAsync(request, cancellationToken).ConfigureAwait(false); }
+        finally { registrationGate.Release(); }
+    }
+
     private async Task<AgentResponse> HandleDownloadStartedAsync(
         AgentCommand request,
         CancellationToken cancellationToken)
@@ -145,11 +153,15 @@ public sealed class AgentCommandHandler(
             return AgentResponse.Error(request.RequestId, "download.invalid-metadata", "Browser and download ID are required.");
         }
 
-        var existing = await repository.GetJobAsync(browser, payload.DownloadId, cancellationToken).ConfigureAwait(false);
+        var existing = payload.StartedAt is { } startedAt
+            ? await repository.GetDownloadInstanceAsync(browser, payload.DownloadId, startedAt, cancellationToken).ConfigureAwait(false)
+            : null;
 
         if (existing is not null)
         {
-            existing = await UpdateFileNameAsync(
+            logger.LogInformation("Download registration reused instance: downloadId={DownloadId}, jobId={JobId}, routingState={RoutingState}, terminal={Terminal}",
+                SanitizeDownloadId(payload.DownloadId), existing.Id, existing.RoutingState, existing.IsTerminal);
+            if (!existing.IsTerminal) existing = await UpdateFileNameAsync(
                 existing,
                 payload.FileName,
                 payload.FilePath,
@@ -263,9 +275,12 @@ public sealed class AgentCommandHandler(
             DateTimeOffset.UtcNow,
             false,
             promptState,
-            SelectedDestinationFolder: temporaryDestination);
+            SelectedDestinationFolder: temporaryDestination,
+            BrowserStartedAt: payload.StartedAt);
 
         await repository.CreateJobAsync(job, cancellationToken).ConfigureAwait(false);
+        logger.LogInformation("Download instance created: downloadId={DownloadId}, jobId={JobId}, requiresSelection={RequiresSelection}",
+            SanitizeDownloadId(payload.DownloadId), job.Id, requiresSelection);
         var selectionUiRequested = requiresSelection && selectionUiLauncher.RequestSelectionUi();
         logger.LogInformation(
             "Rule {RuleId} matched download {DownloadId} using {SourceField}",
@@ -292,7 +307,7 @@ public sealed class AgentCommandHandler(
             return AgentResponse.Error(request.RequestId, "download.unknown-browser", "The browser is not supported.");
         }
 
-        var job = await repository.GetJobAsync(browser, payload.DownloadId, cancellationToken).ConfigureAwait(false);
+        var job = await ResolveDownloadInstanceAsync(browser, payload.DownloadId, payload.StartedAt, request.Command, cancellationToken).ConfigureAwait(false);
         if (job is null)
         {
             return AgentResponse.Ok(request.RequestId, new { tracked = false, failOpen = true });
@@ -334,7 +349,17 @@ public sealed class AgentCommandHandler(
             SanitizeState(state),
             NormalizeBrowserError(payload.Error));
 
-        var job = await repository.GetJobAsync(browser, payload.DownloadId, cancellationToken).ConfigureAwait(false);
+        DownloadJob? job;
+        if (state == "stale" && payload.IsReconciliation && payload.JobId is { } staleJobId)
+        {
+            job = await repository.GetJobAsync(staleJobId, cancellationToken).ConfigureAwait(false);
+            if (job?.Browser != browser || job.BrowserDownloadId != payload.DownloadId)
+                job = null;
+        }
+        else
+        {
+            job = await ResolveDownloadInstanceAsync(browser, payload.DownloadId, payload.StartedAt, request.Command, cancellationToken).ConfigureAwait(false);
+        }
         if (job is null)
         {
             return AgentResponse.Ok(request.RequestId, new { tracked = false, failOpen = true });
@@ -1044,6 +1069,7 @@ public sealed class AgentCommandHandler(
         bool refreshBrowserActivity,
         CancellationToken cancellationToken)
     {
+        if (job.IsTerminal) return job;
         var trusted = DownloadPresentation.TrustedFileName(reportedFileName)
             ?? DownloadPresentation.TrustedFileName(reportedFilePath);
         var currentFileName = trusted ?? job.CurrentFileName;
@@ -1069,6 +1095,19 @@ public sealed class AgentCommandHandler(
             "download.filename-updated",
             cancellationToken).ConfigureAwait(false);
         return updated;
+    }
+
+    private async Task<DownloadJob?> ResolveDownloadInstanceAsync(
+        BrowserKind browser, string downloadId, DateTimeOffset? startedAt,
+        string command, CancellationToken cancellationToken)
+    {
+        var job = startedAt is { } identity
+            ? await repository.GetDownloadInstanceAsync(browser, downloadId, identity, cancellationToken).ConfigureAwait(false)
+            : null;
+        if (job is null)
+            logger.LogInformation("Browser event ignored: command={Command}, downloadId={DownloadId}, reason={Reason}",
+                command, SanitizeDownloadId(downloadId), startedAt is null ? "missing-instance-identity" : "untracked-instance");
+        return job;
     }
 
     private void LogTransition(

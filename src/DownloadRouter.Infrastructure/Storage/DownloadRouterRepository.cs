@@ -7,7 +7,7 @@ namespace DownloadRouter.Infrastructure.Storage;
 
 public sealed class DownloadRouterRepository(AppPaths paths)
 {
-    private const int CurrentSchemaVersion = 6;
+    private const int CurrentSchemaVersion = 7;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -215,13 +215,13 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 InitiatingPageUrl, InitialUrl, FinalUrl, ReferrerUrl, SanitizedSource,
                 RuleId, OriginalPath, FinalPath, SelectedRelativeFolder, Status,
                 BrowserState, RoutingState, ErrorCode, ErrorMessage, CreatedAt, CompletedAt,
-                LastBrowserEventAt, IsBrowserRecordStale, SelectionPromptState, SelectedDestinationFolder, SelectedFileName)
+                LastBrowserEventAt, IsBrowserRecordStale, SelectionPromptState, SelectedDestinationFolder, SelectedFileName, BrowserStartedAt)
             VALUES(
                 $id, $browser, $browserDownloadId, $originalFileName, $currentFileName,
                 $initiatingPageUrl, $initialUrl, $finalUrl, $referrerUrl, $sanitizedSource,
                 $ruleId, $originalPath, $finalPath, $selectedRelativeFolder, $status,
                 $browserState, $routingState, $errorCode, $errorMessage, $createdAt, $completedAt,
-                $lastBrowserEventAt, $isBrowserRecordStale, $selectionPromptState, $selectedDestinationFolder, $selectedFileName);
+                $lastBrowserEventAt, $isBrowserRecordStale, $selectionPromptState, $selectedDestinationFolder, $selectedFileName, $browserStartedAt);
             """;
         AddJobParameters(command, job);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -236,7 +236,7 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
-        command.CommandText = SelectJobColumns + " WHERE Browser = $browser AND BrowserDownloadId = $downloadId;";
+        command.CommandText = SelectJobColumns + " WHERE Browser = $browser AND BrowserDownloadId = $downloadId ORDER BY CreatedAt DESC LIMIT 1;";
         command.Parameters.AddWithValue("$browser", browser.ToString());
         command.Parameters.AddWithValue("$downloadId", browserDownloadId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -250,6 +250,22 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         await using var command = connection.CreateCommand();
         command.CommandText = SelectJobColumns + " WHERE Id = $id;";
         command.Parameters.AddWithValue("$id", id.ToString("D"));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadJob(reader) : null;
+    }
+
+    public async Task<DownloadJob?> GetDownloadInstanceAsync(
+        BrowserKind browser, string downloadId, DateTimeOffset startedAt,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = SelectJobColumns +
+            " WHERE Browser = $browser AND BrowserDownloadId = $downloadId AND BrowserStartedAt = $startedAt;";
+        command.Parameters.AddWithValue("$browser", browser.ToString());
+        command.Parameters.AddWithValue("$downloadId", downloadId);
+        command.Parameters.AddWithValue("$startedAt", startedAt.ToUnixTimeMilliseconds());
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadJob(reader) : null;
     }
@@ -505,7 +521,7 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT Id, BrowserDownloadId
+            SELECT Id, BrowserDownloadId, BrowserStartedAt
             FROM DownloadJobs
             WHERE Browser = $browser
               AND BrowserState = 'InProgress';
@@ -515,7 +531,8 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            result.Add(new ActiveBrowserDownload(Guid.Parse(reader.GetString(0)), reader.GetString(1)));
+            result.Add(new ActiveBrowserDownload(Guid.Parse(reader.GetString(0)), reader.GetString(1),
+                reader.GetInt64(2) < 0 ? null : DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(2))));
         }
 
         return result;
@@ -542,7 +559,7 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                InitiatingPageUrl, InitialUrl, FinalUrl, ReferrerUrl, SanitizedSource,
                RuleId, OriginalPath, FinalPath, SelectedRelativeFolder, Status,
                BrowserState, RoutingState, ErrorCode, ErrorMessage, CreatedAt, CompletedAt,
-               LastBrowserEventAt, IsBrowserRecordStale, SelectionPromptState, SelectedDestinationFolder, SelectedFileName
+               LastBrowserEventAt, IsBrowserRecordStale, SelectionPromptState, SelectedDestinationFolder, SelectedFileName, BrowserStartedAt
         FROM DownloadJobs
         """;
 
@@ -550,6 +567,9 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         SqliteConnection connection,
         CancellationToken cancellationToken)
     {
+        // Rebuild the unique key without changing job/event IDs. Foreign keys are
+        // checked inside the transaction before committing the copied table.
+        await ExecuteAsync(connection, "PRAGMA foreign_keys = OFF;", cancellationToken).ConfigureAwait(false);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         await using (var columnCommand = connection.CreateCommand())
@@ -712,12 +732,56 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             "INSERT OR IGNORE INTO MigrationHistory(Version, AppliedAt) VALUES (6, CURRENT_TIMESTAMP);",
             cancellationToken, transaction).ConfigureAwait(false);
 
-        if (CurrentSchemaVersion != 6)
+        if (!columns.Contains("BrowserStartedAt"))
+        {
+            await ExecuteAsync(connection, """
+                CREATE TABLE DownloadJobs_v7 (
+                    Id TEXT PRIMARY KEY, Browser TEXT NOT NULL, BrowserDownloadId TEXT NOT NULL,
+                    OriginalFileName TEXT NOT NULL, CurrentFileName TEXT NOT NULL,
+                    InitiatingPageUrl TEXT NULL, InitialUrl TEXT NULL, FinalUrl TEXT NULL,
+                    ReferrerUrl TEXT NULL, SanitizedSource TEXT NULL, RuleId TEXT NOT NULL,
+                    OriginalPath TEXT NULL, FinalPath TEXT NULL, SelectedRelativeFolder TEXT NULL,
+                    Status TEXT NOT NULL, BrowserState TEXT NOT NULL DEFAULT 'InProgress',
+                    RoutingState TEXT NOT NULL DEFAULT 'NotRequired', ErrorCode TEXT NULL,
+                    ErrorMessage TEXT NULL, CreatedAt TEXT NOT NULL, CompletedAt TEXT NULL,
+                    LastBrowserEventAt TEXT NULL, IsBrowserRecordStale INTEGER NOT NULL DEFAULT 0,
+                    SelectionPromptState TEXT NOT NULL DEFAULT 'NeverShown',
+                    SelectedDestinationFolder TEXT NULL, SelectedFileName TEXT NULL,
+                    BrowserStartedAt INTEGER NOT NULL DEFAULT -1,
+                    FOREIGN KEY(RuleId) REFERENCES Rules(Id),
+                    UNIQUE(Browser, BrowserDownloadId, BrowserStartedAt)
+                );
+                INSERT INTO DownloadJobs_v7
+                SELECT Id, Browser, BrowserDownloadId, OriginalFileName, CurrentFileName,
+                       InitiatingPageUrl, InitialUrl, FinalUrl, ReferrerUrl, SanitizedSource,
+                       RuleId, OriginalPath, FinalPath, SelectedRelativeFolder, Status,
+                       BrowserState, RoutingState, ErrorCode, ErrorMessage, CreatedAt, CompletedAt,
+                       LastBrowserEventAt, IsBrowserRecordStale, SelectionPromptState,
+                       SelectedDestinationFolder, SelectedFileName, -1
+                FROM DownloadJobs;
+                DROP TABLE DownloadJobs;
+                ALTER TABLE DownloadJobs_v7 RENAME TO DownloadJobs;
+                CREATE INDEX IX_DownloadJobs_StatusCreated ON DownloadJobs(Status, CreatedAt DESC);
+                INSERT INTO MigrationHistory(Version, AppliedAt) VALUES (7, CURRENT_TIMESTAMP);
+                """, cancellationToken, transaction).ConfigureAwait(false);
+        }
+
+        await using (var check = connection.CreateCommand())
+        {
+            check.Transaction = transaction;
+            check.CommandText = "PRAGMA foreign_key_check;";
+            await using var reader = await check.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                throw new InvalidOperationException("Migration foreign key validation failed.");
+        }
+
+        if (CurrentSchemaVersion != 7)
         {
             throw new InvalidOperationException("Repository migration version is inconsistent.");
         }
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        await ExecuteAsync(connection, "PRAGMA foreign_keys = ON;", cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task ExecuteAsync(
@@ -796,7 +860,8 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 ? promptState
                 : SelectionPromptState.NeverShown,
             GetNullableString(reader, 24),
-            GetNullableString(reader, 25));
+            GetNullableString(reader, 25),
+            reader.GetInt64(26) < 0 ? null : DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(26)));
 
     private static string? GetNullableString(SqliteDataReader reader, int ordinal)
         => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
@@ -819,6 +884,7 @@ public sealed class DownloadRouterRepository(AppPaths paths)
 
     private static void AddJobParameters(SqliteCommand command, DownloadJob job)
     {
+        command.Parameters.AddWithValue("$browserStartedAt", job.BrowserStartedAt?.ToUnixTimeMilliseconds() ?? -1);
         command.Parameters.AddWithValue("$id", job.Id.ToString("D"));
         command.Parameters.AddWithValue("$browser", job.Browser.ToString());
         command.Parameters.AddWithValue("$browserDownloadId", job.BrowserDownloadId);
