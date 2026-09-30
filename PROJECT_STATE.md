@@ -1,8 +1,10 @@
 # 프로젝트 상태
 
-기준일: 2026-09-27 (Asia/Seoul)
+기준일: 2026-09-30 (Asia/Seoul)
 
 ## 요약
+
+- 1.3.4: 다운로드 번호 재사용으로 과거 terminal 작업을 잘못 찾던 버그 수정. Browser + DownloadId + 브라우저 시작 시각(ms)으로 구분하고 DB schema 7로 이력 보존 마이그레이션. 확장 0.3.0(build 2026.09.30) 새로고침 필요. .NET 213건, Extension 31건 통과; 실제 다운로드 재현은 자동 테스트와 구분합니다.
 
 - 1.3.3: 폴더 선택창에서 기본 폴더와 복원된 선택 폴더를 한 단계 펼쳐 표시. 저장 동작·DB·Extension은 변경하지 않습니다.
 
@@ -14,8 +16,8 @@
 
 - 1.2.0: 선택창의 상위 폴더 탐색과 개별 파일명 변경. 설치본 UI에서 상위 폴더 선택·이름 입력을 조작하고, 격리 이벤트로 재시작 후 실제 파일 저장과 내용 보존을 검증했습니다.
 
-- 현재 단계: 1.3.3 릴리즈.
-- 직전 정식 버전: 1.3.2
+- 현재 단계: 1.3.4 릴리즈.
+- 직전 정식 버전: 1.3.3
 - 공식 저장소: https://github.com/esleeeeee/eslee-download-router
 - 기본 브랜치: `main`
 - 변경 기록: [GitHub Pull Requests](https://github.com/esleeeeee/eslee-download-router/pulls?q=is%3Apr+is%3Amerged)
@@ -25,7 +27,7 @@
 
 ## 정식 버전 구성
 
-- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.3.3` 제품 버전을 사용합니다.
+- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.3.4` 제품 버전을 사용합니다.
 - assembly informational version에는 빌드한 Git commit metadata가 포함됩니다.
 - Extension manifest 버전은 기존 정책에 따라 제품 assembly와 독립 관리합니다.
 - 고정 Extension ID `gilicenlclaemgiijcjjejilikbooggj`와 Native Messaging identity를 유지합니다.

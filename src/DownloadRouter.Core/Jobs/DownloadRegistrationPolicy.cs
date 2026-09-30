@@ -15,6 +15,7 @@ public enum DownloadRegistrationDecision
 
     /// <summary>The transfer began before this session; it is a replayed history record.</summary>
     RejectStartedBeforeSession,
+    RejectMissingIdentity,
 }
 
 /// <summary>
@@ -41,7 +42,7 @@ public static class DownloadRegistrationPolicy
     /// Keep in sync with <c>extensionBuild</c> in the extension's download-origin module.
     /// </summary>
     public static readonly IReadOnlySet<string> SupportedExtensionBuilds =
-        new HashSet<string>(StringComparer.Ordinal) { "2026.08.02" };
+        new HashSet<string>(StringComparer.Ordinal) { "2026.09.30" };
 
     public static DownloadRegistrationDecision Classify(
         DownloadStartedPayload payload,
@@ -64,6 +65,11 @@ public static class DownloadRegistrationPolicy
             return DownloadRegistrationDecision.RejectAlreadyFinished;
         }
 
+        if (payload.StartedAt is null || state != "in_progress")
+        {
+            return DownloadRegistrationDecision.RejectMissingIdentity;
+        }
+
         if (payload.StartedAt is DateTimeOffset startedAt
             && now - startedAt > LiveDownloadWindow)
         {
@@ -79,6 +85,7 @@ public static class DownloadRegistrationPolicy
             DownloadRegistrationDecision.RejectUnsupportedExtension => "unsupported-extension-build",
             DownloadRegistrationDecision.RejectAlreadyFinished => "already-finished",
             DownloadRegistrationDecision.RejectStartedBeforeSession => "started-before-session",
+            DownloadRegistrationDecision.RejectMissingIdentity => "missing-or-invalid-download-identity",
             _ => "tracked",
         };
 
