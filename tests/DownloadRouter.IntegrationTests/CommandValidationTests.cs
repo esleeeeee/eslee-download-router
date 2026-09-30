@@ -115,7 +115,8 @@ public sealed class CommandValidationTests : IDisposable
             Guid.NewGuid(),
             "download.changed",
             JsonSerializer.SerializeToElement(
-                new DownloadChangedPayload("Whale", "example-download-1", "complete", source, null),
+                new DownloadChangedPayload("Whale", "example-download-1", "complete", source, null,
+                    StartedAt: started.Payload.GetProperty("startedAt").GetDateTimeOffset()),
                 ProtocolJson.Options));
         var changedResponse = await handler.HandleAsync(changed, CancellationToken.None);
 
@@ -720,7 +721,8 @@ public sealed class CommandValidationTests : IDisposable
             "download.started",
             new DownloadStartedPayload(
                 "Whale", "metadata-1", "실제 이름.zip", null, "https://example.com/downloads",
-                "https://example.com/file", null, null));
+                "https://example.com/file", null, null,
+                StartedAt: (await repository.GetJobAsync(jobId))!.BrowserStartedAt));
         Assert.True(duplicateStart.Success, duplicateStart.Message);
         Assert.True(duplicateStart.Data!.Value.GetProperty("existing").GetBoolean());
         Assert.Single(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
@@ -1012,6 +1014,7 @@ public sealed class CommandValidationTests : IDisposable
         var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
         await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
         var jobId = await StartLiveAsync(handler, "3001", "live.bin");
+        var startedAt = (await repository.GetJobAsync(jobId))!.BrowserStartedAt;
 
         for (var repeat = 0; repeat < 5; repeat++)
         {
@@ -1022,7 +1025,7 @@ public sealed class CommandValidationTests : IDisposable
                     "Whale", "3001", "live.bin", null, "https://example.com/downloads",
                     "https://example.com/live.bin", null, null,
                     State: "in_progress",
-                    StartedAt: DateTimeOffset.UtcNow, ExtensionBuild: SupportedBuild));
+                    StartedAt: startedAt, ExtensionBuild: SupportedBuild));
             Assert.True(response.Success, response.Message);
             Assert.True(response.Data!.Value.GetProperty("existing").GetBoolean());
             Assert.Equal(jobId, response.Data.Value.GetProperty("jobId").GetGuid());
@@ -1173,14 +1176,15 @@ public sealed class CommandValidationTests : IDisposable
     }
 
     [Fact]
-    public async Task ACachedOlderExtensionCanStillUpdateAnExistingJob()
+    public async Task ACachedOlderExtensionWithoutIdentityCannotUpdateAnExistingJob()
     {
         var (handler, repository) = await CreateHandlerAsync();
         var destination = Directory.CreateDirectory(Path.Combine(root, "routed")).FullName;
         await CreateRuleAsync(repository, destination, StorageMode.SelectSubfolder);
         var jobId = await StartAsync(handler, "7001", "live.bin");
 
-        // Same download, replayed by a stale extension: it must update, never duplicate.
+        var original = await repository.GetJobAsync(jobId);
+        // An ID without its start time cannot safely identify an existing download.
         var replay = await SendAsync(
             handler,
             "download.started",
@@ -1189,15 +1193,14 @@ public sealed class CommandValidationTests : IDisposable
                 "https://example.com/live.bin", null, null));
 
         Assert.True(replay.Success, replay.Message);
-        Assert.True(replay.Data!.Value.GetProperty("existing").GetBoolean());
-        Assert.Equal(jobId, replay.Data.Value.GetProperty("jobId").GetGuid());
+        Assert.False(replay.Data!.Value.GetProperty("tracked").GetBoolean());
 
-        // Terminal browser events from the same stale extension still reach the job.
-        var completed = await SendAsync(
-            handler,
-            "download.changed",
-            new DownloadChangedPayload("Whale", "7001", "complete", Path.Combine(root, "live.bin"), null));
+        var completed = await handler.HandleAsync(new AgentCommand(1, Guid.NewGuid(), "download.changed",
+            JsonSerializer.SerializeToElement(new DownloadChangedPayload("Whale", "7001", "complete",
+                Path.Combine(root, "live.bin"), null), ProtocolJson.Options)), CancellationToken.None);
         Assert.True(completed.Success, completed.Message);
+        Assert.False(completed.Data!.Value.GetProperty("tracked").GetBoolean());
+        Assert.Equal(original, await repository.GetJobAsync(jobId));
         Assert.Single(await repository.GetRecentJobsAsync(cancellationToken: CancellationToken.None));
     }
 
@@ -1463,6 +1466,92 @@ public sealed class CommandValidationTests : IDisposable
         Assert.Empty((await SendAsync(handler, "temporary-folder.list", new { })).Data!.Value.EnumerateArray());
     }
 
+    [Theory]
+    [InlineData(BrowserTransferState.Complete, RoutingState.Completed)]
+    [InlineData(BrowserTransferState.Cancelled, RoutingState.NotRequired)]
+    [InlineData(BrowserTransferState.InProgress, RoutingState.Skipped)]
+    public async Task ReusedDownloadNumberCreatesANewInstanceWithoutRevivingTerminalHistory(
+        BrowserTransferState browserState, RoutingState routingState)
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        await CreateRuleAsync(repository, root, StorageMode.SelectSubfolder);
+        var oldStart = DateTimeOffset.UtcNow.AddMinutes(-2);
+        var newStart = oldStart.AddMinutes(1);
+        DownloadStartedPayload Payload(DateTimeOffset time) => new(
+            "Whale", "850", "fixture.bin", null, "https://example.com/downloads",
+            "https://example.com/fixture.bin", null, null, "in_progress", time, SupportedBuild);
+        var first = await SendAsync(handler, "download.started", Payload(oldStart));
+        var oldId = first.Data!.Value.GetProperty("jobId").GetGuid();
+        var oldJob = (await repository.GetJobAsync(oldId))! with
+        {
+            BrowserState = browserState, RoutingState = routingState,
+            SelectionPromptState = SelectionPromptState.Resolved,
+        };
+        await repository.UpdateJobAsync(oldJob, "test.terminal");
+
+        // A restart and simultaneous duplicate notifications cannot recreate the old prompt.
+        (handler, repository) = await CreateHandlerAsync();
+        var responses = await Task.WhenAll(Enumerable.Range(0, 3)
+            .Select(_ => SendAsync(handler, "download.started", Payload(newStart))));
+        Assert.All(responses, response => Assert.True(response.Success, response.Message));
+        var newId = responses[0].Data!.Value.GetProperty("jobId").GetGuid();
+        Assert.NotEqual(oldId, newId);
+        Assert.All(responses, response => Assert.Equal(newId, response.Data!.Value.GetProperty("jobId").GetGuid()));
+        Assert.Equal(2, (await repository.GetRecentJobsAsync()).Count);
+        var newJob = (await repository.GetJobAsync(newId))!;
+        Assert.Equal(RoutingState.WaitingForSelection, newJob.RoutingState);
+        Assert.Equal(SelectionPromptState.NeverShown, newJob.SelectionPromptState);
+
+        await SendAsync(handler, "download.started", Payload(oldStart));
+        await SendAsync(handler, "download.metadata", new DownloadMetadataChangedPayload(
+            "Whale", "850", null, "must-not-replace-history.bin", oldStart));
+        Assert.Equal(oldJob, await repository.GetJobAsync(oldId));
+        Assert.Equal(newJob, await repository.GetJobAsync(newId));
+
+        // An unrelated start time and an old completed event cannot move/cancel the new file.
+        await SendAsync(handler, "download.cancelled", new DownloadChangedPayload(
+            "Whale", "850", "cancelled", null, "USER_CANCELED", StartedAt: oldStart.AddDays(-1)));
+        Assert.Equal(newJob, await repository.GetJobAsync(newId));
+        await SendAsync(handler, "download.cancelled", new DownloadChangedPayload(
+            "Whale", "850", "cancelled", null, "USER_CANCELED", StartedAt: newStart));
+        Assert.Equal(BrowserTransferState.Cancelled, (await repository.GetJobAsync(newId))!.BrowserState);
+        Assert.Equal(oldJob, await repository.GetJobAsync(oldId));
+    }
+
+    [Fact]
+    public async Task LegacyHistoryWithoutStartTimeNeverCapturesANewDownload()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        await CreateRuleAsync(repository, root, StorageMode.SelectSubfolder);
+        var seedId = await StartAsync(handler, "seed", "fixture.bin");
+        var legacy = (await repository.GetJobAsync(seedId))! with
+        {
+            Id = Guid.NewGuid(), BrowserDownloadId = "849", BrowserStartedAt = null,
+            BrowserState = BrowserTransferState.Complete, RoutingState = RoutingState.Completed,
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-3), SelectionPromptState = SelectionPromptState.Resolved,
+        };
+        await repository.CreateJobAsync(legacy);
+        var newId = await StartAsync(handler, "849", "new-fixture.bin");
+        Assert.NotEqual(legacy.Id, newId);
+        Assert.Equal(legacy, await repository.GetJobAsync(legacy.Id));
+        Assert.Equal(RoutingState.WaitingForSelection, (await repository.GetJobAsync(newId))!.RoutingState);
+    }
+
+    [Fact]
+    public async Task StaleReconciliationTargetsItsJobNotAnotherInstanceOfTheSameNumber()
+    {
+        var (handler, repository) = await CreateHandlerAsync();
+        await CreateRuleAsync(repository, root, StorageMode.SelectSubfolder);
+        var firstId = await StartAsync(handler, "846", "first.bin");
+        var secondId = await StartAsync(handler, "846", "second.bin");
+        Assert.NotEqual(firstId, secondId);
+        var result = await SendAsync(handler, "download.changed", new DownloadChangedPayload(
+            "Whale", "846", "stale", null, null, IsReconciliation: true, JobId: firstId));
+        Assert.True(result.Success);
+        Assert.True((await repository.GetJobAsync(firstId))!.IsBrowserRecordStale);
+        Assert.False((await repository.GetJobAsync(secondId))!.IsBrowserRecordStale);
+    }
+
     private sealed class SelectionTestClock : TimeProvider
     {
         public DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;
@@ -1517,17 +1606,31 @@ public sealed class CommandValidationTests : IDisposable
         return response.Data!.Value.GetProperty("jobId").GetGuid();
     }
 
-    private static Task<AgentResponse> SendAsync(
+    private static async Task<AgentResponse> SendAsync(
         AgentCommandHandler handler,
         string command,
         object payload)
-        => handler.HandleAsync(
+    {
+        // Model the extension's per-transfer identity on follow-up notifications.
+        var element = JsonSerializer.SerializeToElement(payload, ProtocolJson.Options);
+        if (command.StartsWith("download.", StringComparison.Ordinal) && command != "download.started"
+            && element.TryGetProperty("downloadId", out var downloadId)
+            && (!element.TryGetProperty("startedAt", out var identity) || identity.ValueKind == JsonValueKind.Null))
+        {
+            var repository = new DownloadRouterRepository(AppPaths.CreateDefault());
+            var job = await repository.GetJobAsync(BrowserKind.Whale, downloadId.GetString()!);
+            var node = System.Text.Json.Nodes.JsonNode.Parse(element.GetRawText())!;
+            node["startedAt"] = JsonSerializer.SerializeToNode(job?.BrowserStartedAt, ProtocolJson.Options);
+            element = JsonSerializer.SerializeToElement(node, ProtocolJson.Options);
+        }
+        return await handler.HandleAsync(
             new AgentCommand(
                 ProtocolConstants.CurrentVersion,
                 Guid.NewGuid(),
                 command,
-                JsonSerializer.SerializeToElement(payload, ProtocolJson.Options)),
+                element),
             CancellationToken.None);
+    }
 
     private async Task<(AgentCommandHandler Handler, DownloadRouterRepository Repository)> CreateHandlerAsync(TimeProvider? clock = null)
     {

@@ -2,6 +2,7 @@ import { detectBrowser } from "./browser.js";
 import {
   classifyCreatedDownload,
   extensionBuild,
+  parseStartTime,
   reportableState,
 } from "./download-origin.js";
 import {
@@ -11,16 +12,19 @@ import {
 } from "./download-state.js";
 import { trustedDownloadFileName } from "./file-name.js";
 import { sendNative } from "./native.js";
-import { createRequest, type AgentCommandName } from "./protocol.js";
+import { createRequest, type AgentCommandName, type AgentRequest } from "./protocol.js";
 import { sourceMetadata } from "./source-attribution.js";
 
 const browser = detectBrowser(navigator.userAgent);
 const lastErrors = new Map<number, string>();
 const reportedTerminalStates = new Map<number, "cancelled" | "interrupted" | "complete">();
+const startedTimes = new Map<number, string>();
+const pendingSends = new Map<number, Promise<void>>();
 
 interface ActiveBrowserDownload {
   jobId: string;
   downloadId: string;
+  startedAt?: string | null;
 }
 
 chrome.downloads.onCreated.addListener((item) => {
@@ -36,14 +40,15 @@ chrome.downloads.onCreated.addListener((item) => {
 
   lastErrors.delete(item.id);
   reportedTerminalStates.delete(item.id);
+  rememberIdentity(item);
   const metadata = sourceMetadata(item);
-  void sendNative(
+  sendDownload(item.id,
     createRequest("download.started", {
       browser,
       downloadId: item.id.toString(),
       ...metadata,
       state: reportableState(item.state),
-      startedAt: item.startTime ?? null,
+      startedAt: instanceStart(item),
       extensionBuild,
     }),
   );
@@ -61,7 +66,14 @@ chrome.downloads.onChanged.addListener((delta) => {
   );
 
   if (isUserCancelled(deltaError)) {
-    reportTerminalWithoutItem(delta.id, "download.cancelled", "cancelled", deltaError);
+    if (startedTimes.has(delta.id)) {
+      reportTerminalWithoutItem(delta.id, "download.cancelled", "cancelled", deltaError);
+    } else {
+      chrome.downloads.search({ id: delta.id }, (items) => {
+        if (items[0]) rememberIdentity(items[0]);
+        reportTerminalWithoutItem(delta.id, "download.cancelled", "cancelled", deltaError);
+      });
+    }
     return;
   }
 
@@ -77,6 +89,7 @@ chrome.downloads.onChanged.addListener((delta) => {
       }
       return;
     }
+    rememberIdentity(item);
 
     if (delta.filename) {
       reportDownloadMetadata(item);
@@ -103,6 +116,7 @@ chrome.downloads.onErased.addListener((downloadId) => {
   console.debug(`[Download Router] onErased downloadId=${safeDownloadId(downloadId)} event=history-erased`);
   lastErrors.delete(downloadId);
   reportedTerminalStates.delete(downloadId);
+  startedTimes.delete(downloadId);
 });
 
 void announceExtensionBuild();
@@ -135,7 +149,7 @@ function reportTerminal(
     return;
   }
 
-  void sendNative(
+  sendDownload(item.id,
     createRequest(command, {
       browser,
       downloadId: item.id.toString(),
@@ -144,6 +158,7 @@ function reportTerminal(
       fileName: trustedDownloadFileName(item.filename),
       error,
       isReconciliation,
+      startedAt: instanceStart(item),
     }),
   );
 }
@@ -158,23 +173,25 @@ function reportTerminalWithoutItem(
     return;
   }
 
-  void sendNative(createRequest(command, {
+  sendDownload(downloadId, createRequest(command, {
     browser,
     downloadId: downloadId.toString(),
     state,
     filePath: null,
     fileName: null,
     error,
+    startedAt: startedTimes.get(downloadId) ?? null,
   }));
 }
 
 function reportDownloadMetadata(item: chrome.downloads.DownloadItem): void {
-  void sendNative(
+  sendDownload(item.id,
     createRequest("download.metadata", {
       browser,
       downloadId: item.id.toString(),
       filePath: item.filename || null,
       fileName: trustedDownloadFileName(item.filename),
+      startedAt: instanceStart(item),
     }),
   );
 }
@@ -197,7 +214,7 @@ function reportReconciledState(item: chrome.downloads.DownloadItem): void {
     return;
   }
 
-  void sendNative(createRequest("download.changed", {
+  sendDownload(item.id, createRequest("download.changed", {
     browser,
     downloadId: item.id.toString(),
     state: "in_progress",
@@ -205,11 +222,12 @@ function reportReconciledState(item: chrome.downloads.DownloadItem): void {
     fileName: null,
     error: null,
     isReconciliation: true,
+    startedAt: instanceStart(item),
   }));
 }
 
-function reportStale(downloadId: number): void {
-  void sendNative(createRequest("download.changed", {
+function reportStale(downloadId: number, jobId?: string, startedAt?: string | null): void {
+  sendDownload(downloadId, createRequest("download.changed", {
     browser,
     downloadId: downloadId.toString(),
     state: "stale",
@@ -217,6 +235,8 @@ function reportStale(downloadId: number): void {
     fileName: null,
     error: null,
     isReconciliation: true,
+    jobId,
+    startedAt: startedAt ?? startedTimes.get(downloadId) ?? null,
   }));
 }
 
@@ -236,14 +256,41 @@ async function reconcileActiveDownloads(): Promise<void> {
 
     chrome.downloads.search({ id }, (items) => {
       const item = items[0];
-      if (!item) {
-        reportStale(id);
+      if (!item || !tracked.startedAt || !instanceStart(item)
+          || parseStartTime(tracked.startedAt) !== parseStartTime(item.startTime)) {
+        reportStale(id, tracked.jobId, tracked.startedAt);
         return;
       }
 
+      rememberIdentity(item);
       reportReconciledState(item);
     });
   }
+}
+
+function instanceStart(item: chrome.downloads.DownloadItem): string | null {
+  const value = parseStartTime(item.startTime);
+  return value === null ? null : new Date(value).toISOString();
+}
+
+function rememberIdentity(item: chrome.downloads.DownloadItem): void {
+  const startedAt = instanceStart(item);
+  if (startedAt === null) return;
+  if (startedTimes.get(item.id) !== startedAt) {
+    reportedTerminalStates.delete(item.id);
+    lastErrors.delete(item.id);
+  }
+  startedTimes.set(item.id, startedAt);
+}
+
+// onChanged can arrive before native registration completes. Preserve per-ID order.
+function sendDownload<TPayload>(id: number, request: AgentRequest<TPayload>): void {
+  const previous = pendingSends.get(id) ?? Promise.resolve();
+  const next = previous.then(async () => { await sendNative(request); });
+  pendingSends.set(id, next);
+  void next.finally(() => {
+    if (pendingSends.get(id) === next) pendingSends.delete(id);
+  });
 }
 
 function markTerminalReported(id: number, state: "cancelled" | "interrupted" | "complete"): boolean {
