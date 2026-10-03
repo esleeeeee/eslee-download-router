@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, develop, "feature/**"]
+    branches: [main, develop, "feature/**", "fix/**"]
   pull_request:
 
 permissions:
@@ -30,3 +30,15 @@ jobs:
         run: .\scripts\build.ps1 -Configuration Release
       - name: Test
         run: .\scripts\test.ps1 -Configuration Release
+      - name: Record validation evidence
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts/validation | Out-Null
+          git rev-parse HEAD | Set-Content artifacts/validation/source-sha.txt
+          Get-ChildItem src -Recurse -File -Filter *.dll | Where-Object FullName -Match '[\\/]bin[\\/]' | Get-FileHash -Algorithm SHA256 | Select-Object Path,Hash | ConvertTo-Json | Set-Content artifacts/validation/sha256.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-validation
+          path: artifacts/validation

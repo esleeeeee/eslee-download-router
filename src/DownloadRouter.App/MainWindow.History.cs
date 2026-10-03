@@ -695,7 +695,10 @@ public sealed partial class MainWindow
             $"{job.Id:N}:{job.CurrentFileName}:{job.BrowserState}:{job.RoutingState}:{job.SelectionPromptState}:{job.SelectedRelativeFolder}:{job.SelectedDestinationFolder}:{job.SelectedFileName}:{job.FinalPath}:{job.CompletedAt:O}:{job.ErrorCode}"));
 
     private static string DescribeStatus(DownloadJob job)
-        => job.BrowserState switch
+        => job.ErrorCode == "file.source-cleanup-pending" ? "복사 검증 완료 · 원본 정리 재시도 대기"
+            : job.ErrorCode == "file.source-changed-after-copy" ? "복사 후 원본 변경 · 두 파일 확인 필요"
+            : job.ErrorCode == "file.staging-changed" ? "임시 파일 변경 · 직접 확인 필요"
+            : job.BrowserState switch
         {
             BrowserTransferState.Cancelled => "사용자가 다운로드를 취소했습니다",
             BrowserTransferState.Interrupted => "브라우저 또는 네트워크 오류로 중단",
