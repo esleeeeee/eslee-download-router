@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using DownloadRouter.Core.Paths;
 using Microsoft.Extensions.Logging;
 
@@ -14,8 +16,11 @@ public sealed record FileMoveResult(
 
 public sealed class FileMoveService(
     PathBoundaryValidator boundaryValidator,
-    ILogger<FileMoveService> logger)
+    ILogger<FileMoveService> logger,
+    FileMoveOperations? operations = null)
 {
+    private sealed record Publication(string Source, string Destination, string Temporary, string Hash);
+    private readonly FileMoveOperations _operations = operations ?? new();
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> DestinationLocks = new(StringComparer.OrdinalIgnoreCase);
 
     public async Task<FileMoveResult> MoveAsync(
@@ -35,11 +40,6 @@ public sealed class FileMoveService(
             }
 
             var sourceFull = Path.GetFullPath(sourcePath);
-            if (!File.Exists(sourceFull))
-            {
-                return Failure("file.source-missing", "The downloaded file no longer exists.", false);
-            }
-
             if (IsTemporaryDownloadFile(sourceFull))
             {
                 return Failure("file.temporary-extension", "The browser is still using a temporary download extension.", true);
@@ -53,11 +53,6 @@ public sealed class FileMoveService(
                 return Failure("destination.missing", "The destination folder does not exist.", false);
             }
 
-            if (!await WaitForStableFileAsync(sourceFull, cancellationToken).ConfigureAwait(false))
-            {
-                return Failure("file.locked-or-changing", "The file is still changing or locked by another process.", true);
-            }
-
             var safeFileName = selectedFileName is null
                 ? ValidateFileName(Path.GetFileName(sourceFull))
                 : SelectionDestination.ValidateFileName(selectedFileName);
@@ -65,6 +60,22 @@ public sealed class FileMoveService(
             await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
+                var requested = Path.Combine(destinationDirectory, safeFileName);
+                boundaryValidator.EnsureWithin(storageRoot, requested);
+                var journal = Path.Combine(destinationDirectory, ".eslee-move-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sourceFull.ToUpperInvariant() + "|" + requested.ToUpperInvariant()))) + ".json");
+                if (File.Exists(journal))
+                {
+                    var pending = JsonSerializer.Deserialize<Publication>(await File.ReadAllTextAsync(journal, cancellationToken)) ?? throw new IOException("Invalid move recovery record.");
+                    if (!string.Equals(pending.Source, sourceFull, StringComparison.OrdinalIgnoreCase) || Path.GetDirectoryName(pending.Destination) != destinationDirectory || Path.GetDirectoryName(pending.Temporary) != destinationDirectory || !System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(pending.Temporary), @"^\.eslee-[0-9a-f]{32}\.partial$") || pending.Temporary == pending.Destination)
+                        throw new IOException("Move recovery path mismatch.");
+                    boundaryValidator.EnsureWithin(storageRoot, pending.Destination);
+                    return await FinishPublicationAsync(pending, journal, cancellationToken);
+                }
+                if (!File.Exists(sourceFull)) return Failure("file.source-missing", "The downloaded file no longer exists.", false);
+                if (sourceFull.Equals(requested, StringComparison.OrdinalIgnoreCase))
+                    return new FileMoveResult(true, sourceFull, null, null, false);
+                if (!await WaitForStableFileAsync(sourceFull, cancellationToken).ConfigureAwait(false))
+                    return Failure("file.locked-or-changing", "The file is still changing or locked by another process.", true);
                 var destination = FindAvailableDestination(destinationDirectory, safeFileName);
                 boundaryValidator.EnsureWithin(storageRoot, destination);
 
@@ -73,13 +84,13 @@ public sealed class FileMoveService(
                     return new FileMoveResult(true, destination, null, null, false);
                 }
 
-                if (SameVolume(sourceFull, destination))
+                if (_operations.SameVolume(sourceFull, destination))
                 {
                     File.Move(sourceFull, destination, overwrite: false);
                 }
                 else
                 {
-                    await CopyAcrossVolumesAsync(sourceFull, destination, cancellationToken).ConfigureAwait(false);
+                    return await CopyAcrossVolumesAsync(sourceFull, destination, journal, cancellationToken).ConfigureAwait(false);
                 }
 
                 logger.LogInformation("File move completed");
@@ -154,9 +165,10 @@ public sealed class FileMoveService(
         return false;
     }
 
-    private static async Task CopyAcrossVolumesAsync(
+    private async Task<FileMoveResult> CopyAcrossVolumesAsync(
         string source,
         string destination,
+        string journal,
         CancellationToken cancellationToken)
     {
         var destinationDirectory = Path.GetDirectoryName(destination)
@@ -198,18 +210,57 @@ public sealed class FileMoveService(
                 throw new IOException("Copied file hash does not match the source file hash.");
             }
 
-            File.Move(temporary, destination, overwrite: false);
-            File.Delete(source);
+            var publication = new Publication(source, destination, temporary, Convert.ToHexString(sourceHash));
+            using (var state = new FileStream(journal + ".tmp", FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                JsonSerializer.Serialize(state, publication);
+                state.Flush(true);
+            }
+            File.Move(journal + ".tmp", journal, true);
+            return await FinishPublicationAsync(publication, journal, cancellationToken);
         }
         catch
         {
-            if (File.Exists(temporary))
+            if (!File.Exists(journal) && File.Exists(temporary))
             {
                 File.Delete(temporary);
             }
 
             throw;
         }
+    }
+
+    private async Task<FileMoveResult> FinishPublicationAsync(Publication pending, string journal, CancellationToken cancellationToken)
+    {
+        if (!File.Exists(pending.Destination))
+        {
+            if (!File.Exists(pending.Temporary) || Convert.ToHexString(await ComputeSha256Async(pending.Temporary, cancellationToken)) != pending.Hash)
+                throw new IOException("The staged copy failed recovery verification.");
+            File.Move(pending.Temporary, pending.Destination, false);
+        }
+        if (Convert.ToHexString(await ComputeSha256Async(pending.Destination, cancellationToken)) != pending.Hash)
+            throw new IOException("The published destination has changed; source retained.");
+        try
+        {
+            if (File.Exists(pending.Source))
+            {
+                if (Convert.ToHexString(await ComputeSha256Async(pending.Source, cancellationToken)) != pending.Hash)
+                    return new FileMoveResult(false, pending.Destination, "file.source-changed-after-copy", "The verified destination exists, but the source changed. Both files were kept; inspect them before retrying cleanup.", false);
+                _operations.DeleteSource(pending.Source);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new FileMoveResult(false, pending.Destination, "file.source-cleanup-pending", ex.Message, true);
+        }
+        if (File.Exists(pending.Temporary))
+        {
+            if (Convert.ToHexString(await ComputeSha256Async(pending.Temporary, cancellationToken)) != pending.Hash)
+                return new FileMoveResult(false, pending.Destination, "file.staging-changed", "The staging file changed; it was retained for inspection.", false);
+            File.Delete(pending.Temporary);
+        }
+        File.Delete(journal);
+        return new FileMoveResult(true, pending.Destination, null, null, false);
     }
 
     private static async Task<byte[]> ComputeSha256Async(string path, CancellationToken cancellationToken)
@@ -281,4 +332,12 @@ public sealed class FileMoveService(
 
     private static FileMoveResult Failure(string code, string message, bool canRetry)
         => new(false, null, code, message, canRetry);
+}
+
+/// <summary>Filesystem boundary hooks allow cross-volume failure tests using temporary folders.</summary>
+public sealed class FileMoveOperations
+{
+    public Func<string, string, bool> SameVolume { get; init; } = (first, second) =>
+        string.Equals(Path.GetPathRoot(first), Path.GetPathRoot(second), StringComparison.OrdinalIgnoreCase);
+    public Action<string> DeleteSource { get; init; } = File.Delete;
 }

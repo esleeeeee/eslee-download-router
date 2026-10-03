@@ -165,3 +165,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-agent.ps1
 - 긴 폴더 이름과 다중 대기 작업의 레이아웃
 
 물리 디스플레이별 검증은 장치 정보나 사용자 환경을 기록하지 않고 통과 여부만 남깁니다.
+
+
+## Isolated actual cross-volume check
+
+`dotnet run --project tests/DownloadRouter.FileIo.Checks -- D:\` requires a distinct local fixed volume and creates only GUID-named test directories in the source temporary directory and the selected volume root. It writes 128 MiB, uses the production cross-volume implementation, holds a real Windows sharing lock that permits copy but denies source deletion, verifies the published destination and pending journal, then creates a fresh service and retries after releasing the lock. Exactly one destination with matching SHA-256 must remain; both test directories are removed afterward.
+
+On 2026-10-03 this passed for C: to D: (NTFS), with SHA-256 `B8E55196CCB6B0B785AC8D6F72BD1C023078436990371D88F64B1540772CE8D2`. It supplements injected failure tests; it does not mount disks, modify ACLs, or use browser/user downloads.
