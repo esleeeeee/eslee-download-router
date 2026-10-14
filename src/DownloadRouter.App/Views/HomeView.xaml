@@ -1,0 +1,190 @@
+<UserControl
+    x:Class="DownloadRouter.App.Views.HomeView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:c="using:DownloadRouter.App.Controls"
+    xmlns:models="using:DownloadRouter.Core.Models"
+    xmlns:vm="using:DownloadRouter.App.ViewModels">
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+    <StackPanel MaxWidth="1040" Padding="{StaticResource PagePadding}" HorizontalAlignment="Stretch" Spacing="12">
+      <StackPanel Spacing="4">
+        <TextBlock Style="{StaticResource PageTitleTextStyle}" Text="{c:L Ko='홈', En='Home'}" />
+        <TextBlock Style="{StaticResource PageSubtitleTextStyle}" Text="{c:L Ko='다운로드 분류 상태와 처리할 일을 한눈에 봅니다.', En='See how downloads are being sorted and what needs your attention.'}" />
+      </StackPanel>
+
+      <InfoBar
+          x:Name="ExtensionRefreshBar"
+          IsClosable="False"
+          Severity="Warning"
+          Title="{c:L Ko='브라우저 확장을 새로 고쳐야 합니다', En='Reload the browser extension'}" />
+
+      <InfoBar
+          x:Name="RootAttentionBar"
+          IsClosable="False"
+          Severity="Warning"
+          Title="{c:L Ko='기준 폴더를 확인해야 하는 규칙이 있습니다', En='Some rules need their base folder checked'}">
+        <InfoBar.ActionButton>
+          <Button Click="ShowAttentionRules_Click" Content="{c:L Ko='규칙 보기', En='Show rules'}" />
+        </InfoBar.ActionButton>
+      </InfoBar>
+
+      <!-- Sorting status and pause control -->
+      <Border Style="{StaticResource CardStyle}">
+        <Grid ColumnSpacing="16">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <c:IconPlate x:Name="StatusPlate" Glyph="&#xE768;" Kind="Success" Size="44" />
+          <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+            <TextBlock x:Name="StatusTitle" Style="{StaticResource SubtitleTextBlockStyle}" FontSize="18" TextWrapping="Wrap" />
+            <TextBlock x:Name="StatusDescription" Style="{StaticResource SecondaryTextStyle}" />
+          </StackPanel>
+          <StackPanel Grid.Column="2" VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+            <DropDownButton x:Name="PauseButton" AutomationProperties.Name="{c:L Ko='자동 분류 잠시 멈추기', En='Pause sorting'}">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <FontIcon FontSize="14" Glyph="&#xE769;" />
+                <TextBlock Text="{c:L Ko='잠시 멈추기', En='Pause'}" />
+              </StackPanel>
+              <DropDownButton.Flyout>
+                <MenuFlyout Placement="BottomEdgeAlignedRight">
+                  <MenuFlyoutItem Click="Pause30_Click" Text="{c:L Ko='30분 동안', En='For 30 minutes'}" />
+                  <MenuFlyoutItem Click="Pause60_Click" Text="{c:L Ko='1시간 동안', En='For 1 hour'}" />
+                  <MenuFlyoutItem Click="Pause180_Click" Text="{c:L Ko='3시간 동안', En='For 3 hours'}" />
+                  <MenuFlyoutSeparator />
+                  <MenuFlyoutItem Click="PauseIndefinitely_Click" Text="{c:L Ko='다시 켤 때까지', En='Until I resume'}" />
+                </MenuFlyout>
+              </DropDownButton.Flyout>
+            </DropDownButton>
+            <Button
+                x:Name="ResumeButton"
+                AutomationProperties.Name="{c:L Ko='자동 분류 다시 켜기', En='Resume sorting'}"
+                Click="Resume_Click"
+                Style="{StaticResource AccentButtonStyle}"
+                Visibility="Collapsed">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <FontIcon FontSize="14" Glyph="&#xE768;" />
+                <TextBlock Text="{c:L Ko='다시 켜기', En='Resume'}" />
+              </StackPanel>
+            </Button>
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <!-- Summary tiles; each opens the matching download filter. -->
+      <ItemsRepeater x:Name="TileRepeater">
+        <ItemsRepeater.Layout>
+          <UniformGridLayout ItemsStretch="Fill" MinColumnSpacing="12" MinItemHeight="96" MinItemWidth="200" MinRowSpacing="12" />
+        </ItemsRepeater.Layout>
+        <ItemsRepeater.ItemTemplate>
+          <DataTemplate x:DataType="vm:SummaryTile">
+            <Button
+                Padding="16,12"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Stretch"
+                HorizontalContentAlignment="Stretch"
+                VerticalContentAlignment="Stretch"
+                AutomationProperties.Name="{x:Bind AutomationName, Mode=OneWay}"
+                Background="{ThemeResource CardBackgroundBrush}"
+                BorderBrush="{ThemeResource CardStrokeBrush}"
+                Click="Tile_Click"
+                CornerRadius="8"
+                Tag="{x:Bind}">
+              <Grid RowSpacing="6">
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <c:IconPlate Glyph="{x:Bind Glyph}" Kind="{x:Bind Kind, Mode=OneWay}" Size="28" />
+                  <TextBlock VerticalAlignment="Center" Style="{StaticResource SecondaryTextStyle}" Text="{x:Bind Title}" />
+                </StackPanel>
+                <TextBlock Grid.Row="1" VerticalAlignment="Bottom" Style="{StaticResource StatValueTextStyle}" Text="{x:Bind Value, Mode=OneWay}" />
+              </Grid>
+            </Button>
+          </DataTemplate>
+        </ItemsRepeater.ItemTemplate>
+      </ItemsRepeater>
+
+      <!-- 10-minute remembered folders -->
+      <StackPanel x:Name="TemporaryFoldersSection" Spacing="0" Visibility="Collapsed">
+        <TextBlock Style="{StaticResource SectionHeaderTextStyle}" Text="{c:L Ko='10분 자동 저장', En='10-minute folders'}" />
+        <Border Style="{StaticResource FlatCardStyle}">
+          <ItemsControl x:Name="TemporaryFoldersList">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="models:ActiveTemporaryFolder">
+                <Grid Padding="16,12" BorderBrush="{ThemeResource DividerStrokeBrush}" BorderThickness="0,0,0,1" ColumnSpacing="16">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <c:IconPlate Glyph="&#xE916;" Kind="Accent" Size="32" />
+                  <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                    <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="{x:Bind RuleName}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Style="{StaticResource CaptionSecondaryTextStyle}" Text="{x:Bind DestinationFolder}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                  </StackPanel>
+                  <Button
+                      Grid.Column="2"
+                      VerticalAlignment="Center"
+                      Click="CancelTemporaryFolder_Click"
+                      Content="{c:L Ko='취소', En='Cancel'}"
+                      Tag="{x:Bind}" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </Border>
+        <TextBlock
+            Margin="2,6,0,0"
+            Style="{StaticResource CaptionSecondaryTextStyle}"
+            Text="{c:L Ko='취소하면 이후 다운로드부터 저장 위치를 다시 묻습니다. 이미 정한 파일의 위치는 바뀌지 않습니다.', En='After cancelling, new downloads ask for a folder again. Files that already have a folder keep it.'}" />
+      </StackPanel>
+
+      <!-- Recent downloads -->
+      <Grid Margin="0,8,0,0">
+        <TextBlock Style="{StaticResource SectionHeaderTextStyle}" Margin="2,12,0,8" Text="{c:L Ko='최근 다운로드', En='Recent downloads'}" />
+        <HyperlinkButton HorizontalAlignment="Right" VerticalAlignment="Bottom" Click="ShowAllDownloads_Click" Content="{c:L Ko='모두 보기', En='View all'}" />
+      </Grid>
+      <Border Style="{StaticResource FlatCardStyle}">
+        <Grid>
+          <ListView
+              x:Name="RecentList"
+              Padding="4"
+              IsItemClickEnabled="True"
+              ItemClick="RecentList_ItemClick"
+              ItemContainerStyle="{StaticResource AppListViewItemStyle}"
+              SelectionMode="None">
+            <ListView.ItemTemplate>
+              <DataTemplate x:DataType="vm:JobRowItem">
+                <Grid ColumnSpacing="12" Opacity="{x:Bind RowOpacity, Mode=OneWay}">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <c:IconPlate Glyph="{x:Bind Glyph, Mode=OneWay}" Kind="{x:Bind Kind, Mode=OneWay}" />
+                  <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                    <TextBlock
+                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                        Text="{x:Bind FileName, Mode=OneWay}"
+                        TextDecorations="{x:Bind FileNameDecorations, Mode=OneWay}"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="NoWrap" />
+                    <TextBlock Style="{StaticResource CaptionSecondaryTextStyle}" Text="{x:Bind Subtitle, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                  </StackPanel>
+                  <c:StatusBadge Grid.Column="2" Kind="{x:Bind Kind, Mode=OneWay}" Text="{x:Bind StatusText, Mode=OneWay}" />
+                </Grid>
+              </DataTemplate>
+            </ListView.ItemTemplate>
+          </ListView>
+          <StackPanel x:Name="RecentEmpty" Padding="24" HorizontalAlignment="Center" Spacing="8" Visibility="Collapsed">
+            <FontIcon HorizontalAlignment="Center" FontSize="28" Foreground="{ThemeResource TextTertiaryBrush}" Glyph="&#xE896;" />
+            <TextBlock HorizontalAlignment="Center" Style="{StaticResource SecondaryTextStyle}" TextAlignment="Center" Text="{c:L Ko='아직 규칙에 맞는 다운로드가 없습니다. 사이트 규칙을 만들면 여기에 표시됩니다.', En='No downloads have matched a rule yet. Create a site rule and they will appear here.'}" />
+          </StackPanel>
+        </Grid>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

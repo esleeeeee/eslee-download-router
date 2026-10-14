@@ -69,7 +69,9 @@ public static class BrowserCatalog
     {
         if (browser.ExecutablePath is null)
         {
-            throw new FileNotFoundException($"{browser.DisplayName} 실행 파일을 찾지 못했습니다.");
+            throw new FileNotFoundException(DownloadRouter.Core.Localization.AppText.Pick(
+                $"{browser.DisplayName} 실행 파일을 찾지 못했습니다.",
+                $"The {browser.DisplayName} executable was not found."));
         }
 
         Process.Start(new ProcessStartInfo

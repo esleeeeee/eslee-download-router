@@ -1,20 +1,33 @@
 using System.Runtime.InteropServices;
+using DownloadRouter.App.Services;
 using DownloadRouter.Core.Ipc;
+using DownloadRouter.Core.Localization;
 using DownloadRouter.Core.Models;
-using DownloadRouter.Core.Settings;
 using Microsoft.UI.Windowing;
+using Windows.Graphics;
 
 namespace DownloadRouter.App;
 
 public sealed partial class MainWindow
 {
-    private readonly AppPreferencesStore preferencesStore;
-    private readonly ThemeManager themeManager;
-    private AppPreferences preferences;
+    private const int DefaultWidthDip = 1180;
+    private const int DefaultHeightDip = 780;
+    private const int MinimumWidthDip = 720;
+    private const int MinimumHeightDip = 520;
+
+    /// <summary>Tray Folder menu action ids. Existing ids are part of the Tray Folder catalog contract.</summary>
+    private const string OpenAppAction = "open-app";
+    private const string OpenPendingAction = "open-pending";
+    private const string OpenSettingsAction = "open-settings";
+    private const string PauseRoutingAction = "pause-routing";
+    private const string ResumeRoutingAction = "resume-routing";
+    private const string ExitAppAction = "exit-app";
+
     private AppWindow? appWindow;
     private TrayIconHost? trayIcon;
     private TrayFolderLink? trayFolderLink;
     private bool exitRequested;
+    private bool sizedOnce;
     private Action? exitCallback;
 
     public void InitializeHost(bool background, Action onExit)
@@ -30,27 +43,36 @@ public sealed partial class MainWindow
             ShowFromTray,
             () => NavigateFromTray("pending"),
             () => NavigateFromTray("settings"),
+            () => _ = PauseRoutingAsync(60),
+            () => _ = ResumeRoutingAsync(),
             ExitFromTray);
-        trayFolderLink = new TrayFolderLink(
-            TrayFolderLink.BuildDefaultPipeName(),
-            "eslee.downloadrouter",
-            "eslee Download Router",
-            Environment.ProcessId,
-            visible => RunOnUiAsync(() =>
-            {
-                trayIcon?.SetIconVisible(visible);
-                return true;
-            }),
-            () => RunOnUiAsync(() =>
-            {
-                ShowFromTray();
-                return true;
-            }),
-            () => RunOnUiAsync(BuildTrayFolderMenuItems),
-            actionId => RunOnUiAsync(() => TryStartTrayFolderMenuAction(actionId)),
-            (eventName, message) => WriteAppDiagnostic($"tray-host {eventName}: {message}"),
-            (eventName, message) => WriteAppDiagnostic($"tray-host error {eventName}: {message}"));
-        trayFolderLink.Start();
+
+        // A copy started on another data folder (tests) must not register with Tray Folder:
+        // it would take over the installed app's tile and menu.
+        if (AppServices.Instance.IsDefault)
+        {
+            trayFolderLink = new TrayFolderLink(
+                TrayFolderLink.BuildDefaultPipeName(),
+                "eslee.downloadrouter",
+                "eslee Download Router",
+                Environment.ProcessId,
+                visible => RunOnUiAsync(() =>
+                {
+                    trayIcon?.SetIconVisible(visible);
+                    return true;
+                }),
+                () => RunOnUiAsync(() =>
+                {
+                    ShowFromTray();
+                    return true;
+                }),
+                () => RunOnUiAsync(BuildTrayFolderMenuItems),
+                actionId => RunOnUiAsync(() => TryStartTrayFolderMenuAction(actionId)),
+                (eventName, message) => WriteAppDiagnostic($"tray-host {eventName}: {message}"),
+                (eventName, message) => WriteAppDiagnostic($"tray-host error {eventName}: {message}"));
+            trayFolderLink.Start();
+        }
+
         Closed += (_, _) =>
         {
             trayFolderLink?.Dispose();
@@ -59,6 +81,7 @@ public sealed partial class MainWindow
             exitCallback?.Invoke();
         };
         _ = EnsureAgentForHostAsync();
+        AppServices.Live.Start();
         StartUpdateChecks();
         if (!background)
         {
@@ -66,29 +89,43 @@ public sealed partial class MainWindow
         }
     }
 
-    private IReadOnlyList<TrayFolderMenuItem> BuildTrayFolderMenuItems() =>
-    [
-        TrayFolderMenuItem.Action("open-app", "eslee Download Router 열기"),
-        TrayFolderMenuItem.Action("open-pending", "저장 위치 선택 대기 열기"),
-        TrayFolderMenuItem.Action("open-settings", "일반 설정"),
-        TrayFolderMenuItem.Separator,
-        TrayFolderMenuItem.Action("exit-app", "종료"),
-    ];
+    private IReadOnlyList<TrayFolderMenuItem> BuildTrayFolderMenuItems()
+    {
+        var paused = AppServices.Live.Latest?.Pause.IsPaused == true;
+        return
+        [
+            TrayFolderMenuItem.Action(OpenAppAction, AppText.Pick("eslee Download Router 열기", "Open eslee Download Router")),
+            TrayFolderMenuItem.Action(OpenPendingAction, AppText.Pick("저장 위치 선택 대기 열기", "Open files waiting for a folder")),
+            TrayFolderMenuItem.Action(OpenSettingsAction, AppText.Pick("설정", "Settings")),
+            TrayFolderMenuItem.Separator,
+            paused
+                ? TrayFolderMenuItem.Action(ResumeRoutingAction, AppText.Pick("자동 분류 다시 켜기", "Resume sorting"))
+                : TrayFolderMenuItem.Action(PauseRoutingAction, AppText.Pick("자동 분류 1시간 멈추기", "Pause sorting for 1 hour")),
+            TrayFolderMenuItem.Separator,
+            TrayFolderMenuItem.Action(ExitAppAction, AppText.Pick("종료", "Exit")),
+        ];
+    }
 
     private bool TryStartTrayFolderMenuAction(string actionId)
     {
         switch (actionId)
         {
-            case "open-app":
+            case OpenAppAction:
                 ShowFromTray();
                 return true;
-            case "open-pending":
+            case OpenPendingAction:
                 NavigateFromTray("pending");
                 return true;
-            case "open-settings":
+            case OpenSettingsAction:
                 NavigateFromTray("settings");
                 return true;
-            case "exit-app":
+            case PauseRoutingAction:
+                _ = PauseRoutingAsync(60);
+                return true;
+            case ResumeRoutingAction:
+                _ = ResumeRoutingAsync();
+                return true;
+            case ExitAppAction:
                 _ = DispatcherQueue.TryEnqueue(ExitFromExternalRequest);
                 return true;
             default:
@@ -120,6 +157,7 @@ public sealed partial class MainWindow
 
     public void ShowFromTray()
     {
+        SizeOnFirstShow();
         appWindow?.Show();
         Activate();
         var handle = WinRT.Interop.WindowNative.GetWindowHandle(this);
@@ -127,15 +165,20 @@ public sealed partial class MainWindow
         _ = SetForegroundWindow(handle);
     }
 
+    /// <summary>
+    /// "pending" opens the downloads page on its pending filter. (v1.3.x looked for a navigation
+    /// tag that no longer existed, so the tray item only showed the window.)
+    /// </summary>
     private void NavigateFromTray(string tag)
     {
         ShowFromTray();
-        var item = Navigation.MenuItems
-            .OfType<Microsoft.UI.Xaml.Controls.NavigationViewItem>()
-            .FirstOrDefault(candidate => string.Equals(candidate.Tag as string, tag, StringComparison.Ordinal));
-        if (item is not null)
+        if (tag == "pending")
         {
-            Navigation.SelectedItem = item;
+            OpenPendingHistory();
+        }
+        else
+        {
+            NavigateTo(tag);
         }
     }
 
@@ -145,7 +188,7 @@ public sealed partial class MainWindow
     public void ExitFromExternalRequest()
     {
         exitRequested = true;
-        StopLiveUpdates();
+        currentSelectionCancellation?.Cancel();
         trayIcon?.Dispose();
         trayIcon = null;
         Close();
@@ -158,7 +201,7 @@ public sealed partial class MainWindow
             return;
         }
 
-        if (preferences.CloseBehavior == WindowCloseBehavior.MinimizeToTray)
+        if (AppServices.Preferences.CloseBehavior == WindowCloseBehavior.MinimizeToTray)
         {
             args.Cancel = true;
             sender.Hide();
@@ -166,14 +209,38 @@ public sealed partial class MainWindow
         }
 
         exitRequested = true;
-        StopLiveUpdates();
+        currentSelectionCancellation?.Cancel();
         trayIcon?.Dispose();
         trayIcon = null;
     }
 
-    private async Task EnsureAgentForHostAsync()
+    private void SizeOnFirstShow()
     {
-        var running = await new AgentProcessManager(agent).EnsureRunningAsync();
+        if (sizedOnce || appWindow is null)
+        {
+            return;
+        }
+
+        sizedOnce = true;
+        var handle = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        var scale = Math.Max(96u, GetDpiForWindow(handle)) / 96d;
+        var workArea = DisplayArea.GetFromWindowId(appWindow.Id, DisplayAreaFallback.Primary).WorkArea;
+        var width = Math.Min((int)Math.Round(DefaultWidthDip * scale), workArea.Width - 48);
+        var height = Math.Min((int)Math.Round(DefaultHeightDip * scale), workArea.Height - 48);
+        appWindow.Resize(new SizeInt32(width, height));
+        appWindow.Move(new PointInt32(
+            workArea.X + Math.Max(0, (workArea.Width - width) / 2),
+            workArea.Y + Math.Max(0, (workArea.Height - height) / 2)));
+        if (appWindow.Presenter is OverlappedPresenter presenter)
+        {
+            presenter.PreferredMinimumWidth = (int)Math.Round(MinimumWidthDip * scale);
+            presenter.PreferredMinimumHeight = (int)Math.Round(MinimumHeightDip * scale);
+        }
+    }
+
+    private static async Task EnsureAgentForHostAsync()
+    {
+        var running = await new AgentProcessManager(AppServices.Agent).EnsureRunningAsync();
         if (!running)
         {
             WriteAppDiagnostic("Agent start failed; Native Host fallback remains enabled.");
@@ -181,35 +248,16 @@ public sealed partial class MainWindow
     }
 
     private static void WriteAppDiagnostic(string message)
-        => WriteDiagnostic("app-startup.log", message);
+        => AppServices.WriteDiagnostic("app-startup.log", message);
 
     private static void WriteWindowActivationDiagnostic(string message)
-        => WriteDiagnostic("window-activation.log", message);
+        => AppServices.WriteDiagnostic("window-activation.log", message);
 
     private FolderSelectionWindow CreateFolderSelectionWindow()
-        => new(
-            themeManager,
-            WinRT.Interop.WindowNative.GetWindowHandle(this),
-            WriteWindowActivationDiagnostic);
+        => new(WinRT.Interop.WindowNative.GetWindowHandle(this), WriteWindowActivationDiagnostic);
 
-    private static void WriteDiagnostic(string fileName, string message)
-    {
-        try
-        {
-            var directory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "eslee",
-                "DownloadRouter",
-                "logs");
-            Directory.CreateDirectory(directory);
-            File.AppendAllText(
-                Path.Combine(directory, fileName),
-                $"{DateTimeOffset.UtcNow:O} {message}{Environment.NewLine}");
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-        }
-    }
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(nint windowHandle);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

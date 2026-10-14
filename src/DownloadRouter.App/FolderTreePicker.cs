@@ -1,3 +1,4 @@
+using DownloadRouter.Core.Localization;
 using DownloadRouter.Core.Paths;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -18,12 +19,14 @@ public sealed class FolderTreePicker : UserControl
         TextWrapping = TextWrapping.Wrap,
         MaxLines = 2,
         TextTrimming = TextTrimming.CharacterEllipsis,
-        Opacity = 0.75,
+        Style = Controls.ThemeStyles.Get<Style>("CaptionSecondaryTextStyle"),
     };
     private readonly TextBlock nodeError = new()
     {
         TextWrapping = TextWrapping.Wrap,
         Visibility = Visibility.Collapsed,
+        Style = Controls.ThemeStyles.Get<Style>("CaptionTextBlockStyle"),
+        Foreground = Controls.ThemeStyles.Get<Microsoft.UI.Xaml.Media.Brush>("CautionForegroundBrush"),
     };
     private readonly ProgressRing loading = new()
     {
@@ -34,7 +37,7 @@ public sealed class FolderTreePicker : UserControl
     private readonly Dictionary<TreeViewNode, FolderTreeEntry> entries = [];
     private readonly HashSet<TreeViewNode> loadedNodes = [];
     private string storageRoot = string.Empty;
-    private readonly Button parentButton = new() { Content = "상위 폴더로", Visibility = Visibility.Collapsed };
+    private readonly Button parentButton = new() { Content = AppText.Pick("상위 폴더로", "Up one level"), Visibility = Visibility.Collapsed };
     public bool AllowParentNavigation { get; set; }
 
     public event EventHandler? SelectionChanged;
@@ -56,10 +59,10 @@ public sealed class FolderTreePicker : UserControl
         ScrollViewer.SetHorizontalScrollMode(tree, ScrollMode.Disabled);
         var refresh = new Button
         {
-            Content = "새로 고침",
+            Content = AppText.Pick("새로 고침", "Refresh"),
             HorizontalAlignment = HorizontalAlignment.Left,
         };
-        ToolTipService.SetToolTip(refresh, "선택한 폴더 새로 고침");
+        ToolTipService.SetToolTip(refresh, AppText.Pick("선택한 폴더 새로 고침", "Refresh the selected folder"));
         refresh.Click += async (_, _) => await RefreshSelectedAsync();
         parentButton.Click += async (_, _) =>
         {
@@ -68,7 +71,7 @@ public sealed class FolderTreePicker : UserControl
             try { await InitializeAsync(SelectionDestination.ValidateFolder(parent.FullName)); }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
             {
-                nodeError.Text = "상위 폴더에 접근할 수 없습니다.";
+                nodeError.Text = AppText.Pick("상위 폴더에 접근할 수 없습니다.", "The parent folder cannot be opened.");
                 nodeError.Visibility = Visibility.Visible;
             }
         };
@@ -132,7 +135,7 @@ public sealed class FolderTreePicker : UserControl
         rootNode.HasUnrealizedChildren = true;
         tree.RootNodes.Add(rootNode);
         tree.SelectedNode = rootNode;
-        selectedPath.Text = $"선택 위치: {storageRoot}";
+        selectedPath.Text = AppText.Pick($"선택 위치: {storageRoot}", $"Selected: {storageRoot}");
         ToolTipService.SetToolTip(selectedPath, selectedPath.Text);
 
         // Show the first level immediately without recursively scanning the tree.
@@ -147,6 +150,74 @@ public sealed class FolderTreePicker : UserControl
                 await EnsureChildrenLoadedAsync(selectedNode, cancellationToken);
                 selectedNode.IsExpanded = true;
             }
+        }
+    }
+
+    /// <summary>True when a shortcut folder can be shown: inside the current root, or anywhere when parent navigation is allowed.</summary>
+    public bool CanNavigateTo(string folder)
+        => AllowParentNavigation || IsUnderRoot(folder);
+
+    /// <summary>Selects a folder inside the current root, or re-roots the tree at it when parent navigation is allowed.</summary>
+    public async Task<bool> NavigateToAsync(string folder)
+    {
+        string full;
+        try
+        {
+            full = Path.GetFullPath(folder);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+
+        if (!await Task.Run(() => Directory.Exists(full)))
+        {
+            return false;
+        }
+
+        if (IsUnderRoot(full))
+        {
+            var relative = Path.GetRelativePath(storageRoot, full);
+            if (relative != ".")
+            {
+                await SelectRelativePathAsync(relative);
+            }
+            else if (tree.RootNodes.FirstOrDefault() is { } rootNode)
+            {
+                tree.SelectedNode = rootNode;
+            }
+
+            return string.Equals(SelectedFullPath.TrimEnd(Path.DirectorySeparatorChar), full.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!AllowParentNavigation)
+        {
+            return false;
+        }
+
+        try
+        {
+            await InitializeAsync(SelectionDestination.ValidateFolder(full));
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private bool IsUnderRoot(string folder)
+    {
+        try
+        {
+            var full = Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar);
+            var root = storageRoot.TrimEnd(Path.DirectorySeparatorChar);
+            return string.Equals(full, root, StringComparison.OrdinalIgnoreCase)
+                || full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
         }
     }
 
@@ -206,8 +277,8 @@ public sealed class FolderTreePicker : UserControl
         }
 
         selectedPath.Text = entry.IsAccessible
-            ? $"선택 위치: {entry.FullPath}"
-            : entry.ErrorMessage ?? "이 폴더에 접근할 수 없습니다.";
+            ? AppText.Pick($"선택 위치: {entry.FullPath}", $"Selected: {entry.FullPath}")
+            : entry.ErrorMessage ?? AppText.Pick("이 폴더에 접근할 수 없습니다.", "This folder cannot be opened.");
         ToolTipService.SetToolTip(selectedPath, selectedPath.Text);
         parentButton.IsEnabled = Directory.GetParent(entry.FullPath) is not null;
         SelectionChanged?.Invoke(this, EventArgs.Empty);
@@ -243,7 +314,7 @@ public sealed class FolderTreePicker : UserControl
         catch (Exception exception) when (exception is UnauthorizedAccessException or IOException)
         {
             node.HasUnrealizedChildren = false;
-            nodeError.Text = "이 폴더의 하위 항목을 읽을 수 없습니다.";
+            nodeError.Text = AppText.Pick("이 폴더의 하위 항목을 읽을 수 없습니다.", "The contents of this folder cannot be read.");
             nodeError.Visibility = Visibility.Visible;
         }
         finally

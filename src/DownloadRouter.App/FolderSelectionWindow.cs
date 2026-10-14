@@ -1,10 +1,14 @@
 using System.Runtime.InteropServices;
+using DownloadRouter.App.Controls;
+using DownloadRouter.App.Services;
 using DownloadRouter.Core.Jobs;
+using DownloadRouter.Core.Localization;
 using DownloadRouter.Core.Paths;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Windows.Graphics;
 
 namespace DownloadRouter.App;
@@ -25,8 +29,35 @@ public sealed record FolderSelectionResult(
     string? FileName = null,
     bool UseForTenMinutes = false);
 
+/// <summary>What the window shows about the download being placed.</summary>
+public sealed record FolderSelectionDetails(
+    string SourceHost,
+    string RuleName,
+    string Status,
+    string StorageRoot,
+    int OtherPendingCount,
+    int QueuePosition,
+    int QueueTotal);
+
+public sealed record FolderSelectionRequest(
+    string StorageRoot,
+    string? SelectedRelativeFolder,
+    FolderSelectionDetails? Details,
+    bool AllowLater,
+    bool AllowSkip,
+    bool AllowSkipAll = false,
+    bool AllowParentNavigation = false,
+    string? FileName = null,
+    bool AllowTenMinuteFolder = false,
+    Guid? RuleId = null,
+    IReadOnlyList<string>? RecentFolders = null,
+    string? Heading = null);
+
+/// <summary>
+/// Independent "choose a folder" window. It is not owned by the main window, so it can come to
+/// the front while the main window is minimized or hidden in the tray.
+/// </summary>
 public sealed class FolderSelectionWindow(
-    ThemeManager themeManager,
     nint mainWindowHandle,
     Action<string>? diagnosticWriter = null)
 {
@@ -34,11 +65,27 @@ public sealed class FolderSelectionWindow(
     private const int DefaultHeightDip = 820;
     private readonly Window window = new();
     private readonly FolderTreePicker picker = new();
-    private readonly TextBox fileNameInput = new() { Header = "파일 이름 (확장자 포함)", MaxLength = 255 };
+    private readonly TextBox fileNameInput = new()
+    {
+        Header = AppText.Pick("파일 이름 (확장자 포함)", "File name (with extension)"),
+        MaxLength = 255,
+    };
     private readonly TextBlock fileNameError = new() { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+    private readonly TextBlock headerTitle = new() { TextTrimming = TextTrimming.CharacterEllipsis };
+    private readonly TextBlock headerSubtitle = new() { TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap };
+    private readonly TextBlock details = new() { TextWrapping = TextWrapping.Wrap, MaxWidth = 420, IsTextSelectionEnabled = true };
+    private readonly WrapPanel shortcuts = new();
+    private readonly ToggleButton favoriteToggle = new();
+    private readonly TaskCompletionSource<FolderSelectionResult> completion = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
+    private FolderSelectionRequest request = null!;
+    private DispatcherQueueTimer? foregroundRetryTimer;
+    private int foregroundRetryCount;
     private string? defaultFileName;
     private bool fileNameEdited;
     private bool useForTenMinutes;
+    private bool updatingFavorite;
+    private bool completed;
 
     public void UpdateFileName(string name)
     {
@@ -46,58 +93,44 @@ public sealed class FolderSelectionWindow(
         {
             defaultFileName = name;
             fileNameInput.Text = name;
+            if (request.Heading is null)
+            {
+                headerTitle.Text = name;
+            }
         }
     }
-    private readonly TextBlock details = new()
-    {
-        TextWrapping = TextWrapping.Wrap,
-        HorizontalAlignment = HorizontalAlignment.Stretch,
-        MaxWidth = 440,
-    };
-    private readonly TextBlock descriptionSummary = new()
-    {
-        TextTrimming = TextTrimming.CharacterEllipsis,
-        VerticalAlignment = VerticalAlignment.Center,
-    };
-    private readonly TaskCompletionSource<FolderSelectionResult> completion = new(
-        TaskCreationOptions.RunContinuationsAsynchronously);
-    private DispatcherQueueTimer? foregroundRetryTimer;
-    private int foregroundRetryCount;
-    private bool completed;
 
-    public void UpdateDescription(string description)
+    public void UpdateDetails(FolderSelectionDetails value)
     {
-        details.Text = description;
-        descriptionSummary.Text = description.Split('\n')[0].Trim();
+        headerSubtitle.Text = AppText.Pick(
+            $"{value.SourceHost} · 규칙 {value.RuleName}" + (value.QueueTotal > 1 ? $" · {value.QueuePosition}/{value.QueueTotal}" : string.Empty),
+            $"{value.SourceHost} · rule {value.RuleName}" + (value.QueueTotal > 1 ? $" · {value.QueuePosition}/{value.QueueTotal}" : string.Empty));
+        details.Text = AppText.Pick(
+            $"출처 사이트: {value.SourceHost}\n규칙: {value.RuleName}\n상태: {value.Status}\n기준 폴더: {value.StorageRoot}\n동시에 기다리는 다른 파일: {value.OtherPendingCount}개",
+            $"Source site: {value.SourceHost}\nRule: {value.RuleName}\nStatus: {value.Status}\nBase folder: {value.StorageRoot}\nOther files waiting: {value.OtherPendingCount}");
     }
 
-    public async Task<FolderSelectionResult> ShowAsync(
-        string storageRoot,
-        string? selectedRelativeFolder,
-        string description,
-        bool allowLater,
-        bool allowSkip,
-        CancellationToken cancellationToken = default,
-        bool allowSkipAll = false,
-        bool allowParentNavigation = false,
-        string? fileName = null,
-        bool allowTenMinuteFolder = false)
+    public async Task<FolderSelectionResult> ShowAsync(FolderSelectionRequest selection, CancellationToken cancellationToken = default)
     {
-        picker.AllowParentNavigation = allowParentNavigation;
-        defaultFileName = fileName;
-        fileNameInput.Text = fileName ?? string.Empty;
-        fileNameInput.Visibility = fileName is null ? Visibility.Collapsed : Visibility.Visible;
+        request = selection;
+        picker.AllowParentNavigation = selection.AllowParentNavigation;
+        defaultFileName = selection.FileName;
+        fileNameInput.Text = selection.FileName ?? string.Empty;
+        fileNameInput.Visibility = selection.FileName is null ? Visibility.Collapsed : Visibility.Visible;
         fileNameInput.TextChanged += (_, _) =>
             fileNameEdited = !string.Equals(fileNameInput.Text, defaultFileName, StringComparison.Ordinal);
-        window.Title = "다운로드 저장 위치 선택";
-        window.Content = CreateContent(description, allowLater, allowSkip, allowSkipAll, allowTenMinuteFolder);
-        themeManager.RegisterWindow(window);
+        window.Title = AppText.Pick("다운로드 저장 위치 선택", "Choose a download folder");
+        window.Content = CreateContent();
+        AppServices.Theme.Register(window);
         window.Closed += (_, _) =>
         {
             diagnosticWriter?.Invoke("selection-window closed-event");
             CompleteWithoutClosing(FolderSelectionAction.Closed);
         };
-        await picker.InitializeAsync(storageRoot, selectedRelativeFolder, cancellationToken);
+        picker.SelectionChanged += (_, _) => UpdateFavoriteToggle();
+        await picker.InitializeAsync(selection.StorageRoot, selection.SelectedRelativeFolder, cancellationToken);
+        RenderShortcuts();
+        UpdateFavoriteToggle();
         window.Activate();
         SizeAndCenterWindow();
         ShowAndActivateSelectionWindow("initial");
@@ -111,149 +144,305 @@ public sealed class FolderSelectionWindow(
         return await completion.Task;
     }
 
-    private UIElement CreateContent(string description, bool allowLater, bool allowSkip, bool allowSkipAll, bool allowTenMinuteFolder)
+    private UIElement CreateContent()
     {
-        var root = new Grid
-        {
-            Padding = new Thickness(16),
-            RowSpacing = 12,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Stretch,
-        };
+        var root = new Grid();
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var background = new Border { Style = ThemeStyles.Get<Style>("WindowRootBorderStyle") };
+        Grid.SetRowSpan(background, 3);
+        root.Children.Add(background);
 
-        UpdateDescription(description);
-        var info = new Button
+        // Header: what is being placed, with the full download details one click away.
+        var header = new Grid { Padding = new Thickness(24, 20, 24, 12), ColumnSpacing = 16 };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.Children.Add(new IconPlate { Glyph = "", Kind = BadgeKind.Accent, Size = 44 });
+        var titles = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        headerTitle.Style = ThemeStyles.Get<Style>("SubtitleTextBlockStyle");
+        headerTitle.FontSize = 18;
+        headerTitle.Text = request.Heading ?? request.FileName ?? AppText.Pick("저장 위치 선택", "Choose a folder");
+        headerTitle.TextWrapping = request.Heading is null ? TextWrapping.NoWrap : TextWrapping.Wrap;
+        headerSubtitle.Style = ThemeStyles.Get<Style>("CaptionSecondaryTextStyle");
+        titles.Children.Add(headerTitle);
+        titles.Children.Add(headerSubtitle);
+        Grid.SetColumn(titles, 1);
+        header.Children.Add(titles);
+        if (request.Details is { } info)
         {
-            Content = "다운로드 정보",
-            Flyout = new Flyout
+            UpdateDetails(info);
+            var infoButton = new Button
             {
-                Content = new ScrollViewer
+                Content = new FontIcon { Glyph = "", FontSize = 16 },
+                VerticalAlignment = VerticalAlignment.Center,
+                Flyout = new Flyout
                 {
-                    Content = details,
-                    MaxHeight = 320,
-                    HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    Content = new ScrollViewer
+                    {
+                        Content = details,
+                        MaxHeight = 320,
+                        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    },
                 },
-            },
-        };
-        var summaryRow = new Grid { ColumnSpacing = 12 };
-        summaryRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        summaryRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        summaryRow.Children.Add(descriptionSummary);
-        Grid.SetColumn(info, 1);
-        summaryRow.Children.Add(info);
-        var header = new StackPanel { Spacing = 8 };
-        header.Children.Add(summaryRow);
-        header.Children.Add(fileNameInput);
-        header.Children.Add(fileNameError);
-        root.Children.Add(header);
-
-        picker.HorizontalAlignment = HorizontalAlignment.Stretch;
-        picker.VerticalAlignment = VerticalAlignment.Stretch;
-        Grid.SetRow(picker, 1);
-        root.Children.Add(picker);
-
-        var buttons = new Grid
-        {
-            RowSpacing = 8,
-            ColumnSpacing = 8,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-        };
-        buttons.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        buttons.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var apply = new Button
-        {
-            Content = "이 위치로 보내기",
-            Style = Application.Current.Resources["AccentButtonStyle"] as Style,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-        };
-        apply.Click += (_, _) => Complete(FolderSelectionAction.Apply);
-        picker.SelectionChanged += (_, _) => apply.IsEnabled = picker.IsSelectionAccessible;
-        buttons.Children.Add(apply);
-
-        if (allowTenMinuteFolder)
-        {
-            var remember = new Button
-            {
-                Content = "10분간 이 위치로 저장",
-                HorizontalAlignment = HorizontalAlignment.Stretch,
             };
-            ToolTipService.SetToolTip(remember, "현재 파일과 이후 10분 동안 같은 사이트 규칙의 새 다운로드에 적용합니다. 파일명은 재사용하지 않습니다.");
-            picker.SelectionChanged += (_, _) => remember.IsEnabled = picker.IsSelectionAccessible;
-            remember.Click += (_, _) => Complete(FolderSelectionAction.Apply, rememberFolder: true);
-            Grid.SetColumn(remember, 1);
-            buttons.Children.Add(remember);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(infoButton, AppText.Pick("다운로드 정보", "Download details"));
+            ToolTipService.SetToolTip(infoButton, AppText.Pick("다운로드 정보", "Download details"));
+            Grid.SetColumn(infoButton, 2);
+            header.Children.Add(infoButton);
         }
         else
         {
-            Grid.SetColumnSpan(apply, 2);
+            headerSubtitle.Visibility = Visibility.Collapsed;
         }
 
-        var otherActions = new MenuFlyout();
-        if (allowLater)
+        root.Children.Add(header);
+
+        // Body: file name, shortcuts, folder tree.
+        var body = new Grid { Padding = new Thickness(24, 0, 24, 16), RowSpacing = 12 };
+        body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        var nameArea = new StackPanel { Spacing = 4 };
+        nameArea.Children.Add(fileNameInput);
+        fileNameError.Style = ThemeStyles.Get<Style>("CaptionTextBlockStyle");
+        fileNameError.Foreground = ThemeStyles.Get<Microsoft.UI.Xaml.Media.Brush>("CriticalForegroundBrush");
+        nameArea.Children.Add(fileNameError);
+        body.Children.Add(nameArea);
+
+        var shortcutArea = new StackPanel { Spacing = 6 };
+        var shortcutHeader = new Grid();
+        shortcutHeader.Children.Add(new TextBlock
         {
-            var later = new MenuFlyoutItem
-            {
-                Text = "대기 목록에 남기기",
-            };
-            ToolTipService.SetToolTip(later, "자동 팝업은 다시 표시하지 않으며, 다운로드 이력의 처리 대기에서 나중에 처리할 수 있습니다.");
+            Text = AppText.Pick("즐겨찾기와 최근 폴더", "Favorites and recent folders"),
+            Style = ThemeStyles.Get<Style>("CaptionSecondaryTextStyle"),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        favoriteToggle.HorizontalAlignment = HorizontalAlignment.Right;
+        favoriteToggle.Padding = new Thickness(10, 3, 10, 4);
+        favoriteToggle.Checked += (_, _) => _ = SetFavoriteAsync(true);
+        favoriteToggle.Unchecked += (_, _) => _ = SetFavoriteAsync(false);
+        shortcutHeader.Children.Add(favoriteToggle);
+        shortcutArea.Children.Add(shortcutHeader);
+        shortcutArea.Children.Add(shortcuts);
+        Grid.SetRow(shortcutArea, 1);
+        body.Children.Add(shortcutArea);
+
+        var treeCard = new Border { Style = ThemeStyles.Get<Style>("CardStyle"), Padding = new Thickness(12) };
+        picker.HorizontalAlignment = HorizontalAlignment.Stretch;
+        picker.VerticalAlignment = VerticalAlignment.Stretch;
+        treeCard.Child = picker;
+        Grid.SetRow(treeCard, 2);
+        body.Children.Add(treeCard);
+        Grid.SetRow(body, 1);
+        root.Children.Add(body);
+
+        // Footer: the main decision on the right, the rest behind "More".
+        var footer = new Border { Style = ThemeStyles.Get<Style>("FooterBarStyle") };
+        var buttons = new Grid { ColumnSpacing = 8 };
+        buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        buttons.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var otherActions = new MenuFlyout();
+        if (request.AllowLater)
+        {
+            var later = new MenuFlyoutItem { Text = AppText.Pick("대기 목록에 남기기", "Keep waiting in the list") };
+            ToolTipService.SetToolTip(later, AppText.Pick(
+                "이 창은 다시 자동으로 뜨지 않으며, 다운로드 화면의 처리 대기에서 나중에 정할 수 있습니다.",
+                "This window will not pop up again; choose later from Waiting on the Downloads page."));
             later.Click += (_, _) => Complete(FolderSelectionAction.Later);
             otherActions.Items.Add(later);
         }
 
-        if (allowSkipAll)
+        if (request.AllowSkipAll)
         {
-            var skipAll = new MenuFlyoutItem
-            {
-                Text = "대기 중인 파일 모두 이동하지 않기",
-            };
+            var skipAll = new MenuFlyoutItem { Text = AppText.Pick("대기 중인 파일 모두 옮기지 않기", "Do not move any waiting file") };
             skipAll.Click += (_, _) => Complete(FolderSelectionAction.SkipAll);
             otherActions.Items.Add(skipAll);
         }
 
-        if (allowSkip)
+        if (request.AllowSkip)
         {
-            var skip = new Button
-            {
-                Content = "이번 파일은 이동하지 않기",
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-            };
+            var skip = new MenuFlyoutItem { Text = AppText.Pick("이번 파일은 옮기지 않기", "Do not move this file") };
             skip.Click += (_, _) => Complete(FolderSelectionAction.Skip);
-            Grid.SetRow(skip, 1);
-            buttons.Children.Add(skip);
+            otherActions.Items.Add(skip);
+        }
+
+        if (otherActions.Items.Count > 0)
+        {
+            otherActions.Items.Add(new MenuFlyoutSeparator());
         }
 
         var close = new MenuFlyoutItem
         {
-            Text = allowLater ? "닫고 대기 목록에 남기기" : "창 닫기",
+            Text = request.AllowLater ? AppText.Pick("닫고 대기 목록에 남기기", "Close and keep waiting") : AppText.Pick("창 닫기", "Close"),
         };
         close.Click += (_, _) => Complete(FolderSelectionAction.Closed);
         otherActions.Items.Add(close);
-        var more = new DropDownButton
-        {
-            Content = "다른 작업",
-            Flyout = otherActions,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-        };
-        Grid.SetRow(more, 1);
-        Grid.SetColumn(more, allowSkip ? 1 : 0);
-        Grid.SetColumnSpan(more, allowSkip ? 1 : 2);
+        var more = new DropDownButton { Content = AppText.Pick("다른 작업", "More"), Flyout = otherActions };
         buttons.Children.Add(more);
-        Grid.SetRow(buttons, 2);
-        root.Children.Add(buttons);
+
+        if (request.AllowTenMinuteFolder)
+        {
+            var remember = new Button { Content = AppText.Pick("10분간 이 위치로", "Use for 10 minutes") };
+            ToolTipService.SetToolTip(remember, AppText.Pick(
+                "이 파일과 앞으로 10분 동안 같은 규칙의 새 다운로드를 이 폴더에 저장합니다. 파일 이름은 다시 쓰지 않습니다.",
+                "Saves this file and new downloads of the same rule for the next 10 minutes into this folder. The file name is not reused."));
+            picker.SelectionChanged += (_, _) => remember.IsEnabled = picker.IsSelectionAccessible;
+            remember.Click += (_, _) => Complete(FolderSelectionAction.Apply, rememberFolder: true);
+            Grid.SetColumn(remember, 2);
+            buttons.Children.Add(remember);
+        }
+
+        var apply = new Button
+        {
+            Content = AppText.Pick("이 위치로 보내기", "Save here"),
+            Style = ThemeStyles.Get<Style>("AccentButtonStyle"),
+            MinWidth = 140,
+        };
+        apply.Click += (_, _) => Complete(FolderSelectionAction.Apply);
+        picker.SelectionChanged += (_, _) => apply.IsEnabled = picker.IsSelectionAccessible;
+        Grid.SetColumn(apply, 3);
+        buttons.Children.Add(apply);
+        footer.Child = buttons;
+        Grid.SetRow(footer, 2);
+        root.Children.Add(footer);
+
+        // Enter applies from the file name box; Escape keeps the file waiting.
+        root.KeyboardAccelerators.Add(CreateAccelerator(Windows.System.VirtualKey.Escape, () => Complete(FolderSelectionAction.Closed)));
         return root;
+    }
+
+    private static Microsoft.UI.Xaml.Input.KeyboardAccelerator CreateAccelerator(Windows.System.VirtualKey key, Action action)
+    {
+        var accelerator = new Microsoft.UI.Xaml.Input.KeyboardAccelerator { Key = key };
+        accelerator.Invoked += (_, args) =>
+        {
+            args.Handled = true;
+            action();
+        };
+        return accelerator;
+    }
+
+    private void RenderShortcuts()
+    {
+        shortcuts.Children.Clear();
+        var favorites = AppServices.Preferences.FavoriteFolders ?? [];
+        var recent = (request.RecentFolders ?? [])
+            .Where(folder => !favorites.Contains(folder, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
+        foreach (var folder in favorites)
+        {
+            shortcuts.Children.Add(CreateShortcut(folder, ""));
+        }
+
+        foreach (var folder in recent)
+        {
+            shortcuts.Children.Add(CreateShortcut(folder, ""));
+        }
+
+        if (shortcuts.Children.Count == 0)
+        {
+            shortcuts.Children.Add(new TextBlock
+            {
+                Text = AppText.Pick(
+                    "아직 없습니다. 자주 쓰는 폴더를 고른 뒤 ☆를 누르면 여기에 표시됩니다.",
+                    "None yet. Select a folder you use often and choose ☆ to pin it here."),
+                Style = ThemeStyles.Get<Style>("CaptionSecondaryTextStyle"),
+            });
+        }
+    }
+
+    private Button CreateShortcut(string folder, string glyph)
+    {
+        var reachable = picker.CanNavigateTo(folder);
+        var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        content.Children.Add(new FontIcon { Glyph = glyph, FontSize = 12 });
+        content.Children.Add(new TextBlock
+        {
+            Text = Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar)) is { Length: > 0 } name ? name : folder,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
+        var button = new Button
+        {
+            Content = content,
+            Style = ThemeStyles.Get<Style>("ShortcutButtonStyle"),
+            IsEnabled = reachable,
+        };
+        ToolTipService.SetToolTip(button, reachable
+            ? folder
+            : folder + "\n" + AppText.Pick("이 규칙의 기준 폴더 밖이라 고를 수 없습니다.", "Outside this rule's base folder."));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, folder);
+        button.Click += async (_, _) =>
+        {
+            if (!await picker.NavigateToAsync(folder))
+            {
+                await AppDialog.ShowMessageAsync(
+                    window.Content.XamlRoot,
+                    AppText.Pick($"폴더를 열 수 없습니다. 지워졌거나 연결되지 않았을 수 있습니다.\n{folder}", $"The folder cannot be opened. It may be deleted or offline.\n{folder}"),
+                    DialogTone.Warning);
+            }
+        };
+        return button;
+    }
+
+    private void UpdateFavoriteToggle()
+    {
+        var current = picker.SelectedFullPath;
+        var isFavorite = (AppServices.Preferences.FavoriteFolders ?? []).Contains(current, StringComparer.OrdinalIgnoreCase);
+        updatingFavorite = true;
+        favoriteToggle.IsChecked = isFavorite;
+        favoriteToggle.IsEnabled = picker.IsSelectionAccessible;
+        updatingFavorite = false;
+        var label = isFavorite
+            ? AppText.Pick("★ 즐겨찾기에서 빼기", "★ Remove from favorites")
+            : AppText.Pick("☆ 이 폴더 즐겨찾기", "☆ Add to favorites");
+        favoriteToggle.Content = label;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(favoriteToggle, label);
+    }
+
+    private async Task SetFavoriteAsync(bool add)
+    {
+        if (updatingFavorite)
+        {
+            return;
+        }
+
+        var folder = picker.SelectedFullPath;
+        try
+        {
+            await AppServices.UpdatePreferencesAsync(preferences =>
+            {
+                var list = (preferences.FavoriteFolders ?? []).Where(entry => !string.Equals(entry, folder, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (add)
+                {
+                    list.Insert(0, folder);
+                }
+
+                return preferences with { FavoriteFolders = list.Take(20).ToArray() };
+            });
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or TimeoutException)
+        {
+            diagnosticWriter?.Invoke($"selection-window favorite-save-failed {exception.GetType().Name}");
+        }
+
+        RenderShortcuts();
+        UpdateFavoriteToggle();
     }
 
     private void Complete(FolderSelectionAction action, bool rememberFolder = false)
     {
         if (action == FolderSelectionAction.Apply && fileNameEdited)
         {
-            try { SelectionDestination.ValidateFileName(fileNameInput.Text); }
+            try
+            {
+                SelectionDestination.ValidateFileName(fileNameInput.Text);
+            }
             catch (ArgumentException exception)
             {
                 fileNameError.Text = exception.Message;
@@ -261,6 +450,7 @@ public sealed class FolderSelectionWindow(
                 return;
             }
         }
+
         useForTenMinutes = action == FolderSelectionAction.Apply && rememberFolder;
         if (CompleteWithoutClosing(action))
         {
@@ -279,9 +469,12 @@ public sealed class FolderSelectionWindow(
         foregroundRetryTimer?.Stop();
         foregroundRetryTimer = null;
         diagnosticWriter?.Invoke($"selection-window completion action={action}");
-        completion.TrySetResult(new FolderSelectionResult(action, picker.SelectedRelativeFolder,
+        completion.TrySetResult(new FolderSelectionResult(
+            action,
+            picker.SelectedRelativeFolder,
             picker.AllowParentNavigation ? picker.SelectedFullPath : null,
-            fileNameEdited ? fileNameInput.Text : null, useForTenMinutes));
+            fileNameEdited ? fileNameInput.Text : null,
+            useForTenMinutes));
         return true;
     }
 

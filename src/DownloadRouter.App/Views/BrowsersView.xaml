@@ -1,0 +1,72 @@
+<UserControl
+    x:Class="DownloadRouter.App.Views.BrowsersView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:c="using:DownloadRouter.App.Controls">
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+    <StackPanel MaxWidth="1000" Padding="{StaticResource PagePadding}" HorizontalAlignment="Stretch" Spacing="12">
+      <StackPanel Spacing="4">
+        <TextBlock Style="{StaticResource PageTitleTextStyle}" Text="{c:L Ko='브라우저 연결', En='Browsers'}" />
+        <TextBlock Style="{StaticResource PageSubtitleTextStyle}" Text="{c:L Ko='브라우저에 확장을 한 번 설치하면 다운로드를 규칙에 따라 분류합니다.', En='Install the extension in your browser once, and downloads are sorted by your rules.'}" />
+      </StackPanel>
+
+      <InfoBar x:Name="ExtensionRefreshBar" IsClosable="False" IsOpen="True" Severity="Informational" />
+
+      <TextBlock Style="{StaticResource SectionHeaderTextStyle}" Text="{c:L Ko='확장 설치 순서', En='Installing the extension'}" />
+      <Border Style="{StaticResource CardStyle}">
+        <StackPanel Spacing="14">
+          <Grid ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <c:IconPlate Glyph="&#xE774;" Kind="Accent" Size="28" />
+            <TextBlock Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap" Text="{c:L Ko='1. 아래 목록에서 브라우저의 “확장 관리 열기”를 누릅니다.', En='1. Choose “Open extensions page” for your browser below.'}" />
+          </Grid>
+          <Grid ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <c:IconPlate Glyph="&#xE9F5;" Kind="Accent" Size="28" />
+            <TextBlock Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap" Text="{c:L Ko='2. 개발자 모드를 켭니다.', En='2. Turn on developer mode.'}" />
+          </Grid>
+          <Grid ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <c:IconPlate Glyph="&#xE8B7;" Kind="Accent" Size="28" />
+            <TextBlock Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap" Text="{c:L Ko='3. “압축 해제된 확장 로드”를 누르고 아래 폴더를 고릅니다.', En='3. Choose “Load unpacked” and pick the folder below.'}" />
+          </Grid>
+          <Border Style="{StaticResource SecondaryCardStyle}">
+            <StackPanel Spacing="8">
+              <TextBlock x:Name="ExtensionFolderText" Style="{StaticResource BodyTextBlockStyle}" IsTextSelectionEnabled="True" TextWrapping="Wrap" />
+              <StackPanel x:Name="ExtensionFolderActions" Orientation="Horizontal" Spacing="8">
+                <Button Click="CopyFolder_Click">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon FontSize="14" Glyph="&#xE8C8;" />
+                    <TextBlock Text="{c:L Ko='폴더 경로 복사', En='Copy folder path'}" />
+                  </StackPanel>
+                </Button>
+                <Button Click="OpenFolder_Click">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon FontSize="14" Glyph="&#xE838;" />
+                    <TextBlock Text="{c:L Ko='폴더 열기', En='Open folder'}" />
+                  </StackPanel>
+                </Button>
+              </StackPanel>
+            </StackPanel>
+          </Border>
+          <TextBlock x:Name="ExtensionIdText" Style="{StaticResource CaptionSecondaryTextStyle}" />
+        </StackPanel>
+      </Border>
+
+      <TextBlock Style="{StaticResource SectionHeaderTextStyle}" Text="{c:L Ko='이 PC의 브라우저', En='Browsers on this PC'}" />
+      <Border Style="{StaticResource FlatCardStyle}">
+        <StackPanel x:Name="BrowserRows" />
+      </Border>
+      <TextBlock x:Name="SupportText" Style="{StaticResource CaptionSecondaryTextStyle}" />
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

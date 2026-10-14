@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
+using DownloadRouter.Core.Localization;
 using Microsoft.UI.Dispatching;
 
 namespace DownloadRouter.App;
@@ -28,6 +29,8 @@ public sealed class TrayIconHost : IDisposable
     private const uint PendingCommand = 1002;
     private const uint SettingsCommand = 1003;
     private const uint ExitCommand = 1004;
+    private const uint PauseCommand = 1005;
+    private const uint ResumeCommand = 1006;
     private static readonly ConcurrentDictionary<nint, TrayIconHost> Instances = new();
     private static readonly WindowProcedureDelegate WindowProcedureInstance = WindowProcedure;
 
@@ -35,7 +38,10 @@ public sealed class TrayIconHost : IDisposable
     private readonly Action open;
     private readonly Action openPending;
     private readonly Action openSettings;
+    private readonly Action pauseRouting;
+    private readonly Action resumeRouting;
     private readonly Action exit;
+    private bool routingPaused;
     private readonly string windowClassName = $"eslee.DownloadRouter.Tray.{Environment.ProcessId}";
     private nint windowHandle;
     private nint menuHandle;
@@ -48,12 +54,16 @@ public sealed class TrayIconHost : IDisposable
         Action open,
         Action openPending,
         Action openSettings,
+        Action pauseRouting,
+        Action resumeRouting,
         Action exit)
     {
         this.dispatcher = dispatcher;
         this.open = open;
         this.openPending = openPending;
         this.openSettings = openSettings;
+        this.pauseRouting = pauseRouting;
+        this.resumeRouting = resumeRouting;
         this.exit = exit;
         CreateMessageWindow();
         CreateMenu();
@@ -69,11 +79,30 @@ public sealed class TrayIconHost : IDisposable
         }
 
         var data = CreateIconData(NifInfo);
-        data.InfoTitle = "저장 위치 선택 대기";
-        data.Info = $"선택을 기다리는 다운로드가 {pendingCount}개 있습니다.";
+        data.InfoTitle = AppText.Pick("저장 위치 선택 대기", "Waiting for a folder");
+        data.Info = AppText.Pick($"선택을 기다리는 다운로드가 {pendingCount}개 있습니다.", $"{pendingCount} download(s) are waiting for a folder.");
         data.InfoFlags = 0x00000001;
         _ = ShellNotifyIcon(NimModify, ref data);
     }
+
+    /// <summary>Balloon fallback for "file moved" when Windows notifications are unavailable.</summary>
+    public void ShowMoveNotification(string fileName, string folder)
+    {
+        if (!iconVisible)
+        {
+            return;
+        }
+
+        var data = CreateIconData(NifInfo);
+        data.InfoTitle = AppText.Pick("파일을 옮겼습니다", "File moved");
+        data.Info = $"{fileName}\n{folder}";
+        data.InfoFlags = 0x00000001;
+        _ = ShellNotifyIcon(NimModify, ref data);
+    }
+
+    /// <summary>The right-click menu offers "pause" or "resume" depending on this state.</summary>
+    public void SetRoutingPaused(bool paused)
+        => routingPaused = paused;
 
     /// <summary>
     /// Tray Folder Hosted 모드 전환용 아이콘 표시 제어입니다. 아이콘만 추가/제거되며
@@ -165,12 +194,21 @@ public sealed class TrayIconHost : IDisposable
 
     private void CreateMenu()
     {
+        if (menuHandle != 0)
+        {
+            _ = DestroyMenu(menuHandle);
+        }
+
         menuHandle = CreatePopupMenu();
-        _ = AppendMenu(menuHandle, MfString, OpenCommand, "eslee Download Router 열기");
-        _ = AppendMenu(menuHandle, MfString, PendingCommand, "저장 위치 선택 대기 열기");
-        _ = AppendMenu(menuHandle, MfString, SettingsCommand, "일반 설정");
+        _ = AppendMenu(menuHandle, MfString, OpenCommand, AppText.Pick("eslee Download Router 열기", "Open eslee Download Router"));
+        _ = AppendMenu(menuHandle, MfString, PendingCommand, AppText.Pick("저장 위치 선택 대기 열기", "Open files waiting for a folder"));
+        _ = AppendMenu(menuHandle, MfString, SettingsCommand, AppText.Pick("설정", "Settings"));
         _ = AppendMenu(menuHandle, MfSeparator, 0, string.Empty);
-        _ = AppendMenu(menuHandle, MfString, ExitCommand, "종료");
+        _ = routingPaused
+            ? AppendMenu(menuHandle, MfString, ResumeCommand, AppText.Pick("자동 분류 다시 켜기", "Resume sorting"))
+            : AppendMenu(menuHandle, MfString, PauseCommand, AppText.Pick("자동 분류 1시간 멈추기", "Pause sorting for 1 hour"));
+        _ = AppendMenu(menuHandle, MfSeparator, 0, string.Empty);
+        _ = AppendMenu(menuHandle, MfString, ExitCommand, AppText.Pick("종료", "Exit"));
     }
 
     private void AddIcon()
@@ -232,6 +270,7 @@ public sealed class TrayIconHost : IDisposable
             return;
         }
 
+        CreateMenu();
         _ = GetCursorPos(out var point);
         _ = SetForegroundWindow(windowHandle);
         var command = TrackPopupMenu(
@@ -252,6 +291,8 @@ public sealed class TrayIconHost : IDisposable
             OpenCommand => open,
             PendingCommand => openPending,
             SettingsCommand => openSettings,
+            PauseCommand => pauseRouting,
+            ResumeCommand => resumeRouting,
             ExitCommand => exit,
             _ => null,
         };

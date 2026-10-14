@@ -21,6 +21,9 @@ OutputBaseFilename=eslee-download-router-setup
 Compression=lzma2
 SolidCompression=yes
 SetupIconFile=..\assets\branding\eslee-download-router.ico
+; The executable keeps its name across versions, so Explorer must be told to drop cached icons
+; or the taskbar and Start menu keep showing the previous icon right after an upgrade.
+ChangesAssociations=yes
 UninstallDisplayIcon={app}\DownloadRouter.App.exe
 DisableProgramGroupPage=yes
 WizardStyle=modern
@@ -30,9 +33,31 @@ VersionInfoVersion={#AppVersion}.0
 VersionInfoProductVersion={#AppVersion}
 VersionInfoDescription={#AppName} installer ({#AppCommit})
 
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+#if FileExists(CompilerPath + "\Languages\Korean.isl")
+Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
+#elif FileExists(CompilerPath + "\Languages\Unofficial\Korean.isl")
+Name: "korean"; MessagesFile: "compiler:Languages\Unofficial\Korean.isl"
+#else
+  #error Korean.isl was not found in Languages or Languages\Unofficial.
+#endif
+
+[CustomMessages]
+korean.DesktopIconTask=바탕 화면 바로가기 만들기
+korean.ExtraShortcutsGroup=추가 바로가기:
+korean.AutoStartTask=Windows 로그인 시 백그라운드로 자동 시작
+korean.BackgroundGroup=백그라운드 실행:
+korean.ShutdownFailed=기존 eslee Download Router를 정상 종료하지 못했습니다.
+english.DesktopIconTask=Create a desktop shortcut
+english.ExtraShortcutsGroup=Additional shortcuts:
+english.AutoStartTask=Start in the background when I sign in to Windows
+english.BackgroundGroup=Background:
+english.ShutdownFailed=The running eslee Download Router could not be closed.
+
 [Tasks]
-Name: "desktopicon"; Description: "바탕 화면 바로가기 만들기"; GroupDescription: "추가 바로가기:"; Flags: unchecked
-Name: "autostart"; Description: "Windows 로그인 시 백그라운드로 자동 시작"; GroupDescription: "백그라운드 실행:"; Flags: checkedonce
+Name: "desktopicon"; Description: "{cm:DesktopIconTask}"; GroupDescription: "{cm:ExtraShortcutsGroup}"; Flags: unchecked
+Name: "autostart"; Description: "{cm:AutoStartTask}"; GroupDescription: "{cm:BackgroundGroup}"; Flags: checkedonce
 
 [Files]
 Source: "..\artifacts\publish\app\*"; DestDir: "{app}"; Excludes: "*.pdb"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -49,6 +74,7 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 Filename: "{app}\DownloadRouter.App.exe"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
+Filename: "{app}\DownloadRouter.App.exe"; Parameters: "--unregister-notifications"; Flags: runhidden waituntilterminated; RunOnceId: "UnregisterNotifications"
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\unregister-native-host.ps1"""; Flags: runhidden; RunOnceId: "UnregisterNativeHost"
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\unregister-startup.ps1"""; Flags: runhidden; RunOnceId: "UnregisterStartup"
 
@@ -63,6 +89,6 @@ begin
   if FileExists(AppExe) then
   begin
     if not Exec(AppExe, '--shutdown', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-      Result := '기존 eslee Download Router를 정상 종료하지 못했습니다.';
+      Result := CustomMessage('ShutdownFailed');
   end;
 end;

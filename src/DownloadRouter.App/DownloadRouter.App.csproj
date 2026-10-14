@@ -21,12 +21,12 @@
   </ItemGroup>
   <Target Name="CopyUnpackagedWinUIResourcesToPublish" AfterTargets="Publish">
     <ItemGroup>
-      <UnpackagedWinUIResource Include="$(TargetDir)*.xbf" />
+      <UnpackagedWinUIResource Include="$(TargetDir)**\*.xbf" Exclude="$(TargetDir)publish\**" />
       <UnpackagedWinUIResource Include="$(TargetDir)$(AssemblyName).pri" />
     </ItemGroup>
     <Copy
       SourceFiles="@(UnpackagedWinUIResource)"
-      DestinationFolder="$(PublishDir)"
+      DestinationFiles="@(UnpackagedWinUIResource->'$(PublishDir)%(RecursiveDir)%(Filename)%(Extension)')"
       SkipUnchangedFiles="true" />
   </Target>
 </Project>

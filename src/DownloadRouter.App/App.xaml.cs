@@ -1,11 +1,17 @@
-using Microsoft.UI.Xaml;
-using DownloadRouter.Core.Models;
+using System.Diagnostics;
+using DownloadRouter.App.Services;
+using DownloadRouter.Core.Localization;
 using DownloadRouter.Core.Settings;
+using DownloadRouter.Core.Startup;
+using Microsoft.UI.Xaml;
 
 namespace DownloadRouter.App;
 
 public partial class App : Application
 {
+    /// <summary>Passed by <see cref="AppRestart"/> so the new process waits for the old one to release the instance lock.</summary>
+    public const string WaitForExitArgument = "--wait-for-exit";
+
     private Window? window;
     private Mutex? singleInstance;
     private EventWaitHandle? activationEvent;
@@ -17,43 +23,41 @@ public partial class App : Application
     {
         InitializeComponent();
         UnhandledException += (_, eventArgs) =>
-        {
-            try
-            {
-                var directory = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "eslee",
-                    "DownloadRouter",
-                    "logs");
-                Directory.CreateDirectory(directory);
-                File.AppendAllText(
-                    Path.Combine(directory, "app-unhandled.log"),
-                    $"{DateTimeOffset.UtcNow:O} {eventArgs.Exception}{Environment.NewLine}");
-            }
-            catch
-            {
-            }
-        };
+            AppServices.WriteDiagnostic("app-unhandled.log", eventArgs.Exception.ToString());
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        var commandLine = Environment.GetCommandLineArgs();
-        var background = commandLine
-            .Any(static argument => argument.Equals("--background", StringComparison.OrdinalIgnoreCase));
-        var shutdown = commandLine
-            .Any(static argument => argument.Equals("--shutdown", StringComparison.OrdinalIgnoreCase));
-        singleInstance = new Mutex(initiallyOwned: true, ProtocolConstants.AppMutexName, out var createdNew);
+        var commandLine = Environment.GetCommandLineArgs().Skip(1).ToArray();
+        var instance = AppInstance.Resolve(
+            commandLine,
+            Environment.GetEnvironmentVariable("DOWNLOAD_ROUTER_DATA_DIR"));
+        AppInstance.Initialize(instance);
+        AppServices.Instance = instance;
+
+        if (HasArgument(commandLine, NotificationService.UnregisterArgument))
+        {
+            // Used by the uninstaller: remove the Windows notification registration and stop.
+            NotificationService.UnregisterAll();
+            Exit();
+            return;
+        }
+
+        var background = HasArgument(commandLine, "--background");
+        var shutdown = HasArgument(commandLine, "--shutdown");
+        WaitForPreviousProcess(commandLine);
+
+        singleInstance = new Mutex(initiallyOwned: true, instance.AppMutexName, out var createdNew);
         if (!createdNew)
         {
             if (shutdown)
             {
-                SignalExistingInstance(ProtocolConstants.AppShutdownEventName);
+                SignalExistingInstance(instance.AppShutdownEventName);
                 AgentProcessManager.RequestShutdown();
             }
             else if (!background)
             {
-                SignalExistingInstance(ProtocolConstants.AppActivationEventName);
+                SignalExistingInstance(instance.AppActivationEventName);
             }
 
             singleInstance.Dispose();
@@ -71,25 +75,21 @@ public partial class App : Application
             return;
         }
 
-        var preferencesStore = new AppPreferencesStore();
+        var preferencesStore = new AppPreferencesStore(instance.ConfigPath);
         var preferences = preferencesStore.Load();
-        var themeManager = new ThemeManager(preferences.ThemePreference);
-        var mainWindow = new MainWindow(preferencesStore, themeManager, preferences);
+        AppText.SetLanguage(preferences.LanguagePreference);
+        AppServices.InitializePreferences(preferencesStore, preferences);
+
+        var mainWindow = new MainWindow();
         window = mainWindow;
-        activationEvent = new EventWaitHandle(
-            initialState: false,
-            EventResetMode.AutoReset,
-            ProtocolConstants.AppActivationEventName);
+        activationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, instance.AppActivationEventName);
         activationRegistration = ThreadPool.RegisterWaitForSingleObject(
             activationEvent,
             (_, _) => mainWindow.DispatcherQueue.TryEnqueue(mainWindow.ShowFromTray),
             null,
             Timeout.Infinite,
             executeOnlyOnce: false);
-        shutdownEvent = new EventWaitHandle(
-            initialState: false,
-            EventResetMode.AutoReset,
-            ProtocolConstants.AppShutdownEventName);
+        shutdownEvent = new EventWaitHandle(false, EventResetMode.AutoReset, instance.AppShutdownEventName);
         shutdownRegistration = ThreadPool.RegisterWaitForSingleObject(
             shutdownEvent,
             (_, _) => mainWindow.DispatcherQueue.TryEnqueue(mainWindow.ExitFromExternalRequest),
@@ -103,9 +103,37 @@ public partial class App : Application
             activationEvent?.Dispose();
             shutdownEvent?.Dispose();
             singleInstance?.Dispose();
+            singleInstance = null;
             AgentProcessManager.RequestShutdown();
+            AppRestart.LaunchPendingRestart();
             Exit();
         });
+    }
+
+    private static bool HasArgument(IEnumerable<string> commandLine, string name)
+        => commandLine.Any(argument => argument.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>After an in-app restart the previous process may still hold the instance mutex for a moment.</summary>
+    private static void WaitForPreviousProcess(IReadOnlyList<string> commandLine)
+    {
+        for (var index = 0; index < commandLine.Count - 1; index++)
+        {
+            if (commandLine[index].Equals(WaitForExitArgument, StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(commandLine[index + 1], out var processId))
+            {
+                try
+                {
+                    using var previous = Process.GetProcessById(processId);
+                    previous.WaitForExit(TimeSpan.FromSeconds(15));
+                }
+                catch (ArgumentException)
+                {
+                    // Already gone.
+                }
+
+                return;
+            }
+        }
     }
 
     private static void SignalExistingInstance(string eventName)
