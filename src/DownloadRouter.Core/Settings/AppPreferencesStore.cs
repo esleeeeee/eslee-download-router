@@ -77,7 +77,16 @@ public sealed class AppPreferencesStore
         => new AppPreferencesStore(configPath).Load().LanguagePreference;
 
     public AppPreferences Load()
-        => ReadDocument() is { } document ? FromDocument(document) : new AppPreferences();
+    {
+        try
+        {
+            return FromDocument(ReadDocument());
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return new AppPreferences();
+        }
+    }
 
     /// <summary>Replaces the stored preferences under the cross-process lock.</summary>
     public void Save(AppPreferences preferences)
@@ -99,7 +108,7 @@ public sealed class AppPreferencesStore
         Directory.CreateDirectory(directory);
 
         using var fileLock = AcquireLock();
-        var document = ReadDocument() ?? [];
+        var document = ReadDocumentForUpdate();
         var current = FromDocument(document);
         var changed = change(current)
             ?? throw new InvalidOperationException("The preferences update returned no value.");
@@ -162,29 +171,43 @@ public sealed class AppPreferencesStore
             FavoriteFolders = NormalizeFavoriteFolders(preferences.FavoriteFolders),
         };
 
-    private JsonObject? ReadDocument()
+    private JsonObject ReadDocument()
     {
-        // Each field is read on its own so one wrong-typed value in this user-editable file
-        // cannot silently reset the others to defaults.
         try
         {
-            if (!File.Exists(configPath))
-            {
-                return null;
-            }
-
-            // Delete sharing lets a writer replace the file while this read is open.
+            // File.Exists also returns false for inaccessible existing files.
             using var stream = new FileStream(
-                configPath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.ReadWrite | FileShare.Delete);
+                configPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             using var reader = new StreamReader(stream);
-            return JsonNode.Parse(reader.ReadToEnd()) as JsonObject;
+            return JsonNode.Parse(reader.ReadToEnd()) as JsonObject
+                ?? throw new JsonException("The settings document must be an object.");
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        catch (FileNotFoundException)
         {
-            return null;
+            return [];
+        }
+    }
+
+    private JsonObject ReadDocumentForUpdate()
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return ReadDocument();
+            }
+            catch (IOException) when (attempt < 20)
+            {
+                Thread.Sleep(LockRetryDelay);
+            }
+            catch (JsonException)
+            {
+                // A failed backup leaves the existing settings untouched.
+                var backup = configPath + ".corrupt-" + DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmssfffffffZ",
+                    System.Globalization.CultureInfo.InvariantCulture);
+                File.Copy(configPath, backup, overwrite: false);
+                return [];
+            }
         }
     }
 

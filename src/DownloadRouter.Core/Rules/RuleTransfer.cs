@@ -7,7 +7,7 @@ using DownloadRouter.Core.Paths;
 
 namespace DownloadRouter.Core.Rules;
 
-/// <param name="NewRules">Rules to store: fresh IDs, created now, ordered after the existing rules.</param>
+/// <param name="NewRules">Rules to store: fresh IDs, disabled, created now, ordered after the existing rules.</param>
 /// <param name="SkippedDuplicates">Names of entries that repeat an existing rule or an earlier entry.</param>
 /// <param name="Errors">One localized message per entry that could not be imported.</param>
 public sealed record RuleImportResult(
@@ -152,7 +152,7 @@ public static class RuleTransfer
             DownloadRule candidate;
             try
             {
-                candidate = RuleValidation.Normalize(ReadEntry(entry, now), pathTokenResolver);
+                candidate = RuleValidation.Normalize(ReadEntry(entry, now), pathTokenResolver, forImport: true);
             }
             catch (ArgumentException exception)
             {
@@ -166,7 +166,7 @@ public static class RuleTransfer
                 continue;
             }
 
-            created.Add(candidate with { ListOrder = nextOrder++ });
+            created.Add(candidate with { ListOrder = nextOrder++, IsEnabled = false });
         }
 
         return new RuleImportResult(created, duplicates, errors);

@@ -162,6 +162,61 @@ public sealed class AppPreferencesStoreTests : IDisposable
         Assert.Equal("English", loaded.Language);
     }
 
+    [Fact]
+    public void AnUnreadableExistingFileIsNeverOverwritten()
+    {
+        const string original = """{"theme":"Dark","futureSetting":42}""";
+        File.WriteAllText(ConfigPath, original);
+        var store = new AppPreferencesStore(ConfigPath);
+        var called = false;
+        using (var blocked = new FileStream(ConfigPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            Assert.Equal("System", store.Load().Theme);
+            Assert.Throws<IOException>(() => store.Update(current =>
+            {
+                called = true;
+                return current with { Language = "English" };
+            }));
+        }
+
+        Assert.False(called);
+        Assert.Equal(original, File.ReadAllText(ConfigPath));
+        Assert.False(File.Exists(ConfigPath + ".tmp"));
+    }
+
+    [Fact]
+    public async Task ATransientReadFailureRetriesAndPreservesUnknownKeys()
+    {
+        File.WriteAllText(ConfigPath, """{"theme":"Dark","futureSetting":42}""");
+        using var blocked = new FileStream(ConfigPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        var store = new AppPreferencesStore(ConfigPath);
+        var update = Task.Run(() => store.Update(current => current with { Language = "English" }));
+        await Task.Delay(100);
+        blocked.Dispose();
+        var saved = await update;
+
+        Assert.Equal("Dark", saved.Theme);
+        Assert.Equal(42, JsonNode.Parse(File.ReadAllText(ConfigPath))!["futureSetting"]!.GetValue<int>());
+    }
+
+    [Theory]
+    [InlineData("{broken")]
+    [InlineData("[]")]
+    [InlineData("null")]
+    public void InvalidDocumentsAreBackedUpBeforeRewriting(string original)
+    {
+        File.WriteAllText(ConfigPath, original);
+        var store = new AppPreferencesStore(ConfigPath);
+        Assert.Equal("System", store.Load().Theme);
+        Assert.Empty(Directory.GetFiles(directory.FullName, "config.local.json.corrupt-*"));
+
+        store.Update(current => current with { Theme = "Dark" });
+
+        var backup = Assert.Single(Directory.GetFiles(directory.FullName, "config.local.json.corrupt-*"));
+        Assert.Equal(original, File.ReadAllText(backup));
+        Assert.Equal("Dark", store.Load().Theme);
+    }
+
     public void Dispose()
     {
         if (directory.Exists)

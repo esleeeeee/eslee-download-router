@@ -60,6 +60,7 @@ public sealed class RuleTransferTests
         {
             Assert.DoesNotContain(rule.Id, exported.Select(static source => source.Id));
             Assert.NotEqual(Guid.Empty, rule.Id);
+            Assert.False(rule.IsEnabled);
             Assert.Equal(Now, rule.CreatedAt);
             Assert.Equal(Now, rule.UpdatedAt);
         });
@@ -140,6 +141,32 @@ public sealed class RuleTransferTests
         Assert.Throws<ArgumentException>(() => RuleTransfer.Import(tooMany, [], Now));
         Assert.Equal(RuleTransfer.MaximumRules, RuleTransfer.Import(atLimit, [], Now).NewRules.Count);
         Assert.Throws<ArgumentException>(() => RuleTransfer.Import(oversized, [], Now));
+    }
+
+    [Theory]
+    [InlineData("relative")]
+    [InlineData("C:relative")]
+    [InlineData(@"\folder")]
+    [InlineData(@"\\server\share")]
+    [InlineData(@"\\?\C:\folder")]
+    public void ImportsRejectRelativeNetworkAndDevicePaths(string storageRoot)
+    {
+        var json = RuleTransfer.Export([Rule("Unsafe", "example.com", storageRoot)], Now);
+        var result = RuleTransfer.Import(json, [], Now);
+
+        Assert.Empty(result.NewRules);
+        Assert.Single(result.Errors);
+    }
+
+    [Fact]
+    public void UpsertKeepsUncCompatibilityButRejectsRelativePaths()
+    {
+        var resolver = new DownloadRouter.Core.Paths.PathTokenResolver(new DownloadRouter.Core.Paths.WindowsKnownPathProvider());
+        var unc = Rule("Network", "example.com", @"\\server\share");
+        Assert.Equal(unc, RuleValidation.Normalize(unc, resolver));
+        Assert.Throws<ArgumentException>(() => RuleValidation.Normalize(unc, resolver, forImport: true));
+        Assert.Throws<ArgumentException>(() => RuleValidation.Normalize(unc with { StorageRoot = "relative" }, resolver));
+        Assert.Equal(@"C:\Routed", RuleValidation.Normalize(unc with { StorageRoot = @"C:\Routed" }, resolver).StorageRoot);
     }
 
     private static DownloadRule Rule(string name, string matchValue, string storageRoot)
