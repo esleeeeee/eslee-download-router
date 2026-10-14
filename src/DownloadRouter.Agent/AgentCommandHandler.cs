@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Text.Json;
 using DownloadRouter.Core.Jobs;
+using DownloadRouter.Core.Localization;
 using DownloadRouter.Core.Models;
 using DownloadRouter.Core.Paths;
 using DownloadRouter.Core.Privacy;
@@ -22,10 +24,20 @@ public sealed class AgentCommandHandler(
     ISelectionUiLauncher selectionUiLauncher,
     AppPaths paths,
     ILogger<AgentCommandHandler> logger,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null) : IHistoryCleanup
 {
     private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
     private static readonly SemaphoreSlim registrationGate = new(1, 1);
+
+    /// <summary>
+    /// Serializes every read-modify-write of one job. Handlers read a job, derive a new state,
+    /// and write it back, so two commands for the same job (a browser completion racing a
+    /// folder choice, for example) must not interleave or one update would be lost. Locks are
+    /// per job, so unrelated jobs and their file moves never wait for each other. When the
+    /// registration gate is also needed it is always taken first.
+    /// </summary>
+    private static readonly KeyedAsyncLock<Guid> jobLocks = new();
+
     /// <summary>
     /// Records the most recent rejection caused by an unrecognised extension build so the
     /// app can tell the user to refresh the extension. Counts only, no browser data.
@@ -83,6 +95,12 @@ public sealed class AgentCommandHandler(
                 "selection.prompt-state" => await HandleSelectionPromptStateAsync(request, cancellationToken).ConfigureAwait(false),
                 "route.change" => await HandleRouteChangeAsync(request, cancellationToken).ConfigureAwait(false),
                 "job.retry" => await HandleRetryAsync(request, cancellationToken).ConfigureAwait(false),
+                "routing.status" => AgentResponse.Ok(request.RequestId, await GetRoutingPauseStatusAsync(cancellationToken).ConfigureAwait(false)),
+                "routing.pause" => await HandleRoutingPauseAsync(request, cancellationToken).ConfigureAwait(false),
+                "routing.resume" => await HandleRoutingResumeAsync(request, cancellationToken).ConfigureAwait(false),
+                "history.retention.get" => AgentResponse.Ok(request.RequestId, new HistoryRetentionStatus(
+                    await GetHistoryRetentionDaysAsync(cancellationToken).ConfigureAwait(false))),
+                "history.retention.set" => await HandleHistoryRetentionSetAsync(request, cancellationToken).ConfigureAwait(false),
                 "diagnostics.status" => AgentResponse.Ok(request.RequestId, new
                 {
                     dataDirectory = paths.RootDirectory,
@@ -159,15 +177,36 @@ public sealed class AgentCommandHandler(
 
         if (existing is not null)
         {
-            logger.LogInformation("Download registration reused instance: downloadId={DownloadId}, jobId={JobId}, routingState={RoutingState}, terminal={Terminal}",
-                SanitizeDownloadId(payload.DownloadId), existing.Id, existing.RoutingState, existing.IsTerminal);
-            if (!existing.IsTerminal) existing = await UpdateFileNameAsync(
-                existing,
-                payload.FileName,
-                payload.FilePath,
-                refreshBrowserActivity: false,
-                cancellationToken).ConfigureAwait(false);
-            return AgentResponse.Ok(request.RequestId, new { tracked = true, jobId = existing.Id, existing = true });
+            using (await jobLocks.AcquireAsync(existing.Id, cancellationToken).ConfigureAwait(false))
+            {
+                var existingId = existing.Id;
+                existing = await repository.GetJobAsync(existingId, cancellationToken).ConfigureAwait(false);
+                if (existing is null)
+                {
+                    return AgentResponse.Ok(request.RequestId, new { tracked = false, failOpen = true });
+                }
+
+                logger.LogInformation("Download registration reused instance: downloadId={DownloadId}, jobId={JobId}, routingState={RoutingState}, terminal={Terminal}",
+                    SanitizeDownloadId(payload.DownloadId), existing.Id, existing.RoutingState, existing.IsTerminal);
+                if (!existing.IsTerminal)
+                {
+                    existing = await UpdateFileNameAsync(
+                        existing,
+                        payload.FileName,
+                        payload.FilePath,
+                        refreshBrowserActivity: false,
+                        cancellationToken).ConfigureAwait(false);
+                    var reevaluated = await ReevaluateTentativeRuleAsync(existing, cancellationToken).ConfigureAwait(false);
+                    if (reevaluated is null)
+                    {
+                        return AgentResponse.Ok(request.RequestId, new { tracked = false, failOpen = true, jobId = existingId, existing = true });
+                    }
+
+                    existing = reevaluated;
+                }
+
+                return AgentResponse.Ok(request.RequestId, new { tracked = true, jobId = existing.Id, existing = true });
+            }
         }
 
         // Nothing exists for this download yet, so this request would create a job.
@@ -205,6 +244,16 @@ public sealed class AgentCommandHandler(
             });
         }
 
+        // Pausing leaves every new download exactly where the browser puts it. Jobs that
+        // already exist keep being handled, so nothing in flight is stranded.
+        if ((await GetRoutingPauseStatusAsync(cancellationToken).ConfigureAwait(false)).IsPaused)
+        {
+            logger.LogInformation(
+                "Routing is paused; download {DownloadId} is left to the browser",
+                SanitizeDownloadId(payload.DownloadId));
+            return AgentResponse.Ok(request.RequestId, new { tracked = false, failOpen = true, ignored = "routing-paused" });
+        }
+
         var trustedFileName = DownloadPresentation.TrustedFileName(payload.FileName)
             ?? DownloadPresentation.TrustedFileName(payload.FilePath)
             ?? string.Empty;
@@ -229,20 +278,13 @@ public sealed class AgentCommandHandler(
             return AgentResponse.Ok(request.RequestId, new { tracked = false, failOpen = true });
         }
 
-        string? temporaryDestination = null;
-        if (matched.Rule.StorageMode == StorageMode.SelectSubfolder)
-        {
-            var choice = await repository.GetTemporaryFolderAsync(matched.Rule.Id, cancellationToken).ConfigureAwait(false);
-            if (choice?.IsActive(matched.Rule, clock.GetUtcNow()) == true)
-            {
-                try { temporaryDestination = SelectionDestination.ValidateFolder(choice.DestinationFolder); }
-                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
-                {
-                    // An unavailable remembered folder must return to normal selection, never lose a download.
-                    logger.LogInformation("Temporary destination unavailable for rule {RuleId}", matched.Rule.Id);
-                }
-            }
-        }
+        // A tentative match may still change once the real file name is known, so it neither
+        // applies a 10-minute folder nor asks for the selection window yet. Both happen when
+        // the rule is confirmed.
+        var tentative = matched.IsTentative;
+        var temporaryDestination = tentative
+            ? null
+            : await ResolveTemporaryDestinationAsync(matched.Rule, cancellationToken).ConfigureAwait(false);
         var requiresSelection = matched.Rule.StorageMode == StorageMode.SelectSubfolder && temporaryDestination is null;
         var routingState = requiresSelection
             ? RoutingState.WaitingForSelection
@@ -276,12 +318,13 @@ public sealed class AgentCommandHandler(
             false,
             promptState,
             SelectedDestinationFolder: temporaryDestination,
-            BrowserStartedAt: payload.StartedAt);
+            BrowserStartedAt: payload.StartedAt,
+            IsRuleTentative: tentative);
 
         await repository.CreateJobAsync(job, cancellationToken).ConfigureAwait(false);
-        logger.LogInformation("Download instance created: downloadId={DownloadId}, jobId={JobId}, requiresSelection={RequiresSelection}",
-            SanitizeDownloadId(payload.DownloadId), job.Id, requiresSelection);
-        var selectionUiRequested = requiresSelection && selectionUiLauncher.RequestSelectionUi();
+        logger.LogInformation("Download instance created: downloadId={DownloadId}, jobId={JobId}, requiresSelection={RequiresSelection}, tentative={Tentative}",
+            SanitizeDownloadId(payload.DownloadId), job.Id, requiresSelection, tentative);
+        var selectionUiRequested = requiresSelection && !tentative && selectionUiLauncher.RequestSelectionUi();
         logger.LogInformation(
             "Rule {RuleId} matched download {DownloadId} using {SourceField}",
             matched.Rule.Id,
@@ -294,8 +337,152 @@ public sealed class AgentCommandHandler(
             storageMode = matched.Rule.StorageMode.ToString(),
             requiresSelection,
             selectionUiRequested,
+            ruleTentative = tentative,
         });
     }
+
+    private async Task<string?> ResolveTemporaryDestinationAsync(DownloadRule rule, CancellationToken cancellationToken)
+    {
+        if (rule.StorageMode != StorageMode.SelectSubfolder)
+        {
+            return null;
+        }
+
+        var choice = await repository.GetTemporaryFolderAsync(rule.Id, cancellationToken).ConfigureAwait(false);
+        if (choice?.IsActive(rule, clock.GetUtcNow()) != true)
+        {
+            return null;
+        }
+
+        try
+        {
+            return SelectionDestination.ValidateFolder(choice.DestinationFolder);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // An unavailable remembered folder must return to normal selection, never lose a download.
+            logger.LogInformation("Temporary destination unavailable for rule {RuleId}", rule.Id);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Re-evaluates a tentative job once its file name is trusted, persists the outcome, and
+    /// requests the selection window when the confirmed rule needs it. Returns the updated
+    /// job, or null when no rule applies any more and the job was removed (fail-open: the
+    /// download stays where the browser saved it). Call only while holding the job lock.
+    /// </summary>
+    private async Task<DownloadJob?> ReevaluateTentativeRuleAsync(DownloadJob job, CancellationToken cancellationToken)
+    {
+        var fileName = DownloadPresentation.TrustedFileName(job.CurrentFileName);
+        if (!job.IsRuleTentative || fileName is null)
+        {
+            return job;
+        }
+
+        var outcome = await DecideTentativeRuleAsync(job, fileName, cancellationToken).ConfigureAwait(false);
+        if (outcome.Job is null)
+        {
+            return null;
+        }
+
+        await repository.UpdateJobAsync(outcome.Job, "rule.reevaluated", cancellationToken).ConfigureAwait(false);
+        if (outcome.RequestSelectionUi)
+        {
+            _ = selectionUiLauncher.RequestSelectionUi();
+        }
+
+        return outcome.Job;
+    }
+
+    /// <summary>
+    /// Decides the confirmed rule for a tentative job without persisting it, except that a job
+    /// no rule applies to is deleted with its events. A folder the user already chose (or a
+    /// skip) is kept and only the tentative marker is cleared. When the name is still unknown
+    /// the tentative winner is confirmed as it is.
+    /// </summary>
+    private async Task<TentativeRuleOutcome> DecideTentativeRuleAsync(
+        DownloadJob job,
+        string? fileName,
+        CancellationToken cancellationToken)
+    {
+        var hasUserDecision = job.SelectedRelativeFolder is not null
+            || job.SelectedDestinationFolder is not null
+            || job.RoutingState is not (RoutingState.WaitingForSelection or RoutingState.NotRequired)
+            || job.BrowserState is BrowserTransferState.Cancelled or BrowserTransferState.Interrupted;
+        if (hasUserDecision)
+        {
+            logger.LogInformation("Tentative rule kept for job {JobId}: the user already decided its routing", job.Id);
+            return new TentativeRuleOutcome(job with { IsRuleTentative = false }, null, RequestSelectionUi: false);
+        }
+
+        var rules = await repository.GetRulesAsync(cancellationToken).ConfigureAwait(false);
+        DownloadRule? confirmed;
+        string? matchedUrl = null;
+        if (fileName is null)
+        {
+            confirmed = rules.FirstOrDefault(rule => rule.Id == job.RuleId)
+                ?? await repository.GetRuleAsync(job.RuleId, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            var metadata = new DownloadMetadata(
+                job.Browser,
+                job.BrowserDownloadId,
+                fileName,
+                job.OriginalPath,
+                job.InitiatingPageUrl,
+                job.InitialUrl,
+                job.FinalUrl,
+                job.ReferrerUrl,
+                job.CreatedAt);
+            var match = matcher.Rematch(rules, metadata, job.RuleId, job.SanitizedSource);
+            confirmed = match?.Rule;
+            matchedUrl = match?.MatchedUrl;
+        }
+
+        if (confirmed is null)
+        {
+            await repository.DeleteJobsAsync([job.Id], cancellationToken).ConfigureAwait(false);
+            logger.LogInformation(
+                "No rule applies to job {JobId} once its file type is known; the job was removed and the download stays where the browser saved it",
+                job.Id);
+            return new TentativeRuleOutcome(null, null, RequestSelectionUi: false);
+        }
+
+        var updated = job with { IsRuleTentative = false };
+        if (confirmed.Id != job.RuleId)
+        {
+            updated = updated with
+            {
+                RuleId = confirmed.Id,
+                SanitizedSource = sanitizer.Sanitize(matchedUrl) ?? job.SanitizedSource,
+            };
+            logger.LogInformation("Tentative rule for job {JobId} changed from {PreviousRuleId} to {RuleId}", job.Id, job.RuleId, confirmed.Id);
+        }
+
+        // Apply what creation deferred: the 10-minute folder and the selection window.
+        var temporaryDestination = await ResolveTemporaryDestinationAsync(confirmed, cancellationToken).ConfigureAwait(false);
+        var requiresSelection = confirmed.StorageMode == StorageMode.SelectSubfolder && temporaryDestination is null;
+        // A prompt the user already saw or postponed from the pending list is never replayed.
+        var promptState = requiresSelection
+            ? job.SelectionPromptState == SelectionPromptState.Resolved ? SelectionPromptState.NeverShown : job.SelectionPromptState
+            : SelectionPromptState.Resolved;
+        updated = updated with
+        {
+            RoutingState = requiresSelection
+                ? RoutingState.WaitingForSelection
+                : temporaryDestination is not null ? RoutingState.SelectionReady : RoutingState.NotRequired,
+            SelectionPromptState = promptState,
+            SelectedDestinationFolder = temporaryDestination,
+        };
+        return new TentativeRuleOutcome(
+            updated,
+            confirmed,
+            RequestSelectionUi: requiresSelection && promptState == SelectionPromptState.NeverShown);
+    }
+
+    private sealed record TentativeRuleOutcome(DownloadJob? Job, DownloadRule? Rule, bool RequestSelectionUi);
 
     private async Task<AgentResponse> HandleDownloadMetadataAsync(
         AgentCommand request,
@@ -307,25 +494,40 @@ public sealed class AgentCommandHandler(
             return AgentResponse.Error(request.RequestId, "download.unknown-browser", "The browser is not supported.");
         }
 
-        var job = await ResolveDownloadInstanceAsync(browser, payload.DownloadId, payload.StartedAt, request.Command, cancellationToken).ConfigureAwait(false);
-        if (job is null)
+        var resolved = await ResolveDownloadInstanceAsync(browser, payload.DownloadId, payload.StartedAt, request.Command, cancellationToken).ConfigureAwait(false);
+        if (resolved is null)
         {
             return AgentResponse.Ok(request.RequestId, new { tracked = false, failOpen = true });
         }
 
-        var updated = await UpdateFileNameAsync(
-            job,
-            payload.FileName,
-            payload.FilePath,
-            refreshBrowserActivity: true,
-            cancellationToken).ConfigureAwait(false);
-        return AgentResponse.Ok(request.RequestId, new
+        using (await jobLocks.AcquireAsync(resolved.Id, cancellationToken).ConfigureAwait(false))
         {
-            tracked = true,
-            jobId = updated.Id,
-            fileName = DownloadPresentation.DisplayFileName(updated),
-            changed = !string.Equals(job.CurrentFileName, updated.CurrentFileName, StringComparison.Ordinal),
-        });
+            var job = await repository.GetJobAsync(resolved.Id, cancellationToken).ConfigureAwait(false);
+            if (job is null)
+            {
+                return AgentResponse.Ok(request.RequestId, new { tracked = false, failOpen = true });
+            }
+
+            var updated = await UpdateFileNameAsync(
+                job,
+                payload.FileName,
+                payload.FilePath,
+                refreshBrowserActivity: true,
+                cancellationToken).ConfigureAwait(false);
+            var reevaluated = await ReevaluateTentativeRuleAsync(updated, cancellationToken).ConfigureAwait(false);
+            if (reevaluated is null)
+            {
+                return AgentResponse.Ok(request.RequestId, new { tracked = false, failOpen = true, jobId = job.Id });
+            }
+
+            return AgentResponse.Ok(request.RequestId, new
+            {
+                tracked = true,
+                jobId = reevaluated.Id,
+                fileName = DownloadPresentation.DisplayFileName(reevaluated),
+                changed = !string.Equals(job.CurrentFileName, reevaluated.CurrentFileName, StringComparison.Ordinal),
+            });
+        }
     }
 
     private async Task<AgentResponse> HandleDownloadChangedAsync(
@@ -365,6 +567,26 @@ public sealed class AgentCommandHandler(
             return AgentResponse.Ok(request.RequestId, new { tracked = false, failOpen = true });
         }
 
+        using (await jobLocks.AcquireAsync(job.Id, cancellationToken).ConfigureAwait(false))
+        {
+            job = await repository.GetJobAsync(job.Id, cancellationToken).ConfigureAwait(false);
+            if (job is null)
+            {
+                return AgentResponse.Ok(request.RequestId, new { tracked = false, failOpen = true });
+            }
+
+            return await ApplyDownloadChangeAsync(request, payload, state, sanitizedDownloadId, job, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<AgentResponse> ApplyDownloadChangeAsync(
+        AgentCommand request,
+        DownloadChangedPayload payload,
+        string state,
+        string sanitizedDownloadId,
+        DownloadJob job,
+        CancellationToken cancellationToken)
+    {
         var beforeBrowser = job.BrowserState;
         var beforeRouting = job.RoutingState;
         if (state == "stale")
@@ -477,11 +699,37 @@ public sealed class AgentCommandHandler(
             IsBrowserRecordStale = false,
         };
 
-        var rule = await repository.GetRuleAsync(job.RuleId, cancellationToken).ConfigureAwait(false)
+        // A tentative rule is confirmed before anything is routed or moved. If the browser
+        // never reported a usable name, the tentative winner is kept.
+        var requestSelectionUi = false;
+        DownloadRule? rule = null;
+        if (job.IsRuleTentative)
+        {
+            var outcome = await DecideTentativeRuleAsync(
+                job,
+                DownloadPresentation.TrustedFileName(job.CurrentFileName),
+                cancellationToken).ConfigureAwait(false);
+            if (outcome.Job is null)
+            {
+                LogTransition(sanitizedDownloadId, request.Command, beforeBrowser, beforeRouting, job);
+                return AgentResponse.Ok(request.RequestId, new { tracked = false, failOpen = true, jobId = job.Id });
+            }
+
+            job = outcome.Job;
+            rule = outcome.Rule;
+            requestSelectionUi = outcome.RequestSelectionUi;
+        }
+
+        rule ??= await repository.GetRuleAsync(job.RuleId, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException("The matched rule no longer exists.");
         if (job.RoutingState == RoutingState.WaitingForSelection)
         {
             await repository.UpdateJobAsync(job, "download.completed-selection-pending", cancellationToken).ConfigureAwait(false);
+            if (requestSelectionUi)
+            {
+                _ = selectionUiLauncher.RequestSelectionUi();
+            }
+
             LogTransition(sanitizedDownloadId, request.Command, beforeBrowser, beforeRouting, job);
             return AgentResponse.Ok(request.RequestId, new
             {
@@ -526,8 +774,7 @@ public sealed class AgentCommandHandler(
         AgentCommand request,
         CancellationToken cancellationToken)
     {
-        var rule = Deserialize<DownloadRule>(request.Payload);
-        _ = pathTokenResolver.Resolve(rule.StorageRoot);
+        var rule = RuleValidation.Normalize(Deserialize<DownloadRule>(request.Payload), pathTokenResolver);
         var existing = await repository.GetRuleAsync(rule.Id, cancellationToken).ConfigureAwait(false);
         var persisted = rule with
         {
@@ -565,7 +812,7 @@ public sealed class AgentCommandHandler(
     {
         var payload = Deserialize<TemporaryFolderCancelPayload>(request.Payload);
         if (payload.RuleId == Guid.Empty)
-            return AgentResponse.Error(request.RequestId, "temporary-folder.invalid-rule", "사이트 규칙을 지정하세요.");
+            return AgentResponse.Error(request.RequestId, "temporary-folder.invalid-rule", AppText.Pick("사이트 규칙을 지정하세요.", "Choose a site rule."));
         var cancelled = await repository.CancelTemporaryFolderAsync(payload.RuleId, cancellationToken).ConfigureAwait(false);
         return AgentResponse.Ok(request.RequestId, new { cancelled });
     }
@@ -582,15 +829,22 @@ public sealed class AgentCommandHandler(
 
         var results = new List<object>();
         if (payload.UseForTenMinutes && payload.JobIds.Count != 1)
-            return AgentResponse.Error(request.RequestId, "selection.temporary-single", "10분 저장은 개별 파일 선택창에서 설정하세요.");
+            return AgentResponse.Error(request.RequestId, "selection.temporary-single", AppText.Pick(
+                "10분 저장은 개별 파일 선택창에서 설정하세요.",
+                "Set a 10-minute folder from the selection window of a single file."));
         var destinationFolder = payload.DestinationFolder is null
             ? null : SelectionDestination.ValidateFolder(payload.DestinationFolder);
         var selectedFileName = payload.FileName is null
             ? null : SelectionDestination.ValidateFileName(payload.FileName);
         if (selectedFileName is not null && payload.JobIds.Count != 1)
-            return AgentResponse.Error(request.RequestId, "selection.rename-single", "파일 이름은 한 파일씩 변경하세요.");
+            return AgentResponse.Error(request.RequestId, "selection.rename-single", AppText.Pick(
+                "파일 이름은 한 파일씩 변경하세요.",
+                "Rename one file at a time."));
+        // Each job is locked on its own while it is updated and moved, so a large batch never
+        // holds other jobs back and only one lock is held at a time.
         foreach (var jobId in payload.JobIds.Distinct())
         {
+            using var jobLock = await jobLocks.AcquireAsync(jobId, cancellationToken).ConfigureAwait(false);
             var job = await repository.GetJobAsync(jobId, cancellationToken).ConfigureAwait(false);
             if (job is null || !job.IsSelectionPending)
             {
@@ -607,7 +861,9 @@ public sealed class AgentCommandHandler(
             if (payload.UseForTenMinutes)
             {
                 if (!rule.IsEnabled || rule.StorageMode != StorageMode.SelectSubfolder)
-                    return AgentResponse.Error(request.RequestId, "selection.temporary-rule", "활성 폴더 선택 규칙에서만 사용할 수 있습니다.");
+                    return AgentResponse.Error(request.RequestId, "selection.temporary-rule", AppText.Pick(
+                        "활성 폴더 선택 규칙에서만 사용할 수 있습니다.",
+                        "This is available only for an enabled rule that asks for a folder."));
                 var folder = SelectionDestination.ValidateFolder(destinationFolder
                     ?? boundaryValidator.ValidateRelativeFolder(root, payload.RelativeFolder));
                 var now = clock.GetUtcNow();
@@ -650,6 +906,7 @@ public sealed class AgentCommandHandler(
         CancellationToken cancellationToken)
     {
         var payload = Deserialize<SelectionSkippedPayload>(request.Payload);
+        using var jobLock = await jobLocks.AcquireAsync(payload.JobId, cancellationToken).ConfigureAwait(false);
         var job = await repository.GetJobAsync(payload.JobId, cancellationToken).ConfigureAwait(false);
         if (job is null)
         {
@@ -693,6 +950,7 @@ public sealed class AgentCommandHandler(
             return AgentResponse.Error(request.RequestId, "selection.invalid-count", "Skip between 1 and 1000 queued jobs.");
         }
 
+        using var jobLock = await jobLocks.AcquireManyAsync(jobIds, cancellationToken: cancellationToken).ConfigureAwait(false);
         foreach (var jobId in jobIds)
         {
             var job = await repository.GetJobAsync(jobId, cancellationToken).ConfigureAwait(false);
@@ -762,6 +1020,7 @@ public sealed class AgentCommandHandler(
                 "Record between 1 and 1000 selection prompts.");
         }
 
+        using var jobLock = await jobLocks.AcquireManyAsync(jobIds, cancellationToken: cancellationToken).ConfigureAwait(false);
         var advanced = await repository.AdvanceSelectionPromptStateAsync(
             jobIds,
             payload.State,
@@ -789,6 +1048,9 @@ public sealed class AgentCommandHandler(
             return AgentResponse.Error(request.RequestId, "jobs.invalid-count", "Delete between 1 and 1000 history items.");
         }
 
+        using var jobLock = await jobLocks.AcquireManyAsync(
+            payload.JobIds.Where(static id => id != Guid.Empty),
+            cancellationToken: cancellationToken).ConfigureAwait(false);
         var deleted = await repository.DeleteJobsAsync(payload.JobIds, cancellationToken).ConfigureAwait(false);
         return AgentResponse.Ok(request.RequestId, new { deleted, filesDeleted = 0 });
     }
@@ -798,6 +1060,7 @@ public sealed class AgentCommandHandler(
         CancellationToken cancellationToken)
     {
         var payload = Deserialize<JobRouteChangePayload>(request.Payload);
+        using var jobLock = await jobLocks.AcquireAsync(payload.JobId, cancellationToken).ConfigureAwait(false);
         var job = await repository.GetJobAsync(payload.JobId, cancellationToken).ConfigureAwait(false);
         if (job is null)
         {
@@ -871,6 +1134,78 @@ public sealed class AgentCommandHandler(
     }
 
     /// <summary>
+    /// Reads the pause setting. An expired or unreadable pause counts as not paused and is
+    /// removed, but only if nobody changed it in the meantime.
+    /// </summary>
+    private async Task<RoutingPauseStatus> GetRoutingPauseStatusAsync(CancellationToken cancellationToken)
+    {
+        var stored = await repository.GetSettingAsync(RoutingPausePolicy.SettingKey, cancellationToken).ConfigureAwait(false);
+        var now = clock.GetUtcNow();
+        if (RoutingPausePolicy.IsStale(stored, now))
+        {
+            await repository.DeleteSettingAsync(RoutingPausePolicy.SettingKey, stored, cancellationToken).ConfigureAwait(false);
+        }
+
+        return RoutingPausePolicy.Evaluate(stored, now);
+    }
+
+    private async Task<AgentResponse> HandleRoutingPauseAsync(AgentCommand request, CancellationToken cancellationToken)
+    {
+        var payload = Deserialize<RoutingPausePayload>(request.Payload);
+        var stored = RoutingPausePolicy.ToStoredValue(payload.Minutes, clock.GetUtcNow());
+        await repository.SetSettingAsync(RoutingPausePolicy.SettingKey, stored, cancellationToken).ConfigureAwait(false);
+        logger.LogInformation("Routing paused: minutes={Minutes}", payload.Minutes?.ToString(CultureInfo.InvariantCulture) ?? "until-resumed");
+        return AgentResponse.Ok(request.RequestId, await GetRoutingPauseStatusAsync(cancellationToken).ConfigureAwait(false));
+    }
+
+    private async Task<AgentResponse> HandleRoutingResumeAsync(AgentCommand request, CancellationToken cancellationToken)
+    {
+        await repository.DeleteSettingAsync(RoutingPausePolicy.SettingKey, cancellationToken: cancellationToken).ConfigureAwait(false);
+        logger.LogInformation("Routing resumed");
+        return AgentResponse.Ok(request.RequestId, await GetRoutingPauseStatusAsync(cancellationToken).ConfigureAwait(false));
+    }
+
+    private async Task<int> GetHistoryRetentionDaysAsync(CancellationToken cancellationToken)
+        => HistoryRetentionPolicy.Parse(await repository
+            .GetSettingAsync(HistoryRetentionPolicy.SettingKey, cancellationToken)
+            .ConfigureAwait(false));
+
+    private async Task<AgentResponse> HandleHistoryRetentionSetAsync(AgentCommand request, CancellationToken cancellationToken)
+    {
+        var payload = Deserialize<HistoryRetentionPayload>(request.Payload);
+        HistoryRetentionPolicy.Validate(payload.Days);
+        await repository.SetSettingAsync(
+            HistoryRetentionPolicy.SettingKey,
+            payload.Days.ToString(CultureInfo.InvariantCulture),
+            cancellationToken).ConfigureAwait(false);
+        var deleted = await RunHistoryCleanupAsync(cancellationToken).ConfigureAwait(false);
+        return AgentResponse.Ok(request.RequestId, new HistoryRetentionResult(payload.Days, deleted));
+    }
+
+    /// <summary>
+    /// Deletes finished history older than the configured retention. Returns the number of
+    /// jobs removed; 0 when history is kept forever. Never touches files.
+    /// </summary>
+    public async Task<int> RunHistoryCleanupAsync(CancellationToken cancellationToken)
+    {
+        var days = await GetHistoryRetentionDaysAsync(cancellationToken).ConfigureAwait(false);
+        if (days == HistoryRetentionPolicy.KeepForever)
+        {
+            return 0;
+        }
+
+        var deleted = await repository.DeleteExpiredHistoryAsync(
+            HistoryRetentionPolicy.Cutoff(days, clock.GetUtcNow()),
+            cancellationToken).ConfigureAwait(false);
+        if (deleted > 0)
+        {
+            logger.LogInformation("History cleanup removed {Deleted} finished jobs older than {Days} days", deleted, days);
+        }
+
+        return deleted;
+    }
+
+    /// <summary>
     /// Startup handshake. Lets the app warn about a browser that is still running a cached
     /// older extension before the user tries to download anything.
     /// </summary>
@@ -924,6 +1259,7 @@ public sealed class AgentCommandHandler(
     {
         var payload = request.Payload.Deserialize<JobRetryPayload>(ProtocolJson.Options)
             ?? throw new JsonException("Retry payload is required.");
+        using var jobLock = await jobLocks.AcquireAsync(payload.JobId, cancellationToken).ConfigureAwait(false);
         var job = await repository.GetJobAsync(payload.JobId, cancellationToken).ConfigureAwait(false);
         if (job is null)
         {

@@ -14,11 +14,13 @@ public static class SelectionPromptPolicy
     public static bool IsAutoPromptEligible(DownloadJob job)
         => job.IsSelectionPending
             && !job.IsBrowserRecordStale
+            // A tentative rule can still change once the file name is known, so it waits.
+            && !job.IsRuleTentative
             && job.SelectionPromptState == SelectionPromptState.NeverShown;
 
     /// <summary>
     /// A job that still needs a folder but is no longer an automatic prompt candidate.
-    /// These stay visible in the download history "처리 대기" filter.
+    /// These stay visible in the download history "pending" filter.
     /// </summary>
     public static bool IsPreviousSessionPending(DownloadJob job)
         => job.IsSelectionPending && !IsAutoPromptEligible(job);

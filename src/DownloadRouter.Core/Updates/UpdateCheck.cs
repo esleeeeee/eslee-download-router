@@ -1,4 +1,5 @@
 using System.Text.Json;
+using DownloadRouter.Core.Localization;
 
 namespace DownloadRouter.Core.Updates;
 
@@ -122,12 +123,15 @@ public static class UpdateCheckPolicy
     public static string DescribeForUser(UpdateStatus status, string currentSemanticVersion, LatestReleaseInfo? latest)
         => status switch
         {
-            UpdateStatus.UpdateAvailable when latest is not null =>
+            UpdateStatus.UpdateAvailable when latest is not null => AppText.Pick(
                 $"새 버전 {ToDisplayVersion(latest.Version)}이(가) 있습니다. 현재 버전은 {currentSemanticVersion}입니다.",
-            UpdateStatus.UpToDate =>
+                $"Version {ToDisplayVersion(latest.Version)} is available. You have version {currentSemanticVersion}."),
+            UpdateStatus.UpToDate => AppText.Pick(
                 $"최신 버전입니다. ({currentSemanticVersion})",
-            _ =>
+                $"You have the latest version. ({currentSemanticVersion})"),
+            _ => AppText.Pick(
                 "최신 버전을 확인하지 못했습니다. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.",
+                "Could not check for the latest version. Check your network connection and try again."),
         };
 
     public static string ToDisplayVersion(Version version)

@@ -1,4 +1,5 @@
 using System.Reflection;
+using DownloadRouter.Core.Localization;
 
 namespace DownloadRouter.Core.Models;
 
@@ -11,13 +12,17 @@ public sealed record ProductVersionInfo(
 {
     public const string Name = "eslee Download Router";
 
-    public string DisplayVersion => $"버전 {SemanticVersion}";
+    public string DisplayVersion => AppText.Pick($"버전 {SemanticVersion}", $"Version {SemanticVersion}");
 
     public string BuildDescription
-        => Commit is null ? "빌드 정보 없음" : $"커밋 {Commit}";
+        => Commit is null
+            ? AppText.Pick("빌드 정보 없음", "No build information")
+            : AppText.Pick($"커밋 {Commit}", $"Commit {Commit}");
 
     public string DistributionDescription
-        => IsInstalledBuild ? "설치형 빌드" : "개발 빌드";
+        => IsInstalledBuild
+            ? AppText.Pick("설치형 빌드", "Installed build")
+            : AppText.Pick("개발 빌드", "Development build");
 
     public static ProductVersionInfo Read(Assembly assembly, string baseDirectory)
     {

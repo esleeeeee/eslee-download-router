@@ -26,7 +26,13 @@ $process = $null
 
 try {
     $process = Start-Process -FilePath $agentPath -WorkingDirectory (Split-Path $agentPath -Parent) -WindowStyle Hidden -PassThru
-    $pipe = [IO.Pipes.NamedPipeClientStream]::new('.', 'eslee.download-router.agent.v1', [IO.Pipes.PipeDirection]::InOut)
+    # A non-default data root runs an isolated instance whose pipe name carries a suffix:
+    # "." plus the first 12 hex characters of SHA-256 over the upper-cased full path.
+    $normalizedRoot = [IO.Path]::GetFullPath($smokeRoot).TrimEnd([char]92, [char]47).ToUpperInvariant()
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try { $hash = $sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes($normalizedRoot)) } finally { $sha256.Dispose() }
+    $suffix = '.' + (([BitConverter]::ToString($hash) -replace '-', '').Substring(0, 12).ToLowerInvariant())
+    $pipe = [IO.Pipes.NamedPipeClientStream]::new('.', "eslee.download-router.agent.v1$suffix", [IO.Pipes.PipeDirection]::InOut)
     try {
         $pipe.Connect(5000)
         $requestId = [Guid]::NewGuid()

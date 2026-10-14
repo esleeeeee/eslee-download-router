@@ -1,6 +1,7 @@
 using System.IO.Pipes;
 using DownloadRouter.Core.Ipc;
 using DownloadRouter.Core.Models;
+using DownloadRouter.Core.Startup;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -8,16 +9,17 @@ namespace DownloadRouter.Agent;
 
 public sealed class AgentPipeServer(
     AgentCommandHandler handler,
+    AppInstance instance,
     ILogger<AgentPipeServer> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("Agent named-pipe server started on {PipeName}", ProtocolConstants.AgentPipeName);
+        logger.LogInformation("Agent named-pipe server started on {PipeName}", instance.AgentPipeName);
 
         while (!stoppingToken.IsCancellationRequested)
         {
             var server = new NamedPipeServerStream(
-                ProtocolConstants.AgentPipeName,
+                instance.AgentPipeName,
                 PipeDirection.InOut,
                 NamedPipeServerStream.MaxAllowedServerInstances,
                 PipeTransmissionMode.Byte,

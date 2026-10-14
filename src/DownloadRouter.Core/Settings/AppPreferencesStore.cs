@@ -1,6 +1,9 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using DownloadRouter.Core.Localization;
 using DownloadRouter.Core.Models;
+using DownloadRouter.Core.Startup;
 
 namespace DownloadRouter.Core.Settings;
 
@@ -9,9 +12,22 @@ public sealed record AppPreferences(
     string Theme = "System",
     string? LastUpdateCheckAt = null,
     string? LastKnownLatestVersion = null,
-    string? LastKnownReleaseUrl = null)
+    string? LastKnownReleaseUrl = null,
+    string Language = "System",
+    bool NotifyOnMoveCompleted = false)
 {
+    public const int MaximumFavoriteFolders = 20;
+
+    /// <summary>
+    /// Absolute folder paths the user pinned. The store keeps at most
+    /// <see cref="MaximumFavoriteFolders"/>, de-duplicated without regard to case.
+    /// Record equality compares this list by reference, never by content.
+    /// </summary>
+    public IReadOnlyList<string> FavoriteFolders { get; init; } = [];
+
     public AppThemePreference ThemePreference => AppThemePolicy.Parse(Theme);
+
+    public AppLanguage LanguagePreference => AppText.ParseLanguage(Language);
 }
 
 public static class AppThemePolicy
@@ -34,44 +50,182 @@ public static class AppThemePolicy
         };
 }
 
+/// <summary>
+/// Reads and writes the app's <c>config.local.json</c>. The app owns the file; the agent
+/// only reads <c>language</c> from it at startup. Writes are serialized across processes
+/// with a <c>.lock</c> file and replace the file atomically, and keys this version does not
+/// know are kept so an older or newer build never loses another build's settings.
+/// </summary>
 public sealed class AppPreferencesStore
 {
+    private static readonly TimeSpan LockTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan LockRetryDelay = TimeSpan.FromMilliseconds(25);
+
     private readonly string configPath;
 
     public AppPreferencesStore(string? configPath = null)
     {
-        this.configPath = configPath ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "eslee",
-            "DownloadRouter",
-            "config.local.json");
+        this.configPath = configPath ?? AppInstance.Current.ConfigPath;
     }
 
     public string ConfigPath => configPath;
 
+    private string LockPath => configPath + ".lock";
+
+    /// <summary>Read-only helper for processes that only need the display language.</summary>
+    public static AppLanguage ReadLanguage(string configPath)
+        => new AppPreferencesStore(configPath).Load().LanguagePreference;
+
     public AppPreferences Load()
+        => ReadDocument() is { } document ? FromDocument(document) : new AppPreferences();
+
+    /// <summary>Replaces the stored preferences under the cross-process lock.</summary>
+    public void Save(AppPreferences preferences)
     {
-        // Each field is read on its own so one wrong-typed value (the file is shared with
-        // the agent and user-editable) cannot silently reset the others to defaults.
+        ArgumentNullException.ThrowIfNull(preferences);
+        _ = Update(_ => preferences);
+    }
+
+    /// <summary>
+    /// Reads the current file, applies <paramref name="change"/>, and writes the result while
+    /// holding the cross-process lock, so concurrent writers never overwrite each other.
+    /// Returns the preferences as stored.
+    /// </summary>
+    public AppPreferences Update(Func<AppPreferences, AppPreferences> change)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        var directory = Path.GetDirectoryName(configPath)
+            ?? throw new InvalidOperationException("The settings directory could not be resolved.");
+        Directory.CreateDirectory(directory);
+
+        using var fileLock = AcquireLock();
+        var document = ReadDocument() ?? [];
+        var current = FromDocument(document);
+        var changed = change(current)
+            ?? throw new InvalidOperationException("The preferences update returned no value.");
+        var normalized = Normalize(changed);
+        WriteDocument(document, normalized);
+        var temporary = configPath + ".tmp";
+        File.WriteAllText(temporary, document.ToJsonString(ProtocolJson.Options));
+        MoveWithRetry(temporary, configPath);
+        return normalized;
+    }
+
+    public static IReadOnlyList<string> NormalizeFavoriteFolders(IEnumerable<string?>? folders)
+    {
+        var result = new List<string>();
+        if (folders is null)
+        {
+            return result;
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var folder in folders)
+        {
+            if (result.Count >= AppPreferences.MaximumFavoriteFolders)
+            {
+                break;
+            }
+
+            var candidate = folder?.Trim();
+            if (string.IsNullOrEmpty(candidate) || !Path.IsPathFullyQualified(candidate))
+            {
+                continue;
+            }
+
+            string full;
+            try
+            {
+                full = Path.GetFullPath(candidate);
+                var trimmed = Path.TrimEndingDirectorySeparator(full);
+                full = Path.IsPathFullyQualified(trimmed) ? trimmed : full;
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                continue;
+            }
+
+            if (seen.Add(full))
+            {
+                result.Add(full);
+            }
+        }
+
+        return result;
+    }
+
+    private static AppPreferences Normalize(AppPreferences preferences)
+        => preferences with
+        {
+            Theme = AppThemePolicy.ToStorageValue(preferences.ThemePreference),
+            Language = preferences.LanguagePreference.ToString(),
+            FavoriteFolders = NormalizeFavoriteFolders(preferences.FavoriteFolders),
+        };
+
+    private JsonObject? ReadDocument()
+    {
+        // Each field is read on its own so one wrong-typed value in this user-editable file
+        // cannot silently reset the others to defaults.
         try
         {
-            if (File.Exists(configPath)
-                && JsonNode.Parse(File.ReadAllText(configPath)) is JsonObject document)
+            if (!File.Exists(configPath))
             {
-                var loaded = new AppPreferences(
-                    CloseBehavior: ReadCloseBehavior(document),
-                    Theme: ReadString(document, "theme") ?? "System",
-                    LastUpdateCheckAt: ReadString(document, "lastUpdateCheckAt"),
-                    LastKnownLatestVersion: ReadString(document, "lastKnownLatestVersion"),
-                    LastKnownReleaseUrl: ReadString(document, "lastKnownReleaseUrl"));
-                return loaded with { Theme = AppThemePolicy.ToStorageValue(loaded.ThemePreference) };
+                return null;
             }
+
+            // Delete sharing lets a writer replace the file while this read is open.
+            using var stream = new FileStream(
+                configPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            return JsonNode.Parse(reader.ReadToEnd()) as JsonObject;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
+            return null;
+        }
+    }
+
+    private static AppPreferences FromDocument(JsonObject document)
+    {
+        var loaded = new AppPreferences(
+            CloseBehavior: ReadCloseBehavior(document),
+            Theme: ReadString(document, "theme") ?? "System",
+            LastUpdateCheckAt: ReadString(document, "lastUpdateCheckAt"),
+            LastKnownLatestVersion: ReadString(document, "lastKnownLatestVersion"),
+            LastKnownReleaseUrl: ReadString(document, "lastKnownReleaseUrl"),
+            Language: ReadString(document, "language") ?? "System",
+            NotifyOnMoveCompleted: document["notifyOnMoveCompleted"] is JsonValue notify
+                && notify.TryGetValue<bool>(out var enabled)
+                && enabled)
+        {
+            FavoriteFolders = NormalizeFavoriteFolders(ReadStringArray(document, "favoriteFolders")),
+        };
+        return loaded with
+        {
+            Theme = AppThemePolicy.ToStorageValue(loaded.ThemePreference),
+            Language = loaded.LanguagePreference.ToString(),
+        };
+    }
+
+    private static void WriteDocument(JsonObject document, AppPreferences preferences)
+    {
+        document["closeBehavior"] = (int)preferences.CloseBehavior;
+        document["theme"] = preferences.Theme;
+        WriteOrRemove(document, "lastUpdateCheckAt", preferences.LastUpdateCheckAt);
+        WriteOrRemove(document, "lastKnownLatestVersion", preferences.LastKnownLatestVersion);
+        WriteOrRemove(document, "lastKnownReleaseUrl", preferences.LastKnownReleaseUrl);
+        document["language"] = preferences.Language;
+        document["notifyOnMoveCompleted"] = preferences.NotifyOnMoveCompleted;
+        var favorites = new JsonArray();
+        foreach (var folder in preferences.FavoriteFolders)
+        {
+            favorites.Add(folder);
         }
 
-        return new AppPreferences();
+        document["favoriteFolders"] = favorites;
     }
 
     private static string? ReadString(JsonObject document, string key)
@@ -79,43 +233,17 @@ public sealed class AppPreferencesStore
             ? text
             : null;
 
+    private static IEnumerable<string?> ReadStringArray(JsonObject document, string key)
+        => document[key] is JsonArray array
+            ? array.Select(static item => item is JsonValue value && value.TryGetValue<string>(out var text) ? text : null)
+            : [];
+
     private static WindowCloseBehavior ReadCloseBehavior(JsonObject document)
         => document["closeBehavior"] is JsonValue value
             && value.TryGetValue<int>(out var stored)
             && Enum.IsDefined((WindowCloseBehavior)stored)
                 ? (WindowCloseBehavior)stored
                 : WindowCloseBehavior.MinimizeToTray;
-
-    public void Save(AppPreferences preferences)
-    {
-        var directory = Path.GetDirectoryName(configPath)
-            ?? throw new InvalidOperationException("The settings directory could not be resolved.");
-        Directory.CreateDirectory(directory);
-        var normalized = preferences with
-        {
-            Theme = AppThemePolicy.ToStorageValue(preferences.ThemePreference),
-        };
-        JsonObject document;
-        try
-        {
-            document = File.Exists(configPath)
-                ? JsonNode.Parse(File.ReadAllText(configPath)) as JsonObject ?? []
-                : [];
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
-        {
-            document = [];
-        }
-
-        document["closeBehavior"] = (int)normalized.CloseBehavior;
-        document["theme"] = normalized.Theme;
-        WriteOrRemove(document, "lastUpdateCheckAt", normalized.LastUpdateCheckAt);
-        WriteOrRemove(document, "lastKnownLatestVersion", normalized.LastKnownLatestVersion);
-        WriteOrRemove(document, "lastKnownReleaseUrl", normalized.LastKnownReleaseUrl);
-        var temporary = configPath + ".tmp";
-        File.WriteAllText(temporary, document.ToJsonString(ProtocolJson.Options));
-        File.Move(temporary, configPath, overwrite: true);
-    }
 
     private static void WriteOrRemove(JsonObject document, string key, string? value)
     {
@@ -126,6 +254,52 @@ public sealed class AppPreferencesStore
         else
         {
             document[key] = value;
+        }
+    }
+
+    private FileStream AcquireLock()
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (true)
+        {
+            try
+            {
+                return new FileStream(LockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (stopwatch.Elapsed < LockTimeout)
+            {
+                Thread.Sleep(LockRetryDelay);
+            }
+            catch (UnauthorizedAccessException) when (stopwatch.Elapsed < LockTimeout)
+            {
+                // A lock file that is being deleted or recreated reports access denied briefly.
+                Thread.Sleep(LockRetryDelay);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                throw new IOException(
+                    AppText.Pick(
+                        "다른 창이 설정 파일을 사용하고 있어 설정을 저장하지 못했습니다. 잠시 후 다시 시도하세요.",
+                        "Settings could not be saved because another window is using the settings file. Try again in a moment."),
+                    exception);
+            }
+        }
+    }
+
+    private static void MoveWithRetry(string source, string destination)
+    {
+        // A reader without delete sharing (for example an editor) can briefly block the replace.
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                File.Move(source, destination, overwrite: true);
+                return;
+            }
+            catch (Exception exception) when ((exception is IOException or UnauthorizedAccessException) && attempt < 20)
+            {
+                Thread.Sleep(LockRetryDelay);
+            }
         }
     }
 }

@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using DownloadRouter.Core.Models;
+using DownloadRouter.Core.Startup;
 using Microsoft.Extensions.Logging;
 
 namespace DownloadRouter.Agent;
@@ -9,7 +9,9 @@ public interface ISelectionUiLauncher
     bool RequestSelectionUi();
 }
 
-public sealed class SelectionUiLauncher(ILogger<SelectionUiLauncher> logger) : ISelectionUiLauncher
+public sealed class SelectionUiLauncher(
+    AppInstance instance,
+    ILogger<SelectionUiLauncher> logger) : ISelectionUiLauncher
 {
     private readonly object gate = new();
     private string? cachedAppPath;
@@ -20,7 +22,7 @@ public sealed class SelectionUiLauncher(ILogger<SelectionUiLauncher> logger) : I
         {
             try
             {
-                if (Mutex.TryOpenExisting(ProtocolConstants.AppMutexName, out var existing))
+                if (Mutex.TryOpenExisting(instance.AppMutexName, out var existing))
                 {
                     existing.Dispose();
                     return true;
@@ -33,12 +35,19 @@ public sealed class SelectionUiLauncher(ILogger<SelectionUiLauncher> logger) : I
                     return false;
                 }
 
-                Process.Start(new ProcessStartInfo
+                var startInfo = new ProcessStartInfo
                 {
                     FileName = appPath,
                     UseShellExecute = true,
                     WorkingDirectory = Path.GetDirectoryName(appPath)!,
-                });
+                };
+                // A non-default instance must open its own app, never the installed one's data.
+                foreach (var argument in instance.ForwardedArguments)
+                {
+                    startInfo.ArgumentList.Add(argument);
+                }
+
+                Process.Start(startInfo);
                 return true;
             }
             catch (Exception exception)

@@ -1,10 +1,11 @@
+using DownloadRouter.Core.Localization;
 using DownloadRouter.Core.Models;
 
 namespace DownloadRouter.Core.Jobs;
 
 public static class DownloadPresentation
 {
-    public const string PendingFileName = "파일 이름 확인 중…";
+    public static string PendingFileName => AppText.Pick("파일 이름 확인 중…", "Checking file name…");
 
     public static string DisplayFileName(DownloadJob job)
         => (job.RoutingState == RoutingState.Completed ? Path.GetFileName(job.FinalPath) : null)

@@ -1,3 +1,5 @@
+using DownloadRouter.Core.Startup;
+
 namespace DownloadRouter.Infrastructure.Storage;
 
 public sealed class AppPaths
@@ -24,18 +26,21 @@ public sealed class AppPaths
 
     public string ConfigPath { get; }
 
-    public static AppPaths CreateDefault()
+    /// <summary>Paths for the data root of <paramref name="instance"/>.</summary>
+    public static AppPaths For(AppInstance instance)
     {
-        var overridePath = Environment.GetEnvironmentVariable("DOWNLOAD_ROUTER_DATA_DIR");
-        var root = !string.IsNullOrWhiteSpace(overridePath) && Path.IsPathFullyQualified(overridePath)
-            ? overridePath
-            : Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "eslee",
-                "DownloadRouter");
-
-        return new AppPaths(root);
+        ArgumentNullException.ThrowIfNull(instance);
+        return new AppPaths(instance.DataRoot);
     }
+
+    /// <summary>
+    /// Paths for the instance selected by <c>DOWNLOAD_ROUTER_DATA_DIR</c>, or the default
+    /// data folder when it is unset or not fully qualified.
+    /// </summary>
+    public static AppPaths CreateDefault()
+        => For(AppInstance.Resolve(
+            [],
+            Environment.GetEnvironmentVariable(AppInstance.DataDirectoryEnvironmentVariable)));
 
     public void EnsureCreated()
     {
