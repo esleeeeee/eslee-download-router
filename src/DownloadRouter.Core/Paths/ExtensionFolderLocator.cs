@@ -1,3 +1,5 @@
+using DownloadRouter.Core.Localization;
+
 namespace DownloadRouter.Core.Paths;
 
 public enum ExtensionFolderSource
@@ -76,12 +78,15 @@ public static class ExtensionFolderLocator
         ArgumentNullException.ThrowIfNull(location);
         return location.Source switch
         {
-            ExtensionFolderSource.Installed =>
+            ExtensionFolderSource.Installed => AppText.Pick(
                 $"브라우저에서 이 폴더를 선택하세요: {location.Path}",
-            ExtensionFolderSource.DevelopmentBuild =>
+                $"Select this folder in the browser: {location.Path}"),
+            ExtensionFolderSource.DevelopmentBuild => AppText.Pick(
                 $"개발 빌드로 실행 중입니다. 브라우저에서 이 폴더를 선택하세요: {location.Path}",
-            _ =>
+                $"Running a development build. Select this folder in the browser: {location.Path}"),
+            _ => AppText.Pick(
                 "확장 폴더를 찾지 못했습니다. 설치 프로그램으로 다시 설치한 뒤 이 화면을 다시 열어 주세요.",
+                "The extension folder was not found. Reinstall with the installer, then open this screen again."),
         };
     }
 

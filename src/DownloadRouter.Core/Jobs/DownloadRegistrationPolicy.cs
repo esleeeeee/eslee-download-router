@@ -1,3 +1,4 @@
+using DownloadRouter.Core.Localization;
 using DownloadRouter.Core.Models;
 
 namespace DownloadRouter.Core.Jobs;
@@ -93,6 +94,7 @@ public static class DownloadRegistrationPolicy
     /// User-facing guidance shown when the browser is still running an extension build
     /// this agent does not recognise.
     /// </summary>
-    public const string ExtensionRefreshGuidance =
-        "브라우저가 이전 버전의 확장을 계속 사용하고 있습니다. 확장 관리 화면에서 eslee Download Router를 새로 고친 뒤 브라우저를 다시 시작하세요. 그때까지 새 다운로드는 추적되지 않으며 브라우저 다운로드 자체는 그대로 동작합니다.";
+    public static string ExtensionRefreshGuidance => AppText.Pick(
+        "브라우저가 이전 버전의 확장을 계속 사용하고 있습니다. 확장 관리 화면에서 eslee Download Router를 새로 고친 뒤 브라우저를 다시 시작하세요. 그때까지 새 다운로드는 추적되지 않으며 브라우저 다운로드 자체는 그대로 동작합니다.",
+        "The browser is still running an older version of the extension. Reload eslee Download Router on the browser's extensions page, then restart the browser. Until then new downloads are not tracked, and the browser keeps downloading as usual.");
 }

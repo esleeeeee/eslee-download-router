@@ -2,6 +2,7 @@ using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DownloadRouter.Core.Localization;
 
 namespace DownloadRouter.Core.Ipc;
 
@@ -299,12 +300,12 @@ public sealed class TrayFolderLink : IDisposable
             catch (OperationCanceledException)
             {
                 succeeded = false;
-                errorMessage = "앱이 종료되는 중이라 창을 열 수 없습니다.";
+                errorMessage = AppText.Pick("앱이 종료되는 중이라 창을 열 수 없습니다.", "The window cannot open because the app is closing.");
             }
             catch (Exception exception)
             {
                 succeeded = false;
-                errorMessage = "창을 여는 데 실패했습니다.";
+                errorMessage = AppText.Pick("창을 여는 데 실패했습니다.", "The window could not be opened.");
                 logError("tray-host.activate-failed", exception.Message);
             }
         }
@@ -313,7 +314,7 @@ public sealed class TrayFolderLink : IDisposable
             if (string.IsNullOrWhiteSpace(message.ActionId))
             {
                 succeeded = false;
-                errorMessage = "메뉴 항목 id가 없습니다.";
+                errorMessage = AppText.Pick("메뉴 항목 id가 없습니다.", "The menu item id is missing.");
             }
             else
             {
@@ -322,17 +323,17 @@ public sealed class TrayFolderLink : IDisposable
                     succeeded = await executeMenuActionAsync(message.ActionId)
                         .WaitAsync(cancellationToken)
                         .ConfigureAwait(false);
-                    errorMessage = succeeded ? null : "지원하지 않는 메뉴 항목입니다.";
+                    errorMessage = succeeded ? null : AppText.Pick("지원하지 않는 메뉴 항목입니다.", "This menu item is not supported.");
                 }
                 catch (OperationCanceledException)
                 {
                     succeeded = false;
-                    errorMessage = "앱이 종료되는 중이라 메뉴 항목을 실행할 수 없습니다.";
+                    errorMessage = AppText.Pick("앱이 종료되는 중이라 메뉴 항목을 실행할 수 없습니다.", "The menu item cannot run because the app is closing.");
                 }
                 catch (Exception exception)
                 {
                     succeeded = false;
-                    errorMessage = "메뉴 항목을 실행하지 못했습니다.";
+                    errorMessage = AppText.Pick("메뉴 항목을 실행하지 못했습니다.", "The menu item could not be run.");
                     logError("tray-host.menu-action-failed", exception.Message);
                 }
             }
@@ -340,7 +341,7 @@ public sealed class TrayFolderLink : IDisposable
         else
         {
             succeeded = false;
-            errorMessage = "지원하지 않는 명령입니다.";
+            errorMessage = AppText.Pick("지원하지 않는 명령입니다.", "This command is not supported.");
         }
 
         if (message.Id is int commandId)

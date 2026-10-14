@@ -1,3 +1,5 @@
+using DownloadRouter.Core.Localization;
+
 namespace DownloadRouter.Core.Paths;
 
 public sealed record FolderTreeEntry(
@@ -29,7 +31,7 @@ public sealed class SafeFolderTreeProvider(PathBoundaryValidator boundaryValidat
         boundaryValidator.EnsureWithin(root, parent);
         if (!Directory.Exists(parent))
         {
-            return new FolderTreeChildren([], "폴더가 존재하지 않습니다.");
+            return new FolderTreeChildren([], AppText.Pick("폴더가 존재하지 않습니다.", "The folder does not exist."));
         }
 
         try
@@ -61,7 +63,7 @@ public sealed class SafeFolderTreeProvider(PathBoundaryValidator boundaryValidat
                         child,
                         string.Empty,
                         false,
-                        "이 폴더에 접근할 수 없습니다."));
+                        AppText.Pick("이 폴더에 접근할 수 없습니다.", "This folder cannot be accessed.")));
                 }
             }
 
@@ -69,7 +71,7 @@ public sealed class SafeFolderTreeProvider(PathBoundaryValidator boundaryValidat
         }
         catch (Exception exception) when (exception is UnauthorizedAccessException or IOException)
         {
-            return new FolderTreeChildren([], "이 폴더의 하위 항목을 읽을 수 없습니다.");
+            return new FolderTreeChildren([], AppText.Pick("이 폴더의 하위 항목을 읽을 수 없습니다.", "The contents of this folder cannot be read."));
         }
     }
 }
