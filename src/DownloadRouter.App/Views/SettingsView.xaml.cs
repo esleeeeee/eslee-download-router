@@ -63,9 +63,8 @@ public sealed partial class SettingsView : UserControl, IAppView
         RetentionBox.ItemsSource = retentionOptions;
 
         var version = MainWindow.CurrentVersion();
-        VersionCard.Description = AppText.Pick(
-            $"버전 {version.DisplayVersion} · {version.DistributionDescription}",
-            $"Version {version.DisplayVersion} · {version.DistributionDescription}");
+        // DisplayVersion already reads "버전 2.0.0" / "Version 2.0.0".
+        VersionCard.Description = $"{version.DisplayVersion} · {version.DistributionDescription}";
         SupportCard.Description = BrowserSupportCatalog.SupportSummary;
         DataFolderCard.Description = AppServices.Instance.DataRoot;
         TestInstanceBar.IsOpen = !AppServices.Instance.IsDefault;

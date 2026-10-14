@@ -281,6 +281,9 @@ public sealed class UpdateCheckTests
         Assert.True(settingsXaml.IndexOf("x:Name=\"VersionCard\"", StringComparison.Ordinal)
             < settingsXaml.IndexOf("x:Name=\"UpdateCard\"", StringComparison.Ordinal));
         Assert.Contains("version.DisplayVersion", settings, StringComparison.Ordinal);
+        // DisplayVersion carries its own "버전"/"Version" prefix; repeating it showed "버전 버전 2.0.0".
+        Assert.DoesNotContain("버전 {version.DisplayVersion}", settings, StringComparison.Ordinal);
+        Assert.DoesNotContain("Version {version.DisplayVersion}", settings, StringComparison.Ordinal);
         Assert.Contains("RenderUpdateState", settings, StringComparison.Ordinal);
         Assert.Contains("지금 확인", settingsXaml, StringComparison.Ordinal);
         Assert.Contains("Release 페이지 열기", settingsXaml, StringComparison.Ordinal);
