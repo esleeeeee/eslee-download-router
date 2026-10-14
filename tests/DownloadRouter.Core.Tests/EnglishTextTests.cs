@@ -83,6 +83,21 @@ public sealed class EnglishTextTests : EnglishTextTestBase
     }
 
     [Fact]
+    public void StorageHealthAndRuleImportSpeakEnglish()
+    {
+        Assert.Equal(
+            "The folder cannot be reached. Check the external drive or network connection. (D:\\Routed)",
+            StorageRootHealth.Describe(StorageRootStatus.Unreachable, "D:\\Routed"));
+
+        var json = """{"format":"eslee-download-router.rules","version":1,"rules":[{"name":"x","matchType":"Nope","matchValue":"a.example","storageRoot":"D:\\x","storageMode":"Automatic"}]}""";
+        var result = RuleTransfer.Import(json, [], DateTimeOffset.UtcNow);
+        Assert.Equal("Rule 1: The 'matchType' field has an invalid value.", Assert.Single(result.Errors));
+
+        var notAnExport = Assert.Throws<ArgumentException>(() => RuleTransfer.Import("{}", [], DateTimeOffset.UtcNow));
+        Assert.Equal("This is not a rules file exported from eslee Download Router.", notAnExport.Message);
+    }
+
+    [Fact]
     public void TheLanguageIsRestoredToKoreanAfterEachEnglishTest()
     {
         // Runs in the same non-parallel collection; the base class switched to English and
