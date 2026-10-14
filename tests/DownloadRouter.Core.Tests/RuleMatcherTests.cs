@@ -67,6 +67,115 @@ public sealed class RuleMatcherTests
         Assert.True(matcher.IsMatch(rule, "https://xn--vv4b11d.xn--9t4b11yi5a/file"));
     }
 
+    [Fact]
+    public void AKnownNameThatAFilterIncludesSelectsTheFilteredRule()
+    {
+        var general = Rule(RuleMatchType.DomainAndSubdomains, "example.com");
+        var documents = Rule(RuleMatchType.ExactHost, "files.example.com") with
+        {
+            FileTypeMode = FileTypeFilterMode.OnlyListed,
+            FileExtensions = ".pdf;.docx",
+        };
+
+        var result = matcher.Match([general, documents], Metadata("https://files.example.com/page") with { OriginalFileName = "Report.PDF" });
+
+        Assert.NotNull(result);
+        Assert.Equal(documents.Id, result.Rule.Id);
+        Assert.False(result.IsTentative);
+    }
+
+    [Fact]
+    public void AKnownNameThatAFilterExcludesFallsBackToTheNextRuleOrNothing()
+    {
+        var general = Rule(RuleMatchType.DomainAndSubdomains, "example.com");
+        var noInstallers = Rule(RuleMatchType.ExactHost, "files.example.com") with
+        {
+            FileTypeMode = FileTypeFilterMode.ExceptListed,
+            FileExtensions = ".exe;.msi",
+        };
+        var metadata = Metadata("https://files.example.com/page") with { OriginalFileName = "setup.exe" };
+
+        var fallback = matcher.Match([general, noInstallers], metadata);
+        var none = matcher.Match([noInstallers], metadata);
+
+        Assert.NotNull(fallback);
+        Assert.Equal(general.Id, fallback.Rule.Id);
+        Assert.False(fallback.IsTentative);
+        Assert.Null(none);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("Unconfirmed 1.crdownload")]
+    public void AnUnknownNameLetsFilteredRulesCompeteAndMarksTheResultTentative(string fileName)
+    {
+        var general = Rule(RuleMatchType.DomainAndSubdomains, "example.com");
+        var documents = Rule(RuleMatchType.ExactHost, "files.example.com") with
+        {
+            FileTypeMode = FileTypeFilterMode.OnlyListed,
+            FileExtensions = ".pdf",
+        };
+
+        var result = matcher.Match([general, documents], Metadata("https://files.example.com/page") with { OriginalFileName = fileName });
+
+        Assert.NotNull(result);
+        Assert.Equal(documents.Id, result.Rule.Id);
+        Assert.True(result.IsTentative);
+    }
+
+    [Fact]
+    public void AnUnknownNameIsTentativeEvenWhenTheFilteredRuleDoesNotWin()
+    {
+        var exact = Rule(RuleMatchType.ExactHost, "files.example.com");
+        var filteredParent = Rule(RuleMatchType.DomainAndSubdomains, "example.com") with
+        {
+            FileTypeMode = FileTypeFilterMode.ExceptListed,
+            FileExtensions = ".exe",
+        };
+        var disabledFiltered = Rule(RuleMatchType.UrlContains, "files") with
+        {
+            IsEnabled = false,
+            FileTypeMode = FileTypeFilterMode.OnlyListed,
+            FileExtensions = ".pdf",
+        };
+        var metadata = Metadata("https://files.example.com/page") with { OriginalFileName = "" };
+
+        var withFilter = matcher.Match([exact, filteredParent], metadata);
+        var onlyDisabledFilter = matcher.Match([exact, disabledFiltered], metadata);
+
+        Assert.Equal(exact.Id, withFilter!.Rule.Id);
+        Assert.True(withFilter.IsTentative);
+        Assert.False(onlyDisabledFilter!.IsTentative);
+    }
+
+    [Fact]
+    public void AnUnknownNameWithoutAnyFilteredRuleIsNotTentative()
+    {
+        var rule = Rule(RuleMatchType.DomainAndSubdomains, "example.com");
+
+        var result = matcher.Match([rule], Metadata("https://example.com/page") with { OriginalFileName = "" });
+
+        Assert.False(result!.IsTentative);
+    }
+
+    [Fact]
+    public void RematchKeepsThePreviousRuleWhenOnlyItsFullAddressMatched()
+    {
+        // Created from a query-string match that the stored, sanitized address no longer has.
+        var queryRule = Rule(RuleMatchType.UrlContains, "board=7") with
+        {
+            FileTypeMode = FileTypeFilterMode.OnlyListed,
+            FileExtensions = ".pdf",
+        };
+        var metadata = Metadata("https://example.com/view") with { OriginalFileName = "notes.pdf" };
+
+        Assert.Null(matcher.Match([queryRule], metadata));
+        var rematch = matcher.Rematch([queryRule], metadata, queryRule.Id, "https://example.com/view");
+        Assert.Equal(queryRule.Id, rematch!.Rule.Id);
+        Assert.Null(matcher.Rematch([queryRule], metadata with { OriginalFileName = "setup.exe" }, queryRule.Id, null));
+        Assert.Null(matcher.Rematch([queryRule with { IsEnabled = false }], metadata, queryRule.Id, null));
+    }
+
     private static DownloadRule Rule(
         RuleMatchType type,
         string value,

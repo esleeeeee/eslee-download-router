@@ -11,6 +11,12 @@ public sealed class RulePresentationTests
         Assert.Equal(Enum.GetValues<RuleMatchType>().Length, RulePresentation.MatchTypes.Count);
         Assert.Equal(Enum.GetValues<RuleMatchTarget>().Length, RulePresentation.MatchTargets.Count);
         Assert.Equal(Enum.GetValues<StorageMode>().Length, RulePresentation.StorageModes.Count);
+        Assert.Equal(Enum.GetValues<FileTypeFilterMode>().Length, RulePresentation.FileTypeModes.Count);
+
+        foreach (var value in Enum.GetValues<FileTypeFilterMode>())
+        {
+            Assert.Single(RulePresentation.FileTypeModes, choice => choice.Value == value);
+        }
 
         foreach (var value in Enum.GetValues<RuleMatchType>())
         {
@@ -29,7 +35,8 @@ public sealed class RulePresentationTests
 
         var all = RulePresentation.MatchTypes.Select(choice => (choice.Label, choice.Description, choice.Example))
             .Concat(RulePresentation.MatchTargets.Select(choice => (choice.Label, choice.Description, choice.Example)))
-            .Concat(RulePresentation.StorageModes.Select(choice => (choice.Label, choice.Description, choice.Example)));
+            .Concat(RulePresentation.StorageModes.Select(choice => (choice.Label, choice.Description, choice.Example)))
+            .Concat(RulePresentation.FileTypeModes.Select(choice => (choice.Label, choice.Description, choice.Example)));
         foreach (var (label, description, example) in all)
         {
             Assert.False(string.IsNullOrWhiteSpace(label));
@@ -46,6 +53,7 @@ public sealed class RulePresentationTests
             "DomainAndSubdomains", "ExactHost", "UrlContains",
             "InitiatingPage", "FileUrl", "Either",
             "Automatic", "SelectSubfolder",
+            "AllFiles", "OnlyListed", "ExceptListed",
         };
 
         var text = string.Join(
@@ -53,6 +61,15 @@ public sealed class RulePresentationTests
             RulePresentation.MatchTypes.Select(choice => $"{choice.Label}{choice.Description}{choice.Example}")
                 .Concat(RulePresentation.MatchTargets.Select(choice => $"{choice.Label}{choice.Description}{choice.Example}"))
                 .Concat(RulePresentation.StorageModes.Select(choice => $"{choice.Label}{choice.Description}{choice.Example}"))
+                .Concat(RulePresentation.FileTypeModes.Select(choice => $"{choice.Label}{choice.Description}{choice.Example}"))
+                .Append(RulePresentation.Summarize(
+                    RuleMatchType.ExactHost,
+                    "files.example.com",
+                    RuleMatchTarget.FileUrl,
+                    StorageMode.Automatic,
+                    "D:\\Routed",
+                    FileTypeFilterMode.ExceptListed,
+                    ".exe"))
                 .Append(RulePresentation.Summarize(
                     RuleMatchType.DomainAndSubdomains,
                     "kio.ac",
@@ -112,11 +129,53 @@ public sealed class RulePresentationTests
     }
 
     [Fact]
+    public void FileTypeClauseNarrowsTheSummaryAndTheOldOverloadIsUnchanged()
+    {
+        var only = RulePresentation.Summarize(
+            RuleMatchType.DomainAndSubdomains,
+            "kio.ac",
+            RuleMatchTarget.InitiatingPage,
+            StorageMode.Automatic,
+            "D:\\Routed",
+            FileTypeFilterMode.OnlyListed,
+            ".pdf;.zip");
+        var except = RulePresentation.Summarize(
+            RuleMatchType.DomainAndSubdomains,
+            "kio.ac",
+            RuleMatchTarget.InitiatingPage,
+            StorageMode.Automatic,
+            "D:\\Routed",
+            FileTypeFilterMode.ExceptListed,
+            "exe");
+        var all = RulePresentation.Summarize(
+            RuleMatchType.DomainAndSubdomains,
+            "kio.ac",
+            RuleMatchTarget.InitiatingPage,
+            StorageMode.Automatic,
+            "D:\\Routed",
+            FileTypeFilterMode.AllFiles,
+            ".pdf");
+
+        Assert.Contains("에서 시작한 다운로드 가운데 .pdf, .zip 파일만 D:\\Routed 로 자동 이동합니다.", only, StringComparison.Ordinal);
+        Assert.Contains(".exe 파일을 제외한 나머지를", except, StringComparison.Ordinal);
+        Assert.Equal(
+            RulePresentation.Summarize(
+                RuleMatchType.DomainAndSubdomains, "kio.ac", RuleMatchTarget.InitiatingPage, StorageMode.Automatic, "D:\\Routed"),
+            all);
+        Assert.Contains("에서 시작한 다운로드를 D:\\Routed 로 자동 이동합니다.", all, StringComparison.Ordinal);
+        Assert.Equal("지정한 형식만", RulePresentation.FileTypeModeLabel(FileTypeFilterMode.OnlyListed));
+        Assert.Equal("지정한 형식만: .pdf, .zip", RulePresentation.FileTypeModeLabel(FileTypeFilterMode.OnlyListed, ".pdf;.zip"));
+        Assert.Equal("모든 파일", RulePresentation.FileTypeModeLabel(FileTypeFilterMode.AllFiles, ".pdf"));
+        Assert.Contains("(형식 미입력)", RulePresentation.FileTypeModeLabel(FileTypeFilterMode.ExceptListed, " "), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DefaultsMatchTheRecommendedRuleShape()
     {
         Assert.Equal(RuleMatchType.DomainAndSubdomains, RulePresentation.DefaultMatchType);
         Assert.Equal(RuleMatchTarget.InitiatingPage, RulePresentation.DefaultMatchTarget);
         Assert.Equal(StorageMode.Automatic, RulePresentation.DefaultStorageMode);
+        Assert.Equal(FileTypeFilterMode.AllFiles, RulePresentation.DefaultFileTypeMode);
         Assert.Equal("다운로드를 시작한 웹페이지", RulePresentation.MatchTargetLabel(RulePresentation.DefaultMatchTarget));
     }
 }

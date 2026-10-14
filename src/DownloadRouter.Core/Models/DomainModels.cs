@@ -86,6 +86,16 @@ public enum RoutingState
 /// This is persisted so a restart of the app, the browser, or Windows cannot replay a
 /// prompt the user already answered or postponed.
 /// </summary>
+/// <summary>
+/// Narrows a rule to certain file types. Stored as an integer, so append new members only.
+/// </summary>
+public enum FileTypeFilterMode
+{
+    AllFiles,
+    OnlyListed,
+    ExceptListed,
+}
+
 public enum SelectionPromptState
 {
     NeverShown,
@@ -106,7 +116,9 @@ public sealed record DownloadRule(
     int Priority,
     int ListOrder,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    FileTypeFilterMode FileTypeMode = FileTypeFilterMode.AllFiles,
+    string FileExtensions = "");
 
 public sealed record DownloadMetadata(
     BrowserKind Browser,
@@ -119,10 +131,15 @@ public sealed record DownloadMetadata(
     string? ReferrerUrl,
     DateTimeOffset StartedAt);
 
+/// <param name="IsTentative">
+/// True when the file name is not known yet and a matching rule filters by file type, so the
+/// winner may change once the browser reports the real name.
+/// </param>
 public sealed record RuleMatchResult(
     DownloadRule Rule,
     string MatchedUrl,
-    string SourceField);
+    string SourceField,
+    bool IsTentative = false);
 
 public sealed record DownloadJob(
     Guid Id,
@@ -150,7 +167,8 @@ public sealed record DownloadJob(
     SelectionPromptState SelectionPromptState = SelectionPromptState.NeverShown,
     string? SelectedDestinationFolder = null,
     string? SelectedFileName = null,
-    DateTimeOffset? BrowserStartedAt = null)
+    DateTimeOffset? BrowserStartedAt = null,
+    bool IsRuleTentative = false)
 {
     public DownloadJobStatus Status
         => BrowserState switch
@@ -278,6 +296,22 @@ public sealed record JobRouteChangePayload(
 
 public sealed record JobsDeletePayload(IReadOnlyList<Guid> JobIds);
 
+/// <summary>
+/// Whether new downloads are currently left alone. <paramref name="PausedUntil"/> is null for
+/// a pause that lasts until the user resumes routing.
+/// </summary>
+public sealed record RoutingPauseStatus(bool IsPaused, DateTimeOffset? PausedUntil);
+
+/// <summary>Minutes to pause (1 to 1440), or null to pause until resumed.</summary>
+public sealed record RoutingPausePayload(int? Minutes);
+
+/// <summary>Days of finished history to keep. 0 keeps everything.</summary>
+public sealed record HistoryRetentionStatus(int Days);
+
+public sealed record HistoryRetentionPayload(int Days);
+
+public sealed record HistoryRetentionResult(int Days, int Deleted);
+
 public sealed record RuleDeletePayload(Guid RuleId);
 
 public sealed record ActiveDownloadsPayload(string Browser);
@@ -339,7 +373,29 @@ public static class ProtocolConstants
         "route.change",
         "job.retry",
         "diagnostics.status",
+        "routing.status",
+        "routing.pause",
+        "routing.resume",
+        "history.retention.get",
+        "history.retention.set",
     };
+
+    /// <summary>
+    /// Commands only the app may send. The Native Host refuses them, so a browser can never
+    /// pause routing or delete history.
+    /// </summary>
+    public static readonly ISet<string> AppOnlyCommands = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "routing.status",
+        "routing.pause",
+        "routing.resume",
+        "history.retention.get",
+        "history.retention.set",
+    };
+
+    /// <summary>Commands the Native Host forwards from the browser extension.</summary>
+    public static bool IsBrowserForwardable(string? command)
+        => command is not null && AllowedCommands.Contains(command) && !AppOnlyCommands.Contains(command);
 }
 
 public static class ProtocolJson

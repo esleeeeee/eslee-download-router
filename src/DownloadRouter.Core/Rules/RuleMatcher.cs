@@ -7,29 +7,72 @@ public sealed class RuleMatcher
 {
     private static readonly IdnMapping Idn = new();
 
+    /// <summary>
+    /// Picks the most specific enabled rule whose address matches. When the file name is
+    /// known, rules whose file-type filter rejects it are skipped. When it is not known yet,
+    /// filtered rules still compete and the result is marked tentative, because the winner
+    /// can change once the browser reports the real name.
+    /// </summary>
     public RuleMatchResult? Match(IEnumerable<DownloadRule> rules, DownloadMetadata metadata)
+        => Match(rules, metadata, previousRuleId: null, previousMatchedUrl: null);
+
+    /// <summary>
+    /// Matches again once a tentative job's file name is known. A job stores only sanitized
+    /// addresses, so the rule that matched the full addresses at creation keeps counting as an
+    /// address match even when its sanitized address no longer matches it.
+    /// </summary>
+    public RuleMatchResult? Rematch(
+        IEnumerable<DownloadRule> rules,
+        DownloadMetadata metadata,
+        Guid previousRuleId,
+        string? previousMatchedUrl)
+        => Match(rules, metadata, previousRuleId, previousMatchedUrl);
+
+    private static RuleMatchResult? Match(
+        IEnumerable<DownloadRule> rules,
+        DownloadMetadata metadata,
+        Guid? previousRuleId,
+        string? previousMatchedUrl)
     {
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentNullException.ThrowIfNull(metadata);
 
-        return rules
-            .Where(static rule => rule.IsEnabled)
+        var fileNameKnown = FileTypeFilter.IsFileNameKnown(metadata.OriginalFileName);
+        var enabled = rules.Where(static rule => rule.IsEnabled).ToList();
+        var candidates = enabled
             .SelectMany(rule => CandidateUrls(rule, metadata)
                 .Select(candidate => TryMatch(rule, candidate.Url)
                     ? new Candidate(rule, candidate.Url, candidate.Source, Specificity(rule))
                     : null))
             .Where(static candidate => candidate is not null)
             .Cast<Candidate>()
+            .ToList();
+        if (previousRuleId is { } previousId
+            && candidates.All(candidate => candidate.Rule.Id != previousId)
+            && enabled.FirstOrDefault(rule => rule.Id == previousId) is { } previous)
+        {
+            candidates.Add(new Candidate(previous, previousMatchedUrl ?? string.Empty, "PreviousMatch", Specificity(previous)));
+        }
+
+        var isTentative = !fileNameKnown
+            && candidates.Any(static candidate => candidate.Rule.FileTypeMode != FileTypeFilterMode.AllFiles);
+
+        return candidates
+            .Where(candidate => !fileNameKnown || FileTypeFilter.Matches(
+                candidate.Rule.FileTypeMode,
+                candidate.Rule.FileExtensions,
+                metadata.OriginalFileName))
             .OrderByDescending(static candidate => candidate.Specificity.TypeRank)
             .ThenByDescending(static candidate => candidate.Specificity.ValueLength)
             .ThenByDescending(static candidate => candidate.Rule.Priority)
             .ThenBy(static candidate => candidate.Rule.ListOrder)
             .ThenBy(static candidate => candidate.Rule.CreatedAt)
             .ThenBy(static candidate => candidate.Rule.Id)
-            .Select(static candidate => new RuleMatchResult(
+            .Select(candidate => new RuleMatchResult(
                 candidate.Rule,
                 candidate.Url,
-                candidate.Source))
+                candidate.Source,
+                isTentative))
             .FirstOrDefault();
     }
 

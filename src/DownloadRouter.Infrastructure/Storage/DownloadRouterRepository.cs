@@ -7,7 +7,7 @@ namespace DownloadRouter.Infrastructure.Storage;
 
 public sealed class DownloadRouterRepository(AppPaths paths)
 {
-    private const int CurrentSchemaVersion = 7;
+    private const int CurrentSchemaVersion = 8;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -121,7 +121,8 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT Id, Name, IsEnabled, MatchType, MatchValue, MatchTarget,
-                   StorageRoot, StorageMode, Priority, ListOrder, CreatedAt, UpdatedAt
+                   StorageRoot, StorageMode, Priority, ListOrder, CreatedAt, UpdatedAt,
+                   FileTypeMode, FileExtensions
             FROM Rules
             WHERE IsDeleted = 0
             ORDER BY ListOrder, CreatedAt, Id;
@@ -144,7 +145,8 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT Id, Name, IsEnabled, MatchType, MatchValue, MatchTarget,
-                   StorageRoot, StorageMode, Priority, ListOrder, CreatedAt, UpdatedAt
+                   StorageRoot, StorageMode, Priority, ListOrder, CreatedAt, UpdatedAt,
+                   FileTypeMode, FileExtensions
             FROM Rules WHERE Id = $id;
             """;
         command.Parameters.AddWithValue("$id", id.ToString("D"));
@@ -161,10 +163,12 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         command.CommandText = """
             INSERT INTO Rules(
                 Id, Name, IsEnabled, MatchType, MatchValue, MatchTarget, StorageRoot,
-                StorageMode, Priority, ListOrder, CreatedAt, UpdatedAt, IsDeleted)
+                StorageMode, Priority, ListOrder, CreatedAt, UpdatedAt, IsDeleted,
+                FileTypeMode, FileExtensions)
             VALUES(
                 $id, $name, $enabled, $matchType, $matchValue, $matchTarget, $storageRoot,
-                $storageMode, $priority, $listOrder, $createdAt, $updatedAt, 0)
+                $storageMode, $priority, $listOrder, $createdAt, $updatedAt, 0,
+                $fileTypeMode, $fileExtensions)
             ON CONFLICT(Id) DO UPDATE SET
                 Name = excluded.Name,
                 IsEnabled = excluded.IsEnabled,
@@ -176,7 +180,9 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 Priority = excluded.Priority,
                 ListOrder = excluded.ListOrder,
                 UpdatedAt = excluded.UpdatedAt,
-                IsDeleted = 0;
+                IsDeleted = 0,
+                FileTypeMode = excluded.FileTypeMode,
+                FileExtensions = excluded.FileExtensions;
             """;
         AddRuleParameters(command, rule);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -215,13 +221,15 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 InitiatingPageUrl, InitialUrl, FinalUrl, ReferrerUrl, SanitizedSource,
                 RuleId, OriginalPath, FinalPath, SelectedRelativeFolder, Status,
                 BrowserState, RoutingState, ErrorCode, ErrorMessage, CreatedAt, CompletedAt,
-                LastBrowserEventAt, IsBrowserRecordStale, SelectionPromptState, SelectedDestinationFolder, SelectedFileName, BrowserStartedAt)
+                LastBrowserEventAt, IsBrowserRecordStale, SelectionPromptState, SelectedDestinationFolder, SelectedFileName, BrowserStartedAt,
+                IsRuleTentative)
             VALUES(
                 $id, $browser, $browserDownloadId, $originalFileName, $currentFileName,
                 $initiatingPageUrl, $initialUrl, $finalUrl, $referrerUrl, $sanitizedSource,
                 $ruleId, $originalPath, $finalPath, $selectedRelativeFolder, $status,
                 $browserState, $routingState, $errorCode, $errorMessage, $createdAt, $completedAt,
-                $lastBrowserEventAt, $isBrowserRecordStale, $selectionPromptState, $selectedDestinationFolder, $selectedFileName, $browserStartedAt);
+                $lastBrowserEventAt, $isBrowserRecordStale, $selectionPromptState, $selectedDestinationFolder, $selectedFileName, $browserStartedAt,
+                $isRuleTentative);
             """;
         AddJobParameters(command, job);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -338,6 +346,97 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
     }
 
+    public async Task<string?> GetSettingAsync(string key, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Value FROM AppSettings WHERE Key = $key;";
+        command.Parameters.AddWithValue("$key", key);
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as string;
+    }
+
+    public async Task SetSettingAsync(string key, string value, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentNullException.ThrowIfNull(value);
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO AppSettings(Key, Value, UpdatedAt) VALUES($key, $value, $now)
+            ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value, UpdatedAt = excluded.UpdatedAt;
+            """;
+        command.Parameters.AddWithValue("$key", key);
+        command.Parameters.AddWithValue("$value", value);
+        command.Parameters.AddWithValue("$now", Format(DateTimeOffset.UtcNow));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Removes the setting. When <paramref name="expectedValue"/> is given, the row is removed
+    /// only if it still holds that value, so a concurrent change is never lost.
+    /// </summary>
+    public async Task<bool> DeleteSettingAsync(
+        string key,
+        string? expectedValue = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = expectedValue is null
+            ? "DELETE FROM AppSettings WHERE Key = $key;"
+            : "DELETE FROM AppSettings WHERE Key = $key AND Value = $value;";
+        command.Parameters.AddWithValue("$key", key);
+        if (expectedValue is not null)
+        {
+            command.Parameters.AddWithValue("$value", expectedValue);
+        }
+
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
+    }
+
+    /// <summary>
+    /// Deletes finished history older than <paramref name="cutoff"/> together with its events,
+    /// in one transaction. Only a cancelled or interrupted transfer, or a complete download
+    /// whose routing completed or was skipped, is eligible; pending, downloading, moving,
+    /// retrying and failed work is always kept. Files are never touched.
+    /// </summary>
+    public async Task<int> DeleteExpiredHistoryAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default)
+    {
+        const string eligible = """
+            (BrowserState IN ('Cancelled', 'Interrupted')
+                OR (BrowserState = 'Complete' AND RoutingState IN ('Completed', 'Skipped')))
+            AND RoutingState NOT IN ('Moving', 'RetryPending')
+            AND COALESCE(CompletedAt, CreatedAt) < $cutoff
+            """;
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await using (var deleteEvents = connection.CreateCommand())
+        {
+            deleteEvents.Transaction = transaction;
+            deleteEvents.CommandText = $"DELETE FROM DownloadEvents WHERE JobId IN (SELECT Id FROM DownloadJobs WHERE {eligible});";
+            deleteEvents.Parameters.AddWithValue("$cutoff", Format(cutoff));
+            await deleteEvents.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        int deleted;
+        await using (var deleteJobs = connection.CreateCommand())
+        {
+            deleteJobs.Transaction = transaction;
+            deleteJobs.CommandText = $"DELETE FROM DownloadJobs WHERE {eligible};";
+            deleteJobs.Parameters.AddWithValue("$cutoff", Format(cutoff));
+            deleted = await deleteJobs.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return deleted;
+    }
+
     public async Task UpdateJobAsync(DownloadJob job, string eventType, CancellationToken cancellationToken = default,
         TemporaryFolderChoice? temporaryFolder = null)
     {
@@ -353,6 +452,7 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 FinalUrl = $finalUrl,
                 ReferrerUrl = $referrerUrl,
                 SanitizedSource = $sanitizedSource,
+                RuleId = $ruleId,
                 OriginalPath = $originalPath,
                 FinalPath = $finalPath,
                 SelectedRelativeFolder = $selectedRelativeFolder,
@@ -366,7 +466,8 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 IsBrowserRecordStale = $isBrowserRecordStale,
                 SelectionPromptState = $selectionPromptState,
                 SelectedDestinationFolder = $selectedDestinationFolder,
-                SelectedFileName = $selectedFileName
+                SelectedFileName = $selectedFileName,
+                IsRuleTentative = $isRuleTentative
             WHERE Id = $id;
             """;
         AddJobParameters(command, job);
@@ -559,7 +660,8 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                InitiatingPageUrl, InitialUrl, FinalUrl, ReferrerUrl, SanitizedSource,
                RuleId, OriginalPath, FinalPath, SelectedRelativeFolder, Status,
                BrowserState, RoutingState, ErrorCode, ErrorMessage, CreatedAt, CompletedAt,
-               LastBrowserEventAt, IsBrowserRecordStale, SelectionPromptState, SelectedDestinationFolder, SelectedFileName, BrowserStartedAt
+               LastBrowserEventAt, IsBrowserRecordStale, SelectionPromptState, SelectedDestinationFolder, SelectedFileName, BrowserStartedAt,
+               IsRuleTentative
         FROM DownloadJobs
         """;
 
@@ -702,7 +804,7 @@ public sealed class DownloadRouterRepository(AppPaths paths)
 
         // v5 classifies every pre-existing job exactly once. Terminal work is already
         // resolved; anything still waiting for a folder becomes Deferred so it stays in the
-        // download history "처리 대기" filter without replaying an automatic prompt.
+        // download history "pending" filter without replaying an automatic prompt.
         // File locations, routing states, and user files are never changed here.
         await ExecuteAsync(
             connection,
@@ -766,6 +868,54 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 """, cancellationToken, transaction).ConfigureAwait(false);
         }
 
+        // v8 adds the rule file-type filter and the tentative-rule marker. Every existing rule
+        // keeps applying to all files and every existing job stays confirmed.
+        ruleColumns.Clear();
+        await using (var ruleColumnCommand = connection.CreateCommand())
+        {
+            ruleColumnCommand.Transaction = transaction;
+            ruleColumnCommand.CommandText = "PRAGMA table_info(Rules);";
+            await using var reader = await ruleColumnCommand.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                ruleColumns.Add(reader.GetString(1));
+            }
+        }
+
+        if (!ruleColumns.Contains("FileTypeMode"))
+        {
+            await ExecuteAsync(connection, "ALTER TABLE Rules ADD COLUMN FileTypeMode INTEGER NOT NULL DEFAULT 0;",
+                cancellationToken, transaction).ConfigureAwait(false);
+        }
+
+        if (!ruleColumns.Contains("FileExtensions"))
+        {
+            await ExecuteAsync(connection, "ALTER TABLE Rules ADD COLUMN FileExtensions TEXT NOT NULL DEFAULT '';",
+                cancellationToken, transaction).ConfigureAwait(false);
+        }
+
+        columns.Clear();
+        await using (var columnCommand = connection.CreateCommand())
+        {
+            columnCommand.Transaction = transaction;
+            columnCommand.CommandText = "PRAGMA table_info(DownloadJobs);";
+            await using var reader = await columnCommand.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                columns.Add(reader.GetString(1));
+            }
+        }
+
+        if (!columns.Contains("IsRuleTentative"))
+        {
+            await ExecuteAsync(connection, "ALTER TABLE DownloadJobs ADD COLUMN IsRuleTentative INTEGER NOT NULL DEFAULT 0;",
+                cancellationToken, transaction).ConfigureAwait(false);
+        }
+
+        await ExecuteAsync(connection,
+            "INSERT OR IGNORE INTO MigrationHistory(Version, AppliedAt) VALUES (8, CURRENT_TIMESTAMP);",
+            cancellationToken, transaction).ConfigureAwait(false);
+
         await using (var check = connection.CreateCommand())
         {
             check.Transaction = transaction;
@@ -775,7 +925,7 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 throw new InvalidOperationException("Migration foreign key validation failed.");
         }
 
-        if (CurrentSchemaVersion != 7)
+        if (CurrentSchemaVersion != 8)
         {
             throw new InvalidOperationException("Repository migration version is inconsistent.");
         }
@@ -811,9 +961,15 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         ArgumentException.ThrowIfNullOrWhiteSpace(rule.Name);
         ArgumentException.ThrowIfNullOrWhiteSpace(rule.MatchValue);
         ArgumentException.ThrowIfNullOrWhiteSpace(rule.StorageRoot);
-        if (rule.Name.Length > 200 || rule.MatchValue.Length > 2048 || rule.StorageRoot.Length > 32767)
+        if (rule.Name.Length > 200 || rule.MatchValue.Length > 2048 || rule.StorageRoot.Length > 32767
+            || (rule.FileExtensions?.Length ?? 0) > 1024)
         {
             throw new ArgumentException("A rule field exceeds its maximum allowed length.", nameof(rule));
+        }
+
+        if (!Enum.IsDefined(rule.FileTypeMode))
+        {
+            throw new ArgumentException("The rule file-type mode is not supported.", nameof(rule));
         }
     }
 
@@ -830,7 +986,14 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             reader.GetInt32(8),
             reader.GetInt32(9),
             Parse(reader.GetString(10)),
-            Parse(reader.GetString(11)));
+            Parse(reader.GetString(11)),
+            ReadFileTypeMode(reader.GetInt64(12)),
+            reader.GetString(13));
+
+    private static FileTypeFilterMode ReadFileTypeMode(long value)
+        => value is >= 0 and <= int.MaxValue && Enum.IsDefined((FileTypeFilterMode)(int)value)
+            ? (FileTypeFilterMode)(int)value
+            : FileTypeFilterMode.AllFiles;
 
     private static DownloadJob ReadJob(SqliteDataReader reader)
         => new(
@@ -861,7 +1024,8 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 : SelectionPromptState.NeverShown,
             GetNullableString(reader, 24),
             GetNullableString(reader, 25),
-            reader.GetInt64(26) < 0 ? null : DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(26)));
+            reader.GetInt64(26) < 0 ? null : DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(26)),
+            reader.GetBoolean(27));
 
     private static string? GetNullableString(SqliteDataReader reader, int ordinal)
         => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
@@ -880,6 +1044,8 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         command.Parameters.AddWithValue("$listOrder", rule.ListOrder);
         command.Parameters.AddWithValue("$createdAt", Format(rule.CreatedAt));
         command.Parameters.AddWithValue("$updatedAt", Format(rule.UpdatedAt));
+        command.Parameters.AddWithValue("$fileTypeMode", (int)rule.FileTypeMode);
+        command.Parameters.AddWithValue("$fileExtensions", rule.FileExtensions ?? string.Empty);
     }
 
     private static void AddJobParameters(SqliteCommand command, DownloadJob job)
@@ -913,6 +1079,7 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             job.LastBrowserEventAt is null ? DBNull.Value : Format(job.LastBrowserEventAt.Value));
         command.Parameters.AddWithValue("$isBrowserRecordStale", job.IsBrowserRecordStale);
         command.Parameters.AddWithValue("$selectionPromptState", job.SelectionPromptState.ToString());
+        command.Parameters.AddWithValue("$isRuleTentative", job.IsRuleTentative);
     }
 
     /// <summary>
