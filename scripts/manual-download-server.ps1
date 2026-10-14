@@ -46,6 +46,11 @@ try {
             $context.Response.ContentType = 'application/octet-stream'
             $context.Response.ContentLength64 = $file.Length
             $context.Response.AddHeader('Content-Disposition', "attachment; filename=`"$($file.Name)`"")
+            if ($context.Request.HttpMethod -eq 'HEAD') {
+                # Headers only; writing a body here throws and stopped the server.
+                continue
+            }
+
             $buffer = New-Object byte[] $ChunkSize
             $input = [IO.File]::OpenRead($file.FullName)
             try {
