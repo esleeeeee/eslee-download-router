@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('ping', 'download.started', 'download.metadata', 'download.changed', 'download.cancelled', 'download.interrupted', 'downloads.active', 'rules.list', 'rules.upsert', 'rules.delete', 'jobs.list', 'jobs.delete', 'selection.complete', 'selection.skip', 'selection.skip-many', 'selection.prompt-state', 'temporary-folder.list', 'temporary-folder.cancel', 'route.change', 'job.retry', 'diagnostics.status')]
+    # Sent through the Native Host, which since v2.0.0 forwards only the commands the browser
+    # extension uses. App-only commands (rules.*, jobs.*, selection.*, ...) are refused there.
+    [ValidateSet('ping', 'download.started', 'download.metadata', 'download.changed', 'download.cancelled', 'download.interrupted', 'downloads.active', 'extension.hello')]
     [string]$Command,
     [Parameter(Mandatory = $true)]
     [string]$PayloadJson,
