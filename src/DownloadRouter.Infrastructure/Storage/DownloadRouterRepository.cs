@@ -7,7 +7,7 @@ namespace DownloadRouter.Infrastructure.Storage;
 
 public sealed class DownloadRouterRepository(AppPaths paths)
 {
-    private const int CurrentSchemaVersion = 8;
+    private const int CurrentSchemaVersion = 9;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -222,14 +222,14 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 RuleId, OriginalPath, FinalPath, SelectedRelativeFolder, Status,
                 BrowserState, RoutingState, ErrorCode, ErrorMessage, CreatedAt, CompletedAt,
                 LastBrowserEventAt, IsBrowserRecordStale, SelectionPromptState, SelectedDestinationFolder, SelectedFileName, BrowserStartedAt,
-                IsRuleTentative)
+                IsRuleTentative, CandidateRuleIds)
             VALUES(
                 $id, $browser, $browserDownloadId, $originalFileName, $currentFileName,
                 $initiatingPageUrl, $initialUrl, $finalUrl, $referrerUrl, $sanitizedSource,
                 $ruleId, $originalPath, $finalPath, $selectedRelativeFolder, $status,
                 $browserState, $routingState, $errorCode, $errorMessage, $createdAt, $completedAt,
                 $lastBrowserEventAt, $isBrowserRecordStale, $selectionPromptState, $selectedDestinationFolder, $selectedFileName, $browserStartedAt,
-                $isRuleTentative);
+                $isRuleTentative, $candidateRuleIds);
             """;
         AddJobParameters(command, job);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -399,20 +399,56 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
     }
 
-    /// <summary>
-    /// Deletes finished history older than <paramref name="cutoff"/> together with its events,
-    /// in one transaction. Only a cancelled or interrupted transfer, or a complete download
-    /// whose routing completed or was skipped, is eligible; pending, downloading, moving,
-    /// retrying and failed work is always kept. Files are never touched.
-    /// </summary>
-    public async Task<int> DeleteExpiredHistoryAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default)
+    // Only finished history is eligible. Files are never touched.
+    private const string ExpiredHistoryPredicate = """
+        (BrowserState IN ('Cancelled', 'Interrupted')
+            OR (BrowserState = 'Complete' AND RoutingState IN ('Completed', 'Skipped')))
+        AND RoutingState NOT IN ('Moving', 'RetryPending')
+        AND COALESCE(CompletedAt, CreatedAt) < $cutoff
+        """;
+
+    public async Task<IReadOnlyList<Guid>> GetExpiredHistoryIdsAsync(
+        DateTimeOffset cutoff, CancellationToken cancellationToken = default)
     {
-        const string eligible = """
-            (BrowserState IN ('Cancelled', 'Interrupted')
-                OR (BrowserState = 'Complete' AND RoutingState IN ('Completed', 'Skipped')))
-            AND RoutingState NOT IN ('Moving', 'RetryPending')
-            AND COALESCE(CompletedAt, CreatedAt) < $cutoff
-            """;
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT Id FROM DownloadJobs WHERE {ExpiredHistoryPredicate};";
+        command.Parameters.AddWithValue("$cutoff", Format(cutoff));
+        var ids = new List<Guid>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            ids.Add(Guid.Parse(reader.GetString(0)));
+        }
+
+        return ids;
+    }
+
+    /// <summary>Deletes eligible rows and events atomically per batch, rechecking their current state.</summary>
+    public async Task<int> DeleteExpiredHistoryAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default)
+        => await DeleteExpiredHistoryAsync(cutoff,
+            await GetExpiredHistoryIdsAsync(cutoff, cancellationToken).ConfigureAwait(false),
+            cancellationToken).ConfigureAwait(false);
+
+    /// <summary>Rechecks eligibility, and only deletes IDs for which the caller holds job locks.</summary>
+    public async Task<int> DeleteExpiredHistoryAsync(
+        DateTimeOffset cutoff, IReadOnlyCollection<Guid> jobIds, CancellationToken cancellationToken = default)
+    {
+        var deleted = 0;
+        foreach (var ids in jobIds.Distinct().Chunk(500))
+        {
+            deleted += await DeleteExpiredHistoryBatchAsync(cutoff, ids, cancellationToken).ConfigureAwait(false);
+        }
+
+        return deleted;
+    }
+
+    private async Task<int> DeleteExpiredHistoryBatchAsync(
+        DateTimeOffset cutoff, Guid[] ids, CancellationToken cancellationToken)
+    {
+        var inClause = string.Join(", ", ids.Select((_, index) => $"$id{index}"));
+        var eligible = $"{ExpiredHistoryPredicate} AND Id IN ({inClause})";
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
@@ -421,6 +457,7 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             deleteEvents.Transaction = transaction;
             deleteEvents.CommandText = $"DELETE FROM DownloadEvents WHERE JobId IN (SELECT Id FROM DownloadJobs WHERE {eligible});";
             deleteEvents.Parameters.AddWithValue("$cutoff", Format(cutoff));
+            AddIdParameters(deleteEvents, ids);
             await deleteEvents.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -430,6 +467,7 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             deleteJobs.Transaction = transaction;
             deleteJobs.CommandText = $"DELETE FROM DownloadJobs WHERE {eligible};";
             deleteJobs.Parameters.AddWithValue("$cutoff", Format(cutoff));
+            AddIdParameters(deleteJobs, ids);
             deleted = await deleteJobs.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -661,7 +699,7 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                RuleId, OriginalPath, FinalPath, SelectedRelativeFolder, Status,
                BrowserState, RoutingState, ErrorCode, ErrorMessage, CreatedAt, CompletedAt,
                LastBrowserEventAt, IsBrowserRecordStale, SelectionPromptState, SelectedDestinationFolder, SelectedFileName, BrowserStartedAt,
-               IsRuleTentative
+               IsRuleTentative, CandidateRuleIds
         FROM DownloadJobs
         """;
 
@@ -785,7 +823,8 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             """
             UPDATE DownloadJobs
             SET LastBrowserEventAt = CreatedAt
-            WHERE LastBrowserEventAt IS NULL;
+            WHERE LastBrowserEventAt IS NULL
+              AND NOT EXISTS (SELECT 1 FROM MigrationHistory WHERE Version = 4);
 
             INSERT OR IGNORE INTO MigrationHistory(Version, AppliedAt)
             VALUES (4, CURRENT_TIMESTAMP);
@@ -916,6 +955,17 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             "INSERT OR IGNORE INTO MigrationHistory(Version, AppliedAt) VALUES (8, CURRENT_TIMESTAMP);",
             cancellationToken, transaction).ConfigureAwait(false);
 
+        // v9 persists only candidate IDs, preserving URL privacy and every existing row.
+        if (!columns.Contains("CandidateRuleIds"))
+        {
+            await ExecuteAsync(connection, "ALTER TABLE DownloadJobs ADD COLUMN CandidateRuleIds TEXT NULL;",
+                cancellationToken, transaction).ConfigureAwait(false);
+        }
+
+        await ExecuteAsync(connection,
+            "INSERT OR IGNORE INTO MigrationHistory(Version, AppliedAt) VALUES (9, CURRENT_TIMESTAMP);",
+            cancellationToken, transaction).ConfigureAwait(false);
+
         await using (var check = connection.CreateCommand())
         {
             check.Transaction = transaction;
@@ -925,7 +975,7 @@ public sealed class DownloadRouterRepository(AppPaths paths)
                 throw new InvalidOperationException("Migration foreign key validation failed.");
         }
 
-        if (CurrentSchemaVersion != 8)
+        if (CurrentSchemaVersion != 9)
         {
             throw new InvalidOperationException("Repository migration version is inconsistent.");
         }
@@ -1025,7 +1075,8 @@ public sealed class DownloadRouterRepository(AppPaths paths)
             GetNullableString(reader, 24),
             GetNullableString(reader, 25),
             reader.GetInt64(26) < 0 ? null : DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(26)),
-            reader.GetBoolean(27));
+            reader.GetBoolean(27),
+            GetNullableString(reader, 28));
 
     private static string? GetNullableString(SqliteDataReader reader, int ordinal)
         => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
@@ -1080,6 +1131,7 @@ public sealed class DownloadRouterRepository(AppPaths paths)
         command.Parameters.AddWithValue("$isBrowserRecordStale", job.IsBrowserRecordStale);
         command.Parameters.AddWithValue("$selectionPromptState", job.SelectionPromptState.ToString());
         command.Parameters.AddWithValue("$isRuleTentative", job.IsRuleTentative);
+        command.Parameters.AddWithValue("$candidateRuleIds", Db(job.CandidateRuleIds));
     }
 
     /// <summary>

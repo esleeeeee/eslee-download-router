@@ -56,6 +56,81 @@ public sealed class SchemaVersion8Tests : IDisposable
     }
 
     [Fact]
+    public async Task Version8JobsAndEventsSurviveIdempotentVersion9Migration()
+    {
+        await repository.InitializeAsync();
+        var rule = Rule("v8");
+        await repository.UpsertRuleAsync(rule);
+        var job = Job(rule.Id, BrowserTransferState.InProgress, RoutingState.WaitingForSelection, DateTimeOffset.UtcNow)
+            with { IsRuleTentative = true };
+        await repository.CreateJobAsync(job);
+        var before = await repository.GetJobAsync(job.Id);
+        await ExecuteAsync("ALTER TABLE DownloadJobs DROP COLUMN CandidateRuleIds; DELETE FROM MigrationHistory WHERE Version = 9;");
+
+        await repository.InitializeAsync();
+        await repository.InitializeAsync();
+
+        Assert.Equal(before, await repository.GetJobAsync(job.Id));
+        Assert.Equal(rule, await repository.GetRuleAsync(rule.Id));
+        Assert.Equal(1L, await ScalarAsync("SELECT COUNT(*) FROM MigrationHistory WHERE Version = 9;"));
+        Assert.Equal(1L, await ScalarAsync($"SELECT COUNT(*) FROM DownloadEvents WHERE JobId = '{job.Id:D}';"));
+        var candidates = rule.Id.ToString("D");
+        var newJob = job with { Id = Guid.NewGuid(), BrowserDownloadId = "v9", CandidateRuleIds = candidates };
+        await repository.CreateJobAsync(newJob);
+        await repository.InitializeAsync();
+        Assert.Equal(candidates, (await repository.GetJobAsync(newJob.Id))!.CandidateRuleIds);
+        await repository.UpdateJobAsync(newJob with { IsRuleTentative = false }, "confirmed");
+        Assert.Equal(candidates, (await repository.GetJobAsync(newJob.Id))!.CandidateRuleIds);
+    }
+
+    [Fact]
+    public async Task Version9MigrationRollsBackColumnAndVersionTogetherOnFailure()
+    {
+        await repository.InitializeAsync();
+        var rule = Rule("rollback");
+        await repository.UpsertRuleAsync(rule);
+        var job = Job(rule.Id, BrowserTransferState.InProgress, RoutingState.WaitingForSelection, DateTimeOffset.UtcNow);
+        await repository.CreateJobAsync(job);
+        await ExecuteAsync("""
+            ALTER TABLE DownloadJobs DROP COLUMN CandidateRuleIds;
+            DELETE FROM MigrationHistory WHERE Version = 9;
+            CREATE TRIGGER FailVersion9 BEFORE INSERT ON MigrationHistory WHEN NEW.Version = 9
+            BEGIN SELECT RAISE(ABORT, 'test migration failure'); END;
+            """);
+
+        await Assert.ThrowsAsync<SqliteException>(() => repository.InitializeAsync());
+        Assert.Equal(0L, await ScalarAsync("SELECT COUNT(*) FROM pragma_table_info('DownloadJobs') WHERE name = 'CandidateRuleIds';"));
+        Assert.Equal(0L, await ScalarAsync("SELECT COUNT(*) FROM MigrationHistory WHERE Version = 9;"));
+        Assert.Equal(1L, await ScalarAsync($"SELECT COUNT(*) FROM DownloadJobs WHERE Id = '{job.Id:D}';"));
+        Assert.Equal(1L, await ScalarAsync($"SELECT COUNT(*) FROM DownloadEvents WHERE JobId = '{job.Id:D}';"));
+        await ExecuteAsync("DROP TRIGGER FailVersion9;");
+        await repository.InitializeAsync();
+        Assert.NotNull(await repository.GetJobAsync(job.Id));
+    }
+
+    [Fact]
+    public async Task ExpiredHistoryRechecksSelectedIdsAndNeverDeletesNewCandidates()
+    {
+        await repository.InitializeAsync();
+        var rule = Rule("history-recheck");
+        await repository.UpsertRuleAsync(rule);
+        var old = DateTimeOffset.UtcNow.AddDays(-60);
+        var selected = Job(rule.Id, BrowserTransferState.Complete, RoutingState.Completed, old);
+        await repository.CreateJobAsync(selected);
+        var cutoff = DateTimeOffset.UtcNow.AddDays(-30);
+        var ids = await repository.GetExpiredHistoryIdsAsync(cutoff);
+        Assert.Equal([selected.Id], ids);
+        await repository.UpdateJobAsync(selected with { RoutingState = RoutingState.Moving }, "moving");
+        var later = Job(rule.Id, BrowserTransferState.Complete, RoutingState.Completed, old);
+        await repository.CreateJobAsync(later);
+
+        Assert.Equal(0, await repository.DeleteExpiredHistoryAsync(cutoff, ids));
+        Assert.Equal(RoutingState.Moving, (await repository.GetJobAsync(selected.Id))!.RoutingState);
+        Assert.NotNull(await repository.GetJobAsync(later.Id));
+        Assert.Equal(2L, await ScalarAsync($"SELECT COUNT(*) FROM DownloadEvents WHERE JobId = '{selected.Id:D}';"));
+    }
+
+    [Fact]
     public async Task FileTypeFilterAndTentativeRuleRoundTrip()
     {
         await repository.InitializeAsync(CancellationToken.None);

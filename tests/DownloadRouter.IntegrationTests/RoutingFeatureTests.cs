@@ -170,6 +170,30 @@ public sealed class RoutingFeatureTests : IDisposable
     }
 
     [Fact]
+    public async Task QueryOnlyFallbackSurvivesTentativeReevaluation()
+    {
+        var a = await AddRuleAsync("PDF", "example.com", Folder("pdf"), StorageMode.Automatic,
+            fileTypeMode: FileTypeFilterMode.OnlyListed, extensions: ".pdf");
+        var b = await AddRuleAsync("Video", "dl.php?cat=video", Folder("video"), StorageMode.SelectSubfolder,
+            RuleMatchType.UrlContains);
+        var id = await StartAsync("query-video", "", "https://example.com/dl.php?cat=video");
+        var initial = await JobAsync(id);
+        Assert.Equal(a.Id, initial.RuleId);
+        Assert.Contains(b.Id.ToString("D"), initial.CandidateRuleIds!);
+        Assert.DoesNotContain("?", initial.InitiatingPageUrl!);
+
+        var response = await SendAsync("download.metadata", new DownloadMetadataChangedPayload(
+            "Whale", "query-video", null, "clip.mp4", startedAt["query-video"]));
+
+        Assert.True(response.Success, response.Message);
+        var updated = await JobAsync(id);
+        Assert.Equal(b.Id, updated.RuleId);
+        Assert.False(updated.IsRuleTentative);
+        Assert.Equal("clip.mp4", updated.CurrentFileName);
+        Assert.Equal(1, launcher.Requests);
+    }
+
+    [Fact]
     public async Task NoRuleOnceTheNameIsKnownRemovesTheJobAndLeavesTheFileAlone()
     {
         await AddRuleAsync("documents", "example.com", Folder("documents"), StorageMode.Automatic,
@@ -400,6 +424,29 @@ public sealed class RoutingFeatureTests : IDisposable
         clock.Now = clock.Now.AddDays(29);
         Assert.Equal(1, await handler.RunHistoryCleanupAsync(CancellationToken.None));
         Assert.Null(await repository.GetJobAsync(recent.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task HistoryCleanupWaitsForTheJobLockThenRechecksEligibility()
+    {
+        var rule = await AddRuleAsync("locked", "example.com", Folder("locked"), StorageMode.Automatic);
+        await repository.SetSettingAsync(HistoryRetentionPolicy.SettingKey, "30");
+        var job = Job(rule.Id, BrowserTransferState.Complete, RoutingState.Completed, clock.Now.AddDays(-60));
+        await repository.CreateJobAsync(job);
+        var locks = (KeyedAsyncLock<Guid>)typeof(AgentCommandHandler)
+            .GetField("jobLocks", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!.GetValue(null)!;
+        Task<int> cleanup;
+        using (await locks.AcquireAsync(job.Id))
+        {
+            cleanup = handler.RunHistoryCleanupAsync(CancellationToken.None);
+            Assert.False(cleanup.IsCompleted);
+            await repository.UpdateJobAsync(job with { RoutingState = RoutingState.RetryPending }, "retry");
+            Assert.False(cleanup.IsCompleted);
+        }
+
+        Assert.Equal(0, await cleanup.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(RoutingState.RetryPending, (await JobAsync(job.Id)).RoutingState);
+        Assert.Equal(2L, await EventCountAsync(job.Id));
     }
 
     [Fact]

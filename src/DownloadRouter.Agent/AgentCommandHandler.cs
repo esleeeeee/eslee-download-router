@@ -319,7 +319,8 @@ public sealed class AgentCommandHandler(
             promptState,
             SelectedDestinationFolder: temporaryDestination,
             BrowserStartedAt: payload.StartedAt,
-            IsRuleTentative: tentative);
+            IsRuleTentative: tentative,
+            CandidateRuleIds: matcher.GetCandidateRuleIds(rules, metadata));
 
         await repository.CreateJobAsync(job, cancellationToken).ConfigureAwait(false);
         logger.LogInformation("Download instance created: downloadId={DownloadId}, jobId={JobId}, requiresSelection={RequiresSelection}, tentative={Tentative}",
@@ -436,7 +437,7 @@ public sealed class AgentCommandHandler(
                 job.FinalUrl,
                 job.ReferrerUrl,
                 job.CreatedAt);
-            var match = matcher.Rematch(rules, metadata, job.RuleId, job.SanitizedSource);
+            var match = matcher.Rematch(rules, metadata, job.RuleId, job.SanitizedSource, job.CandidateRuleIds);
             confirmed = match?.Rule;
             matchedUrl = match?.MatchedUrl;
         }
@@ -1194,9 +1195,10 @@ public sealed class AgentCommandHandler(
             return 0;
         }
 
-        var deleted = await repository.DeleteExpiredHistoryAsync(
-            HistoryRetentionPolicy.Cutoff(days, clock.GetUtcNow()),
-            cancellationToken).ConfigureAwait(false);
+        var cutoff = HistoryRetentionPolicy.Cutoff(days, clock.GetUtcNow());
+        var ids = await repository.GetExpiredHistoryIdsAsync(cutoff, cancellationToken).ConfigureAwait(false);
+        using var jobLock = await jobLocks.AcquireManyAsync(ids, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var deleted = await repository.DeleteExpiredHistoryAsync(cutoff, ids, cancellationToken).ConfigureAwait(false);
         if (deleted > 0)
         {
             logger.LogInformation("History cleanup removed {Deleted} finished jobs older than {Days} days", deleted, days);

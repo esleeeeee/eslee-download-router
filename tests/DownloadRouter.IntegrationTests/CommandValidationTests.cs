@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Text.Json;
+using DownloadRouter.Core.Ipc;
 using DownloadRouter.Agent;
 using DownloadRouter.Core.Jobs;
 using DownloadRouter.Core.Models;
@@ -24,6 +26,61 @@ public sealed class CommandValidationTests : IDisposable
     {
         previousOverride = Environment.GetEnvironmentVariable("DOWNLOAD_ROUTER_DATA_DIR");
         Environment.SetEnvironmentVariable("DOWNLOAD_ROUTER_DATA_DIR", root);
+    }
+
+    [Fact]
+    public async Task NativeHostRejectsEveryAppOnlyCommandWithoutConnectingToTheAgent()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "DownloadRouter.slnx")))
+        {
+            directory = directory.Parent;
+        }
+
+        Assert.NotNull(directory);
+        var configuration = AppContext.BaseDirectory.Contains($"{Path.DirectorySeparatorChar}Release{Path.DirectorySeparatorChar}",
+            StringComparison.OrdinalIgnoreCase) ? "Release" : "Debug";
+        var executable = Path.Combine(directory.FullName, "src", "DownloadRouter.NativeHost", "bin", configuration,
+            "net10.0", "DownloadRouter.NativeHost.exe");
+        Assert.True(File.Exists(executable), "Build the solution before running this process-level Native Host test.");
+        var start = new ProcessStartInfo(executable)
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        start.ArgumentList.Add($"chrome-extension://{ProtocolConstants.ExtensionId}/");
+        using var process = Process.Start(start)!;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        try
+        {
+            foreach (var command in ProtocolConstants.AppOnlyCommands.Order())
+            {
+                var request = new AgentCommand(ProtocolConstants.CurrentVersion, Guid.NewGuid(), command,
+                    JsonSerializer.SerializeToElement(new { }));
+                await LengthPrefixedJsonProtocol.WriteAsync(process.StandardInput.BaseStream, request, timeout.Token);
+                var response = await LengthPrefixedJsonProtocol.ReadAsync<AgentResponse>(process.StandardOutput.BaseStream, timeout.Token);
+                Assert.NotNull(response);
+                Assert.Equal(request.RequestId, response.RequestId);
+                Assert.False(response.Success);
+                Assert.Equal("nativehost.invalid-command", response.ErrorCode);
+            }
+
+            process.StandardInput.Close();
+            await process.WaitForExitAsync(timeout.Token);
+            Assert.Equal(0, process.ExitCode);
+            Assert.Empty(await process.StandardError.ReadToEndAsync(timeout.Token));
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill();
+                await process.WaitForExitAsync();
+            }
+        }
     }
 
     [Fact]

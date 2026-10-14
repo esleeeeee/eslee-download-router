@@ -132,7 +132,7 @@ public sealed record DownloadMetadata(
     DateTimeOffset StartedAt);
 
 /// <param name="IsTentative">
-/// True when the file name is not known yet and a matching rule filters by file type, so the
+/// True when the file name is not known yet and a filtered candidate outranks the best all-files candidate, so the
 /// winner may change once the browser reports the real name.
 /// </param>
 public sealed record RuleMatchResult(
@@ -168,7 +168,8 @@ public sealed record DownloadJob(
     string? SelectedDestinationFolder = null,
     string? SelectedFileName = null,
     DateTimeOffset? BrowserStartedAt = null,
-    bool IsRuleTentative = false)
+    bool IsRuleTentative = false,
+    string? CandidateRuleIds = null)
 {
     public DownloadJobStatus Status
         => BrowserState switch
@@ -381,21 +382,27 @@ public static class ProtocolConstants
     };
 
     /// <summary>
-    /// Commands only the app may send. The Native Host refuses them, so a browser can never
-    /// pause routing or delete history.
+    /// Only commands used by the extension, plus ping, cross the Native Host boundary.
+    /// App management commands must never be forwarded from a browser.
     /// </summary>
-    public static readonly ISet<string> AppOnlyCommands = new HashSet<string>(StringComparer.Ordinal)
+    private static readonly ISet<string> BrowserCommands = new HashSet<string>(StringComparer.Ordinal)
     {
-        "routing.status",
-        "routing.pause",
-        "routing.resume",
-        "history.retention.get",
-        "history.retention.set",
+        "ping",
+        "download.started",
+        "download.metadata",
+        "download.changed",
+        "download.cancelled",
+        "download.interrupted",
+        "downloads.active",
+        "extension.hello",
     };
+
+    public static readonly ISet<string> AppOnlyCommands = new HashSet<string>(
+        AllowedCommands.Except(BrowserCommands), StringComparer.Ordinal);
 
     /// <summary>Commands the Native Host forwards from the browser extension.</summary>
     public static bool IsBrowserForwardable(string? command)
-        => command is not null && AllowedCommands.Contains(command) && !AppOnlyCommands.Contains(command);
+        => command is not null && BrowserCommands.Contains(command);
 }
 
 public static class ProtocolJson

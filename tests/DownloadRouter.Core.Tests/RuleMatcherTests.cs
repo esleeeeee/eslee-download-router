@@ -124,7 +124,7 @@ public sealed class RuleMatcherTests
     }
 
     [Fact]
-    public void AnUnknownNameIsTentativeEvenWhenTheFilteredRuleDoesNotWin()
+    public void AnUnknownNameIsNotTentativeWhenAnAllFilesRuleOutranksEveryFilter()
     {
         var exact = Rule(RuleMatchType.ExactHost, "files.example.com");
         var filteredParent = Rule(RuleMatchType.DomainAndSubdomains, "example.com") with
@@ -144,7 +144,7 @@ public sealed class RuleMatcherTests
         var onlyDisabledFilter = matcher.Match([exact, disabledFiltered], metadata);
 
         Assert.Equal(exact.Id, withFilter!.Rule.Id);
-        Assert.True(withFilter.IsTentative);
+        Assert.False(withFilter.IsTentative);
         Assert.False(onlyDisabledFilter!.IsTentative);
     }
 
@@ -174,6 +174,40 @@ public sealed class RuleMatcherTests
         Assert.Equal(queryRule.Id, rematch!.Rule.Id);
         Assert.Null(matcher.Rematch([queryRule], metadata with { OriginalFileName = "setup.exe" }, queryRule.Id, null));
         Assert.Null(matcher.Rematch([queryRule with { IsEnabled = false }], metadata, queryRule.Id, null));
+    }
+
+    [Fact]
+    public void StoredQueryCandidatesSurviveSanitizationAndUseCurrentFilters()
+    {
+        var a = Rule(RuleMatchType.DomainAndSubdomains, "example.com") with
+        {
+            FileTypeMode = FileTypeFilterMode.OnlyListed,
+            FileExtensions = ".pdf",
+        };
+        var b = Rule(RuleMatchType.UrlContains, "dl.php?cat=video");
+        var unrelated = Rule(RuleMatchType.ExactHost, "example.com");
+        var original = Metadata("https://example.com/dl.php?cat=video") with { OriginalFileName = "" };
+        var ids = matcher.GetCandidateRuleIds([a, b, unrelated with { IsEnabled = false }], original);
+        var stored = original with { InitiatingPageUrl = "https://example.com/dl.php", OriginalFileName = "clip.mp4" };
+
+        Assert.Equal(a.Id, matcher.Match([a, b], original)!.Rule.Id);
+        Assert.Equal(b.Id, matcher.Rematch([a, b, unrelated], stored, a.Id, stored.InitiatingPageUrl, ids)!.Rule.Id);
+        Assert.Null(matcher.Rematch([a, b with { IsEnabled = false }], stored, a.Id, null, ids));
+        Assert.Null(matcher.Rematch([a, b with { FileTypeMode = FileTypeFilterMode.OnlyListed, FileExtensions = ".pdf" }],
+            stored, a.Id, null, ids));
+    }
+
+    [Fact]
+    public void FilterPriorityAndListOrderDecideWhetherUnknownNamesAreTentative()
+    {
+        var all = Rule(RuleMatchType.ExactHost, "example.com", priority: 10);
+        var filter = all with { Id = Guid.NewGuid(), FileTypeMode = FileTypeFilterMode.OnlyListed, FileExtensions = ".pdf", Priority = 11 };
+        var metadata = Metadata("https://example.com") with { OriginalFileName = "" };
+
+        Assert.True(matcher.Match([all, filter], metadata)!.IsTentative);
+        Assert.False(matcher.Match([all, filter with { Priority = 9 }], metadata)!.IsTentative);
+        Assert.True(matcher.Match([all with { ListOrder = 1 }, filter with { Priority = 10 }], metadata)!.IsTentative);
+        Assert.False(matcher.Match([all, filter with { Priority = 10, ListOrder = 1 }], metadata)!.IsTentative);
     }
 
     private static DownloadRule Rule(

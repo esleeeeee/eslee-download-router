@@ -77,7 +77,10 @@ public sealed class RoutingControlPolicyTests
     [Fact]
     public void NewCommandsAreAllowedForTheAppButNeverForwardedFromTheBrowser()
     {
-        string[] appOnly = ["routing.status", "routing.pause", "routing.resume", "history.retention.get", "history.retention.set"];
+        string[] appOnly = ["rules.list", "rules.upsert", "rules.delete", "jobs.list", "jobs.delete",
+            "selection.complete", "selection.skip", "selection.skip-many", "selection.prompt-state", "route.change", "job.retry",
+            "temporary-folder.list", "temporary-folder.cancel", "diagnostics.status",
+            "routing.status", "routing.pause", "routing.resume", "history.retention.get", "history.retention.set"];
         foreach (var command in appOnly)
         {
             Assert.Contains(command, ProtocolConstants.AllowedCommands);
@@ -103,6 +106,7 @@ public sealed class RoutingControlPolicyTests
         Assert.Contains("download.started", commands);
         Assert.All(commands, command => Assert.True(ProtocolConstants.IsBrowserForwardable(command), command));
         Assert.Empty(commands.Intersect(ProtocolConstants.AppOnlyCommands));
+        Assert.Equal(commands.Order(), ProtocolConstants.AllowedCommands.Where(ProtocolConstants.IsBrowserForwardable).Order());
     }
 
     [Fact]
