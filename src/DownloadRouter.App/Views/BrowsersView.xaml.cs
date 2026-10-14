@@ -66,6 +66,8 @@ public sealed partial class BrowsersView : UserControl, IAppView
                 return;
             }
 
+            // The "after updating, reload the extension" tip only concerns users who already added it.
+            ExtensionRefreshBar.IsOpen = connected.GetBoolean();
             if (!connected.GetBoolean())
             {
                 ConnectionPlate.Kind = BadgeKind.Caution;
