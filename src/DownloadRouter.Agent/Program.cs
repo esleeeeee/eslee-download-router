@@ -52,7 +52,9 @@ builder.Services.AddSingleton<PathBoundaryValidator>();
 builder.Services.AddSingleton<FileMoveService>();
 builder.Services.AddSingleton<ISelectionUiLauncher, SelectionUiLauncher>();
 builder.Services.AddSingleton<AgentCommandHandler>();
+builder.Services.AddSingleton<IHistoryCleanup>(services => services.GetRequiredService<AgentCommandHandler>());
 builder.Services.AddHostedService<AgentPipeServer>();
+builder.Services.AddHostedService<HistoryRetentionService>();
 
 using var host = builder.Build();
 var repository = host.Services.GetRequiredService<DownloadRouterRepository>();

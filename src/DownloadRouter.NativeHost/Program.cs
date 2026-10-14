@@ -40,7 +40,7 @@ while (true)
     AgentResponse response;
     if (command.Version != ProtocolConstants.CurrentVersion
         || command.RequestId == Guid.Empty
-        || !ProtocolConstants.AllowedCommands.Contains(command.Command))
+        || !ProtocolConstants.IsBrowserForwardable(command.Command))
     {
         response = AgentResponse.Error(
             command.RequestId,
