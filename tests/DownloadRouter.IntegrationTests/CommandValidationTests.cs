@@ -18,6 +18,7 @@ public sealed class CommandValidationTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "download-router-integration-tests", Guid.NewGuid().ToString("N"));
     private readonly string? previousOverride;
+    private readonly List<AgentCommandHandler> handlers = [];
 
     private static readonly string SupportedBuild =
         DownloadRegistrationPolicy.SupportedExtensionBuilds.First();
@@ -1707,6 +1708,7 @@ public sealed class CommandValidationTests : IDisposable
             paths,
             NullLogger<AgentCommandHandler>.Instance,
             clock);
+        handlers.Add(handler);
         return (handler, repository);
     }
 
@@ -1717,6 +1719,11 @@ public sealed class CommandValidationTests : IDisposable
 
     public void Dispose()
     {
+        foreach (var handler in handlers)
+        {
+            handler.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+
         Environment.SetEnvironmentVariable("DOWNLOAD_ROUTER_DATA_DIR", previousOverride);
         SqliteConnection.ClearAllPools();
         if (Directory.Exists(root))

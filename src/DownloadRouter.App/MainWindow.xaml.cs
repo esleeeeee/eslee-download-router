@@ -1,3 +1,4 @@
+using System.Text.Json;
 using DownloadRouter.App.Services;
 using DownloadRouter.App.Views;
 using DownloadRouter.Core.Localization;
@@ -16,6 +17,10 @@ public sealed partial class MainWindow : Window
     private readonly Dictionary<string, FrameworkElement> views = new(StringComparer.Ordinal);
     private object? pendingNavigationParameter;
     private string currentTag = "dashboard";
+    private bool hostInitialized;
+    private bool launchedInBackground;
+    private bool browserSetupCheckInProgress;
+    private bool browserSetupChecked;
 
     public MainWindow()
     {
@@ -127,6 +132,7 @@ public sealed partial class MainWindow : Window
         UpdatePendingBadge(active.Count, automatic.Count);
         if (snapshot.AgentReachable)
         {
+            _ = ShowBrowserSetupOnFirstLaunchAsync();
             AppServices.RootHealth.Observe(snapshot.Rules);
             DetectCompletedMoves(snapshot);
             SynchronizeSelectionPrompt(active, automatic);
@@ -141,6 +147,48 @@ public sealed partial class MainWindow : Window
         if (PageHost.Content is IAppView view)
         {
             view.OnLiveUpdate(snapshot, args.Changed);
+        }
+    }
+
+    private async Task ShowBrowserSetupOnFirstLaunchAsync()
+    {
+        if (!hostInitialized || launchedInBackground || browserSetupChecked || browserSetupCheckInProgress
+            || AppServices.Preferences.BrowserSetupShown)
+        {
+            return;
+        }
+
+        browserSetupCheckInProgress = true;
+        try
+        {
+            var response = await AppServices.Agent.SendAsync("diagnostics.status");
+            if (!response.Success || response.Data is not JsonElement status
+                || !status.TryGetProperty("extensionEverConnected", out var connected)
+                || connected.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            {
+                return; // Retry on the next reachable poll, not while the service is unavailable.
+            }
+
+            if (connected.GetBoolean())
+            {
+                browserSetupChecked = true;
+                return;
+            }
+
+            if (!AppServices.Preferences.BrowserSetupShown)
+            {
+                NavigateTo("browsers");
+                browserSetupChecked = true;
+                await AppServices.UpdatePreferencesAsync(preferences => preferences with { BrowserSetupShown = true });
+            }
+        }
+        catch (Exception exception)
+        {
+            AppServices.WriteDiagnostic("app-startup.log", $"first browser setup failed: {exception.GetType().Name}");
+        }
+        finally
+        {
+            browserSetupCheckInProgress = false;
         }
     }
 

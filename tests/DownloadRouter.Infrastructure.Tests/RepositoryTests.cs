@@ -290,6 +290,39 @@ public sealed class RepositoryTests : IDisposable
             (await repository.GetJobAsync(moving.Id, CancellationToken.None))!.RoutingState);
     }
 
+    [Fact]
+    public async Task HasJobsIncludesTerminalHistoryButNotRulesOrSettings()
+    {
+        var paths = AppPaths.CreateDefault();
+        var repository = new DownloadRouterRepository(paths);
+        await repository.InitializeAsync();
+        Assert.False(await repository.HasJobsAsync());
+        var now = DateTimeOffset.UtcNow;
+        var rule = new DownloadRule(Guid.NewGuid(), "history", true, RuleMatchType.ExactHost, "example.com",
+            RuleMatchTarget.FileUrl, root, StorageMode.Automatic, 0, 0, now, now);
+        await repository.UpsertRuleAsync(rule);
+        await repository.SetSettingAsync("extension-last-seen-at", now.ToString("O"));
+        Assert.False(await repository.HasJobsAsync());
+        await repository.CreateJobAsync(new DownloadJob(
+            Guid.NewGuid(), BrowserKind.Whale, "legacy", "a.bin", "a.bin", null, null, null, null, null,
+            rule.Id, null, null, null, BrowserTransferState.Complete, RoutingState.Completed, null, null, now, now));
+        Assert.True(await repository.HasJobsAsync());
+    }
+
+    [Fact]
+    public async Task ExtensionLastSeenSettingRoundTripsAcrossRepositoryInstances()
+    {
+        var paths = AppPaths.CreateDefault();
+        var repository = new DownloadRouterRepository(paths);
+        await repository.InitializeAsync();
+        Assert.Null(await repository.GetSettingAsync("extension-last-seen-at"));
+        var seen = DateTimeOffset.UtcNow.ToString("O");
+        await repository.SetSettingAsync("extension-last-seen-at", seen);
+        var restarted = new DownloadRouterRepository(paths);
+        await restarted.InitializeAsync();
+        Assert.Equal(seen, await restarted.GetSettingAsync("extension-last-seen-at"));
+    }
+
     public void Dispose()
     {
         Environment.SetEnvironmentVariable("DOWNLOAD_ROUTER_DATA_DIR", previousOverride);

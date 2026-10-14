@@ -51,7 +51,7 @@ public sealed partial class HomeView : UserControl, IAppView
     public void OnLiveUpdate(LiveSnapshot snapshot, bool changed)
     {
         RenderStatus(snapshot);
-        if (!extensionStatusKnown && snapshot.AgentReachable)
+        if (snapshot.AgentReachable && (!extensionStatusKnown || ExtensionSetupBar.IsOpen))
         {
             _ = RefreshExtensionStatusAsync();
         }
@@ -159,9 +159,12 @@ public sealed partial class HomeView : UserControl, IAppView
         try
         {
             var response = await AppServices.Agent.SendAsync("diagnostics.status");
-            var refresh = response.Data is JsonElement data
+            var refresh = response.Success && response.Data is JsonElement data
                 && data.TryGetProperty("extensionRefreshRequired", out var value)
                 && value.ValueKind == JsonValueKind.True;
+            ExtensionSetupBar.IsOpen = response.Success && response.Data is JsonElement status
+                && status.TryGetProperty("extensionEverConnected", out var connected)
+                && connected.ValueKind == JsonValueKind.False;
             ExtensionRefreshBar.Message = DownloadRegistrationPolicy.ExtensionRefreshGuidance;
             ExtensionRefreshBar.IsOpen = refresh;
             extensionStatusKnown = response.Success;
@@ -170,6 +173,7 @@ public sealed partial class HomeView : UserControl, IAppView
         {
             AppServices.WriteDiagnostic("app-startup.log", $"extension status read failed: {exception.GetType().Name}");
             ExtensionRefreshBar.IsOpen = false;
+            ExtensionSetupBar.IsOpen = false;
             extensionStatusKnown = false;
         }
         finally
@@ -266,6 +270,9 @@ public sealed partial class HomeView : UserControl, IAppView
 
     private void ShowAllDownloads_Click(object sender, RoutedEventArgs args)
         => AppServices.Main?.NavigateTo("history", new DownloadsNavigation(DownloadFilter.All));
+
+    private void ShowBrowserSetup_Click(object sender, RoutedEventArgs args)
+        => AppServices.Main?.NavigateTo("browsers");
 
     private void ShowAttentionRules_Click(object sender, RoutedEventArgs args)
         => AppServices.Main?.NavigateTo("rules", new RulesNavigation(AttentionOnly: true));

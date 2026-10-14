@@ -14,7 +14,8 @@ public sealed record AppPreferences(
     string? LastKnownLatestVersion = null,
     string? LastKnownReleaseUrl = null,
     string Language = "System",
-    bool NotifyOnMoveCompleted = false)
+    bool NotifyOnMoveCompleted = false,
+    bool BrowserSetupShown = false)
 {
     public const int MaximumFavoriteFolders = 20;
 
@@ -222,7 +223,10 @@ public sealed class AppPreferencesStore
             Language: ReadString(document, "language") ?? "System",
             NotifyOnMoveCompleted: document["notifyOnMoveCompleted"] is JsonValue notify
                 && notify.TryGetValue<bool>(out var enabled)
-                && enabled)
+                && enabled,
+            BrowserSetupShown: document["browserSetupShown"] is JsonValue setup
+                && setup.TryGetValue<bool>(out var shown)
+                && shown)
         {
             FavoriteFolders = NormalizeFavoriteFolders(ReadStringArray(document, "favoriteFolders")),
         };
@@ -242,6 +246,7 @@ public sealed class AppPreferencesStore
         WriteOrRemove(document, "lastKnownReleaseUrl", preferences.LastKnownReleaseUrl);
         document["language"] = preferences.Language;
         document["notifyOnMoveCompleted"] = preferences.NotifyOnMoveCompleted;
+        document["browserSetupShown"] = preferences.BrowserSetupShown;
         var favorites = new JsonArray();
         foreach (var folder in preferences.FavoriteFolders)
         {

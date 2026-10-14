@@ -81,6 +81,42 @@ public sealed class PendingIntegrationSourceTests
     }
 
     [Fact]
+    public void HomeExtensionSetupInfoBarOpensBrowserGuidanceOnlyForNeverConnectedUsers()
+    {
+        var xaml = ReadAppFile("Views", "HomeView.xaml");
+        var code = ReadAppFile("Views", "HomeView.xaml.cs");
+        var bar = xaml[xaml.IndexOf("x:Name=\"ExtensionSetupBar\"", StringComparison.Ordinal)..];
+        bar = bar[..bar.IndexOf("</InfoBar>", StringComparison.Ordinal)];
+        Assert.Contains("Severity=\"Informational\"", bar, StringComparison.Ordinal);
+        Assert.Contains("Click=\"ShowBrowserSetup_Click\"", bar, StringComparison.Ordinal);
+        Assert.Contains("extensionEverConnected", code, StringComparison.Ordinal);
+        Assert.Contains("connected.ValueKind == JsonValueKind.False", code, StringComparison.Ordinal);
+        Assert.Contains("(!extensionStatusKnown || ExtensionSetupBar.IsOpen)", code, StringComparison.Ordinal);
+        var click = code[code.IndexOf("private void ShowBrowserSetup_Click", StringComparison.Ordinal)..];
+        Assert.Contains("=> AppServices.Main?.NavigateTo(\"browsers\");", click, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FirstRunBrowserRedirectSkipsBackgroundLaunchesAndPersistsItsOneTimeFlag()
+    {
+        var shell = ReadAppFile("MainWindow.xaml.cs");
+        var lifetime = ReadAppFile("MainWindow.Lifetime.cs");
+        Assert.Contains("launchedInBackground = background;", lifetime, StringComparison.Ordinal);
+        Assert.Contains("_ = ShowBrowserSetupOnFirstLaunchAsync();", shell, StringComparison.Ordinal);
+        var setup = shell[shell.IndexOf("private async Task ShowBrowserSetupOnFirstLaunchAsync", StringComparison.Ordinal)..];
+        setup = setup[..setup.IndexOf("private void UpdateRoutingStatus", StringComparison.Ordinal)];
+        var backgroundGuard = setup.IndexOf("launchedInBackground", StringComparison.Ordinal);
+        var statusRead = setup.IndexOf("SendAsync(\"diagnostics.status\")", StringComparison.Ordinal);
+        Assert.True(backgroundGuard >= 0 && statusRead > backgroundGuard);
+        Assert.Contains("!response.Success", setup, StringComparison.Ordinal);
+        Assert.Contains("extensionEverConnected", setup, StringComparison.Ordinal);
+        Assert.Contains("if (connected.GetBoolean())", setup, StringComparison.Ordinal);
+        Assert.Contains("if (!AppServices.Preferences.BrowserSetupShown)", setup, StringComparison.Ordinal);
+        Assert.Contains("NavigateTo(\"browsers\");", setup, StringComparison.Ordinal);
+        Assert.Contains("await AppServices.UpdatePreferencesAsync(preferences => preferences with { BrowserSetupShown = true });", setup, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AutomaticPromptDecisionsArePersistedInsteadOfKeptInMemory()
     {
         var selection = ReadAppFile("MainWindow.Selection.cs");

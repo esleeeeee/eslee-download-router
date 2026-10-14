@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.Json;
 using DownloadRouter.App.Controls;
 using DownloadRouter.App.Services;
 using DownloadRouter.Core.Localization;
@@ -16,6 +18,7 @@ namespace DownloadRouter.App.Views;
 public sealed partial class BrowsersView : UserControl, IAppView
 {
     private ExtensionFolderLocation? location;
+    private bool connectionStatusLoading;
 
     public BrowsersView()
     {
@@ -36,10 +39,67 @@ public sealed partial class BrowsersView : UserControl, IAppView
         ExtensionFolderText.Text = ExtensionFolderLocator.DescribeForUser(location);
         ExtensionFolderActions.Visibility = location.Exists ? Visibility.Visible : Visibility.Collapsed;
         RenderBrowsers();
+        _ = RefreshConnectionStatusAsync();
     }
 
     public void OnLiveUpdate(LiveSnapshot snapshot, bool changed)
     {
+        _ = RefreshConnectionStatusAsync();
+    }
+
+    private async Task RefreshConnectionStatusAsync()
+    {
+        if (connectionStatusLoading)
+        {
+            return;
+        }
+
+        connectionStatusLoading = true;
+        try
+        {
+            var response = await AppServices.Agent.SendAsync("diagnostics.status");
+            if (!response.Success || response.Data is not JsonElement data
+                || !data.TryGetProperty("extensionEverConnected", out var connected)
+                || connected.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            {
+                RenderConnectionUnavailable();
+                return;
+            }
+
+            if (!connected.GetBoolean())
+            {
+                ConnectionPlate.Kind = BadgeKind.Caution;
+                ConnectionStatusText.Text = AppText.Pick(
+                    "아직 연결되지 않음 - 아래 순서대로 확장을 추가하세요",
+                    "Not connected yet - add the extension with the steps below");
+                return;
+            }
+
+            ConnectionPlate.Kind = BadgeKind.Success;
+            ConnectionStatusText.Text = data.TryGetProperty("extensionLastSeenAt", out var lastSeen)
+                && lastSeen.ValueKind == JsonValueKind.String
+                && DateTimeOffset.TryParse(lastSeen.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var timestamp)
+                ? AppText.Pick($"연결됨 · 마지막 연결 {timestamp.ToLocalTime():yyyy-MM-dd HH:mm}",
+                    $"Connected · last contact {timestamp.ToLocalTime():yyyy-MM-dd HH:mm}")
+                : AppText.Pick("연결됨 · 이전 다운로드 기록이 있습니다", "Connected · previous downloads found");
+        }
+        catch (Exception exception)
+        {
+            AppServices.WriteDiagnostic("app-startup.log", $"browser connection status read failed: {exception.GetType().Name}");
+            RenderConnectionUnavailable();
+        }
+        finally
+        {
+            connectionStatusLoading = false;
+        }
+    }
+
+    private void RenderConnectionUnavailable()
+    {
+        ConnectionPlate.Kind = BadgeKind.Neutral;
+        ConnectionStatusText.Text = AppText.Pick(
+            "백그라운드 서비스에 연결할 수 없어 연결 상태를 확인하지 못했습니다.",
+            "Connection status is unavailable because the background service is not responding.");
     }
 
     private void RenderBrowsers()

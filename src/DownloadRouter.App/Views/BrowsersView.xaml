@@ -10,6 +10,17 @@
         <TextBlock Style="{StaticResource PageSubtitleTextStyle}" Text="{c:L Ko='브라우저에 확장을 한 번 설치하면 다운로드를 규칙에 따라 분류합니다.', En='Install the extension in your browser once, and downloads are sorted by your rules.'}" />
       </StackPanel>
 
+      <Border Style="{StaticResource CardStyle}">
+        <Grid ColumnSpacing="12">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <c:IconPlate x:Name="ConnectionPlate" Glyph="&#xE774;" Kind="Neutral" Size="36" />
+          <TextBlock x:Name="ConnectionStatusText" Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap" Text="{c:L Ko='연결 상태를 확인하는 중입니다.', En='Checking connection status.'}" />
+        </Grid>
+      </Border>
+
       <InfoBar x:Name="ExtensionRefreshBar" IsClosable="False" IsOpen="True" Severity="Informational" />
 
       <TextBlock Style="{StaticResource SectionHeaderTextStyle}" Text="{c:L Ko='확장 설치 순서', En='Installing the extension'}" />

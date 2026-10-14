@@ -20,6 +20,7 @@ public sealed class AppPreferencesStoreTests : IDisposable
         Assert.Equal("System", preferences.Language);
         Assert.Equal(AppLanguage.System, preferences.LanguagePreference);
         Assert.False(preferences.NotifyOnMoveCompleted);
+        Assert.False(preferences.BrowserSetupShown);
         Assert.Empty(preferences.FavoriteFolders);
     }
 
@@ -43,7 +44,8 @@ public sealed class AppPreferencesStoreTests : IDisposable
             "2.0.0",
             "https://github.com/esleeeeee/eslee-download-router/releases/tag/v2.0.0",
             "English",
-            NotifyOnMoveCompleted: true)
+            NotifyOnMoveCompleted: true,
+            BrowserSetupShown: true)
         {
             FavoriteFolders = [first, second],
         });
@@ -56,8 +58,34 @@ public sealed class AppPreferencesStoreTests : IDisposable
         Assert.Equal("English", loaded.Language);
         Assert.Equal(AppLanguage.English, loaded.LanguagePreference);
         Assert.True(loaded.NotifyOnMoveCompleted);
+        Assert.True(loaded.BrowserSetupShown);
         Assert.Equal([first, second], loaded.FavoriteFolders);
         Assert.Equal(AppLanguage.English, AppPreferencesStore.ReadLanguage(ConfigPath));
+    }
+
+    [Fact]
+    public void BrowserSetupUpdatePreservesUnknownKeysAndOtherPreferences()
+    {
+        File.WriteAllText(ConfigPath, """{"futureKey":{"enabled":true},"theme":"Dark","notifyOnMoveCompleted":true}""");
+        var store = new AppPreferencesStore(ConfigPath);
+        var updated = store.Update(preferences => preferences with { BrowserSetupShown = true });
+        Assert.True(updated.BrowserSetupShown);
+        Assert.True(new AppPreferencesStore(ConfigPath).Load().BrowserSetupShown);
+        var document = JsonNode.Parse(File.ReadAllText(ConfigPath))!;
+        Assert.True(document["browserSetupShown"]!.GetValue<bool>());
+        Assert.True(document["futureKey"]!["enabled"]!.GetValue<bool>());
+        Assert.Equal("Dark", document["theme"]!.GetValue<string>());
+        Assert.True(document["notifyOnMoveCompleted"]!.GetValue<bool>());
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("\"true\"")]
+    [InlineData("1")]
+    public void InvalidBrowserSetupValueDefaultsToFalse(string value)
+    {
+        File.WriteAllText(ConfigPath, "{\"browserSetupShown\":" + value + "}");
+        Assert.False(new AppPreferencesStore(ConfigPath).Load().BrowserSetupShown);
     }
 
     [Fact]

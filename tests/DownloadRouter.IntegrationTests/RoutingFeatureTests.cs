@@ -34,8 +34,14 @@ public sealed class RoutingFeatureTests : IDisposable
     {
         paths = AppPaths.For(AppInstance.Resolve(["--data-root", Path.Combine(root, "data-root")], null));
         repository = new DownloadRouterRepository(paths);
+        handler = CreateHandler();
+        repository.InitializeAsync(CancellationToken.None).GetAwaiter().GetResult();
+    }
+
+    private AgentCommandHandler CreateHandler()
+    {
         var boundary = new PathBoundaryValidator();
-        handler = new AgentCommandHandler(
+        return new AgentCommandHandler(
             repository,
             new RuleMatcher(),
             new UrlSanitizer(),
@@ -47,7 +53,158 @@ public sealed class RoutingFeatureTests : IDisposable
             paths,
             NullLogger<AgentCommandHandler>.Instance,
             clock);
-        repository.InitializeAsync(CancellationToken.None).GetAwaiter().GetResult();
+    }
+
+    [Fact]
+    public async Task ExtensionStatusIsFalseOnAnEmptyDatabaseAndTrueForLegacyJobs()
+    {
+        var empty = await SendAsync("diagnostics.status", new { });
+        Assert.True(empty.Success);
+        Assert.False(empty.Data!.Value.GetProperty("extensionEverConnected").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, empty.Data.Value.GetProperty("extensionLastSeenAt").ValueKind);
+
+        var rule = await AddRuleAsync("legacy", "example.com", Folder("legacy"), StorageMode.Automatic);
+        await repository.CreateJobAsync(Job(rule.Id, BrowserTransferState.Complete, RoutingState.Completed, clock.Now));
+        var legacy = await SendAsync("diagnostics.status", new { });
+        Assert.True(legacy.Data!.Value.GetProperty("extensionEverConnected").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, legacy.Data.Value.GetProperty("extensionLastSeenAt").ValueKind);
+    }
+
+    [Theory]
+    [InlineData("extension.hello", true)]
+    [InlineData("extension.hello", false)]
+    [InlineData("download.started", true)]
+    [InlineData("download.changed", true)]
+    [InlineData("download.metadata", true)]
+    [InlineData("download.cancelled", true)]
+    [InlineData("download.interrupted", true)]
+    [InlineData("downloads.active", true)]
+    public async Task EveryBrowserCommandPersistsContactWithoutChangingItsResponse(string command, bool supported)
+    {
+        object payload = command == "extension.hello"
+            ? new ExtensionHelloPayload("Whale", supported ? SupportedBuild : "old-build")
+            : new { browser = "Whale", downloadId = "unknown", state = "in_progress" };
+        var first = await SendAsync(command, payload);
+        var status = await SendAsync("diagnostics.status", new { });
+        Assert.True(status.Success, status.Message);
+        Assert.True(status.Data!.Value.GetProperty("extensionEverConnected").GetBoolean());
+        var stored = await repository.GetSettingAsync("extension-last-seen-at");
+        Assert.Equal(clock.Now.ToUniversalTime().ToString("O"), stored);
+        Assert.Equal(stored, status.Data.Value.GetProperty("extensionLastSeenAt").GetString());
+        Assert.False(await repository.HasJobsAsync());
+
+        var second = await SendAsync(command, payload);
+        Assert.Equal(first.Success, second.Success);
+        Assert.Equal(first.ErrorCode, second.ErrorCode);
+        Assert.Equal(first.Message, second.Message);
+        Assert.Equal(first.Data?.GetRawText(), second.Data?.GetRawText());
+        if (command == "extension.hello")
+        {
+            Assert.True(first.Success);
+            Assert.Equal(supported, first.Data!.Value.GetProperty("supported").GetBoolean());
+            Assert.Equal(3, first.Data.Value.EnumerateObject().Count());
+        }
+    }
+
+    [Fact]
+    public async Task ContactWritesAreThrottledAcrossBurstsAndHandlerRestarts()
+    {
+        await using var connection = new SqliteConnection($"Data Source={paths.DatabasePath}");
+        await connection.OpenAsync();
+        await using var writes = connection.CreateCommand();
+        writes.CommandText = """
+            CREATE TABLE ContactWrites (Id INTEGER PRIMARY KEY);
+            CREATE TRIGGER CountContactInsert AFTER INSERT ON AppSettings
+            WHEN NEW.Key = 'extension-last-seen-at' BEGIN INSERT INTO ContactWrites(Id) VALUES(NULL); END;
+            CREATE TRIGGER CountContactUpdate AFTER UPDATE ON AppSettings
+            WHEN NEW.Key = 'extension-last-seen-at' BEGIN INSERT INTO ContactWrites(Id) VALUES(NULL); END;
+            """;
+        await writes.ExecuteNonQueryAsync();
+        var hello = new ExtensionHelloPayload("Whale", SupportedBuild);
+        await SendAsync("extension.hello", hello);
+        await SendAsync("diagnostics.status", new { });
+        var initial = await repository.GetSettingAsync("extension-last-seen-at");
+        clock.Now += TimeSpan.FromMinutes(5);
+        await Task.WhenAll(Enumerable.Range(0, 30).Select(_ => SendAsync("extension.hello", hello)));
+        await SendAsync("diagnostics.status", new { });
+        Assert.Equal(initial, await repository.GetSettingAsync("extension-last-seen-at"));
+
+        var restarted = CreateHandler();
+        await restarted.HandleAsync(new AgentCommand(ProtocolConstants.CurrentVersion, Guid.NewGuid(), "extension.hello",
+            JsonSerializer.SerializeToElement(hello, ProtocolJson.Options)), CancellationToken.None);
+        var status = await restarted.HandleAsync(new AgentCommand(ProtocolConstants.CurrentVersion, Guid.NewGuid(), "diagnostics.status",
+            JsonSerializer.SerializeToElement(new { })), CancellationToken.None);
+        Assert.Equal(initial, status.Data!.Value.GetProperty("extensionLastSeenAt").GetString());
+
+        clock.Now += TimeSpan.FromTicks(1);
+        await Task.WhenAll(Enumerable.Range(0, 30).Select(_ => SendAsync("extension.hello", hello)));
+        await SendAsync("diagnostics.status", new { });
+        Assert.Equal(clock.Now.ToString("O"), await repository.GetSettingAsync("extension-last-seen-at"));
+        writes.CommandText = "SELECT COUNT(*) FROM ContactWrites;";
+        Assert.Equal(2L, await writes.ExecuteScalarAsync());
+        await restarted.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task DisposingTheHandlerFinishesTheFirstContactWrite()
+    {
+        await SendAsync("extension.hello", new ExtensionHelloPayload("Whale", SupportedBuild));
+        await handler.DisposeAsync();
+        Assert.Equal(clock.Now.ToString("O"), await repository.GetSettingAsync("extension-last-seen-at"));
+    }
+
+    [Fact]
+    public async Task APersistedContactIsVisibleAfterRestartWithoutAnyJobs()
+    {
+        var stored = clock.Now.AddDays(-1).ToString("O");
+        await repository.SetSettingAsync("extension-last-seen-at", stored);
+        var status = await SendAsync("diagnostics.status", new { });
+        Assert.True(status.Data!.Value.GetProperty("extensionEverConnected").GetBoolean());
+        Assert.Equal(stored, status.Data.Value.GetProperty("extensionLastSeenAt").GetString());
+        Assert.False(await repository.HasJobsAsync());
+    }
+
+    [Fact]
+    public async Task ALockedDatabaseDoesNotDelayTheBrowserHelloResponse()
+    {
+        await using var connection = new SqliteConnection($"Data Source={paths.DatabasePath}");
+        await connection.OpenAsync();
+        using (var transaction = connection.BeginTransaction(deferred: false))
+        {
+            var hello = await SendAsync("extension.hello", new ExtensionHelloPayload("Whale", SupportedBuild))
+                .WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.True(hello.Success);
+            Assert.True(hello.Data!.Value.GetProperty("supported").GetBoolean());
+            transaction.Rollback();
+        }
+
+        var status = await SendAsync("diagnostics.status", new { });
+        Assert.True(status.Data!.Value.GetProperty("extensionEverConnected").GetBoolean());
+    }
+
+    [Fact]
+    public async Task ContactWriteFailuresDoNotChangeHelloResponseAndAreRetried()
+    {
+        await using var connection = new SqliteConnection($"Data Source={paths.DatabasePath}");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            CREATE TRIGGER RejectContact BEFORE INSERT ON AppSettings
+            WHEN NEW.Key = 'extension-last-seen-at'
+            BEGIN SELECT RAISE(ABORT, 'Contact write rejected'); END;
+            """;
+        await command.ExecuteNonQueryAsync();
+        var failedWriteHello = await SendAsync("extension.hello", new ExtensionHelloPayload("Whale", SupportedBuild));
+        var failedWriteStatus = await SendAsync("diagnostics.status", new { });
+        Assert.True(failedWriteHello.Success);
+        Assert.False(failedWriteStatus.Data!.Value.GetProperty("extensionEverConnected").GetBoolean());
+
+        command.CommandText = "DROP TRIGGER RejectContact;";
+        await command.ExecuteNonQueryAsync();
+        var retriedHello = await SendAsync("extension.hello", new ExtensionHelloPayload("Whale", SupportedBuild));
+        var status = await SendAsync("diagnostics.status", new { });
+        Assert.Equal(failedWriteHello.Data?.GetRawText(), retriedHello.Data?.GetRawText());
+        Assert.True(status.Data!.Value.GetProperty("extensionEverConnected").GetBoolean());
     }
 
     // ------------------------------------------------------------------
@@ -656,6 +813,7 @@ public sealed class RoutingFeatureTests : IDisposable
 
     public void Dispose()
     {
+        handler.DisposeAsync().AsTask().GetAwaiter().GetResult();
         SqliteConnection.ClearAllPools();
         if (Directory.Exists(root))
         {

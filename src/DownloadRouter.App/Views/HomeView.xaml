@@ -13,6 +13,18 @@
       </StackPanel>
 
       <InfoBar
+          x:Name="ExtensionSetupBar"
+          IsClosable="False"
+          IsOpen="False"
+          Severity="Informational"
+          Title="{c:L Ko='브라우저 확장을 아직 연결하지 않았습니다', En='The browser extension is not connected yet'}"
+          Message="{c:L Ko='브라우저에 확장을 추가해야 다운로드를 분류할 수 있습니다.', En='Add the extension to your browser to sort downloads.'}">
+        <InfoBar.ActionButton>
+          <Button AutomationProperties.Name="{c:L Ko='연결 방법 보기', En='Show how to connect'}" Click="ShowBrowserSetup_Click" Content="{c:L Ko='연결 방법 보기', En='Show how to connect'}" />
+        </InfoBar.ActionButton>
+      </InfoBar>
+
+      <InfoBar
           x:Name="ExtensionRefreshBar"
           IsClosable="False"
           Severity="Warning"

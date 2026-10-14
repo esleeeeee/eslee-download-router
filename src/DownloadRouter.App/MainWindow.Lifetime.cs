@@ -32,6 +32,8 @@ public sealed partial class MainWindow
 
     public void InitializeHost(bool background, Action onExit)
     {
+        launchedInBackground = background;
+        hostInitialized = true;
         exitCallback = onExit;
         var handle = WinRT.Interop.WindowNative.GetWindowHandle(this);
         var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(handle);

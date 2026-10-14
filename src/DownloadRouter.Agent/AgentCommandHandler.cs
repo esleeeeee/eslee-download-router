@@ -24,7 +24,7 @@ public sealed class AgentCommandHandler(
     ISelectionUiLauncher selectionUiLauncher,
     AppPaths paths,
     ILogger<AgentCommandHandler> logger,
-    TimeProvider? timeProvider = null) : IHistoryCleanup
+    TimeProvider? timeProvider = null) : IHistoryCleanup, IAsyncDisposable
 {
     private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
     private static readonly SemaphoreSlim registrationGate = new(1, 1);
@@ -48,6 +48,14 @@ public sealed class AgentCommandHandler(
     private static long lastExtensionHelloTicks;
     private static string? lastExtensionBuild;
 
+    private const string ExtensionLastSeenSettingKey = "extension-last-seen-at";
+    private static readonly TimeSpan ExtensionContactWriteInterval = TimeSpan.FromMinutes(5);
+    private readonly Lock extensionContactGate = new();
+    private Task extensionContactUpdate = Task.CompletedTask;
+    private bool extensionContactLoaded;
+    private bool extensionContactDisposed;
+    private string? cachedExtensionLastSeenAt;
+
     public async Task<AgentResponse> HandleAsync(AgentCommand request, CancellationToken cancellationToken)
     {
         if (request.Version != ProtocolConstants.CurrentVersion)
@@ -63,6 +71,14 @@ public sealed class AgentCommandHandler(
         if (!ProtocolConstants.AllowedCommands.Contains(request.Command))
         {
             return AgentResponse.Error(request.RequestId, "protocol.command-not-allowed", "The requested command is not allowed.");
+        }
+
+        // Contact bookkeeping is detached: SQLite (including its busy timeout) must never
+        // delay a browser response or turn a fail-open command into a database error.
+        if (request.Command is "extension.hello" or "download.started" or "download.changed"
+            or "download.metadata" or "download.cancelled" or "download.interrupted" or "downloads.active")
+        {
+            RecordExtensionContact();
         }
 
         try
@@ -101,30 +117,7 @@ public sealed class AgentCommandHandler(
                 "history.retention.get" => AgentResponse.Ok(request.RequestId, new HistoryRetentionStatus(
                     await GetHistoryRetentionDaysAsync(cancellationToken).ConfigureAwait(false))),
                 "history.retention.set" => await HandleHistoryRetentionSetAsync(request, cancellationToken).ConfigureAwait(false),
-                "diagnostics.status" => AgentResponse.Ok(request.RequestId, new
-                {
-                    dataDirectory = paths.RootDirectory,
-                    databaseExists = File.Exists(paths.DatabasePath),
-                    protocolVersion = ProtocolConstants.CurrentVersion,
-                    processId = Environment.ProcessId,
-                    supportedExtensionBuilds = DownloadRegistrationPolicy.SupportedExtensionBuilds.ToArray(),
-                    unsupportedExtensionRejections = Volatile.Read(ref unsupportedExtensionRejections),
-                    lastUnsupportedExtensionAt = Volatile.Read(ref lastUnsupportedExtensionTicks) == 0
-                        ? null
-                        : new DateTimeOffset(Volatile.Read(ref lastUnsupportedExtensionTicks), TimeSpan.Zero).ToString("O"),
-                    lastExtensionBuild = Volatile.Read(ref lastExtensionBuild),
-                    extensionBuildSupported = Volatile.Read(ref lastExtensionBuildSupported) switch
-                    {
-                        1 => (bool?)true,
-                        0 => false,
-                        _ => null,
-                    },
-                    lastExtensionHelloAt = Volatile.Read(ref lastExtensionHelloTicks) == 0
-                        ? null
-                        : new DateTimeOffset(Volatile.Read(ref lastExtensionHelloTicks), TimeSpan.Zero).ToString("O"),
-                    extensionRefreshRequired = Volatile.Read(ref lastExtensionBuildSupported) == 0
-                        || Volatile.Read(ref unsupportedExtensionRejections) > 0,
-                }),
+                "diagnostics.status" => await HandleDiagnosticsStatusAsync(request, cancellationToken).ConfigureAwait(false),
                 _ => AgentResponse.Error(request.RequestId, "protocol.command-not-allowed", "The requested command is not allowed."),
             };
         }
@@ -151,6 +144,102 @@ public sealed class AgentCommandHandler(
             logger.LogError(exception, "Agent command {Command} failed", request.Command);
             return AgentResponse.Error(request.RequestId, "agent.unexpected", "The agent could not process this request.");
         }
+    }
+
+    private void RecordExtensionContact()
+    {
+        lock (extensionContactGate)
+        {
+            var now = clock.GetUtcNow();
+            if (extensionContactDisposed || !extensionContactUpdate.IsCompleted
+                || (extensionContactLoaded && IsRecentExtensionContact(cachedExtensionLastSeenAt, now)))
+            {
+                return;
+            }
+
+            extensionContactUpdate = Task.Run(async () =>
+            {
+                try
+                {
+                    var stored = extensionContactLoaded
+                        ? cachedExtensionLastSeenAt
+                        : await repository.GetSettingAsync(ExtensionLastSeenSettingKey).ConfigureAwait(false);
+                    if (!IsRecentExtensionContact(stored, now))
+                    {
+                        stored = now.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+                        await repository.SetSettingAsync(ExtensionLastSeenSettingKey, stored).ConfigureAwait(false);
+                    }
+
+                    lock (extensionContactGate)
+                    {
+                        cachedExtensionLastSeenAt = stored;
+                        extensionContactLoaded = true;
+                    }
+                }
+                catch (Exception exception)
+                {
+                    logger.LogWarning(exception, "Could not persist browser extension contact");
+                }
+            });
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Task pendingContact;
+        lock (extensionContactGate)
+        {
+            extensionContactDisposed = true;
+            pendingContact = extensionContactUpdate;
+        }
+
+        // Finish the detached write before shutdown so the first connection is not lost
+        // on a clean agent exit. Late pipe requests cannot start more bookkeeping.
+        await pendingContact.ConfigureAwait(false);
+    }
+
+    private static bool IsRecentExtensionContact(string? stored, DateTimeOffset now)
+        => DateTimeOffset.TryParse(stored, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var seen)
+            && now - seen <= ExtensionContactWriteInterval;
+
+    private async Task<AgentResponse> HandleDiagnosticsStatusAsync(AgentCommand request, CancellationToken cancellationToken)
+    {
+        Task pendingContact;
+        lock (extensionContactGate)
+        {
+            pendingContact = extensionContactUpdate;
+        }
+
+        // A diagnostics refresh after hello observes the completed best-effort write.
+        await pendingContact.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var lastSeen = await repository.GetSettingAsync(ExtensionLastSeenSettingKey, cancellationToken).ConfigureAwait(false);
+        var everConnected = lastSeen is not null || await repository.HasJobsAsync(cancellationToken).ConfigureAwait(false);
+        return AgentResponse.Ok(request.RequestId, new
+        {
+            dataDirectory = paths.RootDirectory,
+            databaseExists = File.Exists(paths.DatabasePath),
+            protocolVersion = ProtocolConstants.CurrentVersion,
+            processId = Environment.ProcessId,
+            extensionLastSeenAt = lastSeen,
+            extensionEverConnected = everConnected,
+            supportedExtensionBuilds = DownloadRegistrationPolicy.SupportedExtensionBuilds.ToArray(),
+            unsupportedExtensionRejections = Volatile.Read(ref unsupportedExtensionRejections),
+            lastUnsupportedExtensionAt = Volatile.Read(ref lastUnsupportedExtensionTicks) == 0
+                ? null
+                : new DateTimeOffset(Volatile.Read(ref lastUnsupportedExtensionTicks), TimeSpan.Zero).ToString("O"),
+            lastExtensionBuild = Volatile.Read(ref lastExtensionBuild),
+            extensionBuildSupported = Volatile.Read(ref lastExtensionBuildSupported) switch
+            {
+                1 => (bool?)true,
+                0 => false,
+                _ => null,
+            },
+            lastExtensionHelloAt = Volatile.Read(ref lastExtensionHelloTicks) == 0
+                ? null
+                : new DateTimeOffset(Volatile.Read(ref lastExtensionHelloTicks), TimeSpan.Zero).ToString("O"),
+            extensionRefreshRequired = Volatile.Read(ref lastExtensionBuildSupported) == 0
+                || Volatile.Read(ref unsupportedExtensionRejections) > 0,
+        });
     }
 
     private async Task<AgentResponse> HandleDownloadRegistrationAsync(AgentCommand request, CancellationToken cancellationToken)
