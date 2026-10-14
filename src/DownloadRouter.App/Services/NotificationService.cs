@@ -32,6 +32,11 @@ public sealed class NotificationService
 
     public bool EnsureRegistered()
     {
+        if (!AppServices.Instance.IsDefault)
+        {
+            return false;
+        }
+
         if (registered)
         {
             return true;
@@ -91,6 +96,11 @@ public sealed class NotificationService
     /// <summary>Turns notifications off and removes this app's notification registration.</summary>
     public void Disable()
     {
+        if (!AppServices.Instance.IsDefault)
+        {
+            return;
+        }
+
         if (registered)
         {
             AppNotificationManager.Default.NotificationInvoked -= OnNotificationInvoked;

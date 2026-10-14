@@ -25,8 +25,7 @@ public sealed class FolderTreePicker : UserControl
     {
         TextWrapping = TextWrapping.Wrap,
         Visibility = Visibility.Collapsed,
-        Style = Controls.ThemeStyles.Get<Style>("CaptionTextBlockStyle"),
-        Foreground = Controls.ThemeStyles.Get<Microsoft.UI.Xaml.Media.Brush>("CautionForegroundBrush"),
+        Style = Controls.ThemeStyles.Get<Style>("CautionCaptionTextStyle"),
     };
     private readonly ProgressRing loading = new()
     {
@@ -68,7 +67,7 @@ public sealed class FolderTreePicker : UserControl
         {
             var parent = Directory.GetParent(SelectedFullPath);
             if (parent is null) return;
-            try { await InitializeAsync(SelectionDestination.ValidateFolder(parent.FullName)); }
+            try { await InitializeAsync(await Task.Run(() => SelectionDestination.ValidateFolder(parent.FullName))); }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
             {
                 nodeError.Text = AppText.Pick("상위 폴더에 접근할 수 없습니다.", "The parent folder cannot be opened.");
@@ -197,7 +196,7 @@ public sealed class FolderTreePicker : UserControl
 
         try
         {
-            await InitializeAsync(SelectionDestination.ValidateFolder(full));
+            await InitializeAsync(await Task.Run(() => SelectionDestination.ValidateFolder(full)));
             return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)

@@ -238,12 +238,34 @@ public sealed partial class MainWindow
         }
     }
 
-    private static async Task EnsureAgentForHostAsync()
+    private DateTimeOffset lastAgentStartAttempt = DateTimeOffset.MinValue;
+    private bool agentStartInProgress;
+
+    private async Task EnsureAgentForHostAsync()
     {
-        var running = await new AgentProcessManager(AppServices.Agent).EnsureRunningAsync();
-        if (!running)
+        if (exitRequested || agentStartInProgress
+            || DateTimeOffset.UtcNow - lastAgentStartAttempt < TimeSpan.FromSeconds(10))
         {
-            WriteAppDiagnostic("Agent start failed; Native Host fallback remains enabled.");
+            return;
+        }
+
+        lastAgentStartAttempt = DateTimeOffset.UtcNow;
+        agentStartInProgress = true;
+        try
+        {
+            var running = await Task.Run(() => new AgentProcessManager(AppServices.Agent).EnsureRunningAsync());
+            if (!running)
+            {
+                WriteAppDiagnostic("Agent start failed; Native Host fallback remains enabled.");
+            }
+        }
+        catch (Exception exception)
+        {
+            WriteAppDiagnostic($"Agent recovery failed: {exception.GetType().Name}");
+        }
+        finally
+        {
+            agentStartInProgress = false;
         }
     }
 

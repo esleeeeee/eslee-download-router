@@ -51,8 +51,6 @@ public sealed partial class BrowsersView : UserControl, IAppView
             {
                 Padding = new Thickness(20, 12, 20, 12),
                 ColumnSpacing = 16,
-                BorderBrush = ThemeStyles.Get<Microsoft.UI.Xaml.Media.Brush>("DividerStrokeBrush"),
-                BorderThickness = new Thickness(0, BrowserRows.Children.Count == 0 ? 0 : 1, 0, 0),
             };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -96,7 +94,12 @@ public sealed partial class BrowsersView : UserControl, IAppView
             };
             Grid.SetColumn(open, 2);
             row.Children.Add(open);
-            BrowserRows.Children.Add(row);
+            BrowserRows.Children.Add(new Border
+            {
+                Style = ThemeStyles.Get<Style>("DividerRowBorderStyle"),
+                BorderThickness = new Thickness(0, BrowserRows.Children.Count == 0 ? 0 : 1, 0, 0),
+                Child = row,
+            });
         }
     }
 

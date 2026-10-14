@@ -9,9 +9,10 @@ namespace DownloadRouter.Core.Startup;
 /// Identifies which data root a process works on and derives every per-instance name from it.
 ///
 /// The default instance keeps the exact v1.3.5 names (pipe, mutexes, events, data folder),
-/// so the browser extension and Native Host keep reaching it. Any other data root gets a
+/// so the browser extension and Native Host keep reaching it. An explicit --data-root gets a
 /// stable suffix on every name, so a test copy can run beside the installed app without
-/// sharing its database, its single-instance mutexes, or its pipe.
+/// sharing its database, its single-instance mutexes, or its pipe. The environment variable
+/// only relocates the default data folder, retaining browser-compatible names.
 /// </summary>
 public sealed class AppInstance
 {
@@ -74,7 +75,8 @@ public sealed class AppInstance
         ArgumentNullException.ThrowIfNull(instance);
         var previous = Interlocked.CompareExchange(ref current, instance, null);
         if (previous is not null
-            && !string.Equals(previous.DataRoot, instance.DataRoot, StringComparison.OrdinalIgnoreCase))
+            && (!string.Equals(previous.DataRoot, instance.DataRoot, StringComparison.OrdinalIgnoreCase)
+                || previous.IsDefault != instance.IsDefault))
         {
             throw new InvalidOperationException("The application instance was already initialised with a different data root.");
         }
@@ -93,14 +95,15 @@ public sealed class AppInstance
     {
         ArgumentNullException.ThrowIfNull(args);
         var normalizedDefault = Normalize(defaultRoot ?? DefaultRoot);
-        var root = ReadArgument(args)
+        var argumentRoot = ReadArgument(args);
+        var root = argumentRoot
             ?? (!string.IsNullOrWhiteSpace(environmentDataDir) && Path.IsPathFullyQualified(environmentDataDir.Trim())
                 ? environmentDataDir.Trim()
                 : null);
         var normalized = root is null ? normalizedDefault : Normalize(root);
         return new AppInstance(
             normalized,
-            string.Equals(normalized, normalizedDefault, StringComparison.OrdinalIgnoreCase));
+            argumentRoot is null);
     }
 
     private static string? ReadArgument(IReadOnlyList<string> args)

@@ -20,12 +20,10 @@ if (-not $smokeRoot.StartsWith($artifactsRoot + [IO.Path]::DirectorySeparatorCha
 }
 
 New-Item -ItemType Directory -Path $smokeRoot -Force | Out-Null
-$previousDataDirectory = $env:DOWNLOAD_ROUTER_DATA_DIR
-$env:DOWNLOAD_ROUTER_DATA_DIR = $smokeRoot
 $process = $null
 
 try {
-    $process = Start-Process -FilePath $agentPath -WorkingDirectory (Split-Path $agentPath -Parent) -WindowStyle Hidden -PassThru
+    $process = Start-Process -FilePath $agentPath -WorkingDirectory (Split-Path $agentPath -Parent) -WindowStyle Hidden -ArgumentList @('--data-root', ('"' + $smokeRoot + '"')) -PassThru
     # A non-default data root runs an isolated instance whose pipe name carries a suffix:
     # "." plus the first 12 hex characters of SHA-256 over the upper-cased full path.
     $normalizedRoot = [IO.Path]::GetFullPath($smokeRoot).TrimEnd([char]92, [char]47).ToUpperInvariant()
@@ -78,7 +76,6 @@ finally {
         [void]$process.WaitForExit(5000)
     }
 
-    $env:DOWNLOAD_ROUTER_DATA_DIR = $previousDataDirectory
     if (Test-Path -LiteralPath $smokeRoot) {
         Remove-Item -LiteralPath $smokeRoot -Recurse -Force
     }

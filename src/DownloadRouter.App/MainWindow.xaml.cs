@@ -117,6 +117,10 @@ public sealed partial class MainWindow : Window
     {
         var snapshot = args.Snapshot;
         AgentUnavailableBar.IsOpen = !snapshot.AgentReachable;
+        if (!snapshot.AgentReachable)
+        {
+            _ = EnsureAgentForHostAsync();
+        }
         UpdateRoutingStatus(snapshot);
         var active = Core.Jobs.DownloadJobQueries.ActiveSelections(snapshot.Jobs);
         var automatic = Core.Jobs.DownloadJobQueries.AutomaticSelections(snapshot.Jobs);

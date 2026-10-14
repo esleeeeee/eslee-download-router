@@ -239,6 +239,87 @@ public sealed class PendingIntegrationSourceTests
         }
     }
 
+    [Fact]
+    public void CodeUsesThemeAwareStylesInsteadOfFrozenBrushes()
+    {
+        foreach (var file in Directory.EnumerateFiles(AppSourceRoot(), "*.cs", SearchOption.AllDirectories)
+                     .Where(static path => !IsBuildOutput(path)))
+        {
+            Assert.DoesNotContain("Get<Microsoft.UI.Xaml.Media.Brush>", File.ReadAllText(file), StringComparison.Ordinal);
+            Assert.DoesNotContain("Get<Brush>", File.ReadAllText(file), StringComparison.Ordinal);
+        }
+
+        var styles = ReadAppFile("Themes", "Controls.xaml");
+        foreach (var key in new[] { "ErrorCaptionTextStyle", "CautionCaptionTextStyle", "DividerRowBorderStyle", "DangerMenuFlyoutItemStyle" })
+        {
+            Assert.Contains($"x:Key=\"{key}\"", styles, StringComparison.Ordinal);
+        }
+        Assert.Contains("{ThemeResource CriticalForegroundBrush}", styles, StringComparison.Ordinal);
+        Assert.Contains("{ThemeResource CautionForegroundBrush}", styles, StringComparison.Ordinal);
+        Assert.Contains("{ThemeResource DividerStrokeBrush}", styles, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExternalFolderValidationIsOffTheUiThread()
+    {
+        var tree = ReadAppFile("FolderTreePicker.cs");
+        Assert.Contains("Task.Run(() => SelectionDestination.ValidateFolder(parent.FullName))", tree, StringComparison.Ordinal);
+        Assert.Contains("Task.Run(() => SelectionDestination.ValidateFolder(full))", tree, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AgentRecoveryIsThrottledAndRunsOutsideTheUiThread()
+    {
+        var main = ReadAppFile("MainWindow.xaml.cs");
+        var lifetime = ReadAppFile("MainWindow.Lifetime.cs");
+        Assert.Contains("if (!snapshot.AgentReachable)", main, StringComparison.Ordinal);
+        Assert.Contains("_ = EnsureAgentForHostAsync();", main, StringComparison.Ordinal);
+        Assert.Contains("TimeSpan.FromSeconds(10)", lifetime, StringComparison.Ordinal);
+        Assert.Contains("agentStartInProgress", lifetime, StringComparison.Ordinal);
+        Assert.Contains("Task.Run(() => new AgentProcessManager(AppServices.Agent).EnsureRunningAsync())", lifetime, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void IsolatedNotificationsNeverRegisterOrDisableInstalledNotifications()
+    {
+        var source = ReadAppFile("Services", "NotificationService.cs");
+        var ensure = source[source.IndexOf("public bool EnsureRegistered()", StringComparison.Ordinal)..];
+        ensure = ensure[..ensure.IndexOf("public bool ShowMoveCompleted", StringComparison.Ordinal)];
+        var disable = source[source.IndexOf("public void Disable()", StringComparison.Ordinal)..];
+        disable = disable[..disable.IndexOf("public static void UnregisterAll()", StringComparison.Ordinal)];
+        Assert.True(ensure.IndexOf("if (!AppServices.Instance.IsDefault)", StringComparison.Ordinal)
+            < ensure.IndexOf("manager.Register", StringComparison.Ordinal));
+        Assert.Contains("return false;", ensure, StringComparison.Ordinal);
+        Assert.Contains("if (!AppServices.Instance.IsDefault)", disable, StringComparison.Ordinal);
+        Assert.True(disable.IndexOf("return;", StringComparison.Ordinal) < disable.IndexOf("UnregisterAll();", StringComparison.Ordinal));
+        Assert.Contains("NotificationService.UnregisterAll();", ReadAppFile("App.xaml.cs"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PauseRefreshForcingIsConsumedInsideThePollGate()
+    {
+        var monitor = ReadAppFile("Services", "LiveMonitor.cs");
+        Assert.DoesNotContain("tick = 0", monitor, StringComparison.Ordinal);
+        Assert.Contains("Interlocked.Exchange(ref forcePauseStatus, 1)", monitor, StringComparison.Ordinal);
+        var gate = monitor.IndexOf("await pollGate.WaitAsync", StringComparison.Ordinal);
+        var consume = monitor.IndexOf("Interlocked.Exchange(ref forcePauseStatus, 0)", StringComparison.Ordinal);
+        Assert.True(gate >= 0 && consume > gate);
+    }
+
+    [Fact]
+    public void ImportPreviewIncludesRuleDetailsDisabledStateAndDuplicateCount()
+    {
+        var view = ReadAppFile("Views", "RulesView.xaml.cs");
+        var import = view[view.IndexOf("private async void ImportRules_Click", StringComparison.Ordinal)..];
+        Assert.Contains("result.SkippedDuplicates.Count", import, StringComparison.Ordinal);
+        Assert.DoesNotContain("{result.SkippedDuplicates}", import, StringComparison.Ordinal);
+        Assert.Contains("result.NewRules.Take(10)", import, StringComparison.Ordinal);
+        Assert.Contains("RulePresentation.MatchScopeSummary(rule.MatchType, rule.MatchValue)", import, StringComparison.Ordinal);
+        Assert.Contains("{rule.StorageRoot}", import, StringComparison.Ordinal);
+        Assert.Contains("Imported rules are turned off", import, StringComparison.Ordinal);
+        Assert.Contains("…and {result.NewRules.Count - 10} more", import, StringComparison.Ordinal);
+    }
+
     private static bool IsBuildOutput(string path)
         => path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
             || path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal);

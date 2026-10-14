@@ -43,6 +43,19 @@
     <Setter Property="FontSize" Value="28" />
   </Style>
 
+  <Style x:Key="ErrorCaptionTextStyle" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+    <Setter Property="Foreground" Value="{ThemeResource CriticalForegroundBrush}" />
+  </Style>
+  <Style x:Key="CautionCaptionTextStyle" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+    <Setter Property="Foreground" Value="{ThemeResource CautionForegroundBrush}" />
+  </Style>
+  <Style x:Key="DividerRowBorderStyle" TargetType="Border">
+    <Setter Property="BorderBrush" Value="{ThemeResource DividerStrokeBrush}" />
+  </Style>
+  <Style x:Key="DangerMenuFlyoutItemStyle" TargetType="MenuFlyoutItem">
+    <Setter Property="Foreground" Value="{ThemeResource CriticalForegroundBrush}" />
+  </Style>
+
   <!-- Surfaces -->
   <Style x:Key="CardStyle" TargetType="Border">
     <Setter Property="Background" Value="{ThemeResource CardBackgroundBrush}" />

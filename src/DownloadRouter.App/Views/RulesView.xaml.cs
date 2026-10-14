@@ -285,7 +285,7 @@ public sealed partial class RulesView : UserControl, IAppView
         menu.Items.Add(MenuItem(AppText.Pick("기준 폴더 열기", "Open base folder"), "", () => _ = OpenRootAsync(rule)));
         menu.Items.Add(new MenuFlyoutSeparator());
         var delete = MenuItem(AppText.Pick("삭제", "Delete"), "", () => _ = DeleteRuleAsync(rule));
-        delete.Foreground = ThemeStyles.Get<Microsoft.UI.Xaml.Media.Brush>("CriticalForegroundBrush");
+        delete.Style = ThemeStyles.Get<Style>("DangerMenuFlyoutItemStyle");
         menu.Items.Add(delete);
         if (args.TryGetPosition(sender, out var point))
         {
@@ -894,8 +894,26 @@ public sealed partial class RulesView : UserControl, IAppView
         }
 
         var summary = AppText.Pick(
-            $"새 규칙 {result.NewRules.Count}개를 추가합니다.\n이미 있는 규칙 {result.SkippedDuplicates}개는 건너뜁니다.",
-            $"{result.NewRules.Count} new rule(s) will be added.\n{result.SkippedDuplicates} rule(s) already exist and will be skipped.");
+            $"새 규칙 {result.NewRules.Count}개를 추가합니다.\n이미 있는 규칙 {result.SkippedDuplicates.Count}개는 건너뜁니다.",
+            $"{result.NewRules.Count} new rule(s) will be added.\n{result.SkippedDuplicates.Count} rule(s) already exist and will be skipped.");
+        if (result.NewRules.Count > 0)
+        {
+            summary += "\n\n" + AppText.Pick(
+                "가져온 규칙은 꺼진 상태로 추가됩니다. 내용을 확인한 뒤 직접 켜세요.",
+                "Imported rules are turned off. Review them and turn them on deliberately.");
+            foreach (var rule in result.NewRules.Take(10))
+            {
+                summary += "\n\n" + AppText.Pick(
+                    $"이름: {rule.Name}\n사이트: {RulePresentation.MatchScopeSummary(rule.MatchType, rule.MatchValue)}\n저장 폴더: {rule.StorageRoot}",
+                    $"Name: {rule.Name}\nSite: {RulePresentation.MatchScopeSummary(rule.MatchType, rule.MatchValue)}\nDestination folder: {rule.StorageRoot}");
+            }
+
+            if (result.NewRules.Count > 10)
+            {
+                summary += "\n" + AppText.Pick($"…외 {result.NewRules.Count - 10}개", $"…and {result.NewRules.Count - 10} more");
+            }
+        }
+
         if (result.Errors.Count > 0)
         {
             summary += "\n\n" + AppText.Pick($"읽을 수 없는 항목 {result.Errors.Count}개:", $"{result.Errors.Count} entry(ies) could not be read:")

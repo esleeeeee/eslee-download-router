@@ -36,6 +36,7 @@ public sealed class LiveMonitor : IDisposable
     private readonly SemaphoreSlim pollGate = new(1, 1);
     private RoutingPauseStatus pause = new(false, null);
     private int tick;
+    private int forcePauseStatus;
     private Task? loop;
 
     public LiveMonitor(AgentClient agent, DispatcherQueue dispatcher)
@@ -54,7 +55,7 @@ public sealed class LiveMonitor : IDisposable
     /// <summary>Polls immediately (for example right after a command) and returns the new snapshot.</summary>
     public async Task<LiveSnapshot?> RefreshNowAsync()
     {
-        tick = 0;
+        Interlocked.Exchange(ref forcePauseStatus, 1);
         return await Task.Run(() => PollAsync(lifetime.Token)).ConfigureAwait(true);
     }
 
@@ -97,7 +98,7 @@ public sealed class LiveMonitor : IDisposable
                     await agent.SendAsync("jobs.list", cancellationToken: cancellationToken).ConfigureAwait(false)) ?? [];
                 var rules = AgentClient.ReadData<List<DownloadRule>>(
                     await agent.SendAsync("rules.list", cancellationToken: cancellationToken).ConfigureAwait(false)) ?? [];
-                if (tick++ % PauseStatusEveryTicks == 0)
+                if (Interlocked.Exchange(ref forcePauseStatus, 0) != 0 || tick++ % PauseStatusEveryTicks == 0)
                 {
                     var status = await agent.SendAsync("routing.status", cancellationToken: cancellationToken).ConfigureAwait(false);
                     pause = status.Success ? AgentClient.ReadData<RoutingPauseStatus>(status) ?? pause : pause;

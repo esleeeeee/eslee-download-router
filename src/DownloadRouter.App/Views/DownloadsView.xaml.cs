@@ -548,8 +548,6 @@ public sealed partial class DownloadsView : UserControl, IAppView
         {
             Padding = new Thickness(20, 12, 20, 12),
             ColumnSpacing = 16,
-            BorderBrush = ThemeStyles.Get<Microsoft.UI.Xaml.Media.Brush>("DividerStrokeBrush"),
-            BorderThickness = new Thickness(0, DetailRows.Children.Count == 0 ? 0 : 1, 0, 0),
         };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -563,7 +561,12 @@ public sealed partial class DownloadsView : UserControl, IAppView
         };
         Grid.SetColumn(valueText, 1);
         grid.Children.Add(valueText);
-        DetailRows.Children.Add(grid);
+        DetailRows.Children.Add(new Border
+        {
+            Style = ThemeStyles.Get<Style>("DividerRowBorderStyle"),
+            BorderThickness = new Thickness(0, DetailRows.Children.Count == 0 ? 0 : 1, 0, 0),
+            Child = grid,
+        });
     }
 
     // ---------------------------------------------------------------- actions

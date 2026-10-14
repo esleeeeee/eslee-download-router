@@ -51,7 +51,12 @@ public sealed class AppInstanceTests
         Assert.Equal(Path.GetFullPath(TestRoot), fromEqualsArgument.DataRoot);
         Assert.Equal(Path.GetFullPath(EnvironmentRoot), fromEnvironment.DataRoot);
         Assert.False(fromArgument.IsDefault);
-        Assert.False(fromEnvironment.IsDefault);
+        Assert.True(fromEnvironment.IsDefault);
+        Assert.Equal(ProtocolConstants.AgentPipeName, fromEnvironment.AgentPipeName);
+        Assert.Equal(ProtocolConstants.AgentMutexName, fromEnvironment.AgentMutexName);
+        Assert.Equal(ProtocolConstants.AppMutexName, fromEnvironment.AppMutexName);
+        Assert.Empty(fromEnvironment.NameSuffix);
+        Assert.Empty(fromEnvironment.ForwardedArguments);
     }
 
     [Fact]
@@ -72,16 +77,16 @@ public sealed class AppInstanceTests
     }
 
     [Fact]
-    public void TheDefaultIsDetectedCaseInsensitivelyAndWithATrailingSeparator()
+    public void AnExplicitDefaultRootStillCreatesAnIsolatedInstance()
     {
         var instance = AppInstance.Resolve(
             ["--data-root", DefaultRoot.ToUpperInvariant() + Path.DirectorySeparatorChar],
             null,
             DefaultRoot);
 
-        Assert.True(instance.IsDefault);
-        Assert.Equal(string.Empty, instance.NameSuffix);
-        Assert.Equal(ProtocolConstants.AgentPipeName, instance.AgentPipeName);
+        Assert.False(instance.IsDefault);
+        Assert.NotEmpty(instance.NameSuffix);
+        Assert.Equal(ProtocolConstants.AgentPipeName + instance.NameSuffix, instance.AgentPipeName);
     }
 
     [Fact]

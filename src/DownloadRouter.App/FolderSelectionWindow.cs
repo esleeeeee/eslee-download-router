@@ -207,8 +207,7 @@ public sealed class FolderSelectionWindow(
         body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         var nameArea = new StackPanel { Spacing = 4 };
         nameArea.Children.Add(fileNameInput);
-        fileNameError.Style = ThemeStyles.Get<Style>("CaptionTextBlockStyle");
-        fileNameError.Foreground = ThemeStyles.Get<Microsoft.UI.Xaml.Media.Brush>("CriticalForegroundBrush");
+        fileNameError.Style = ThemeStyles.Get<Style>("ErrorCaptionTextStyle");
         nameArea.Children.Add(fileNameError);
         body.Children.Add(nameArea);
 
