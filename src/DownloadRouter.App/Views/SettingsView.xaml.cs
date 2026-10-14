@@ -3,6 +3,7 @@ using DownloadRouter.App.Services;
 using DownloadRouter.App.ViewModels;
 using DownloadRouter.Core.Localization;
 using DownloadRouter.Core.Models;
+using DownloadRouter.Core.Settings;
 using DownloadRouter.Core.Startup;
 using DownloadRouter.Core.Updates;
 using Microsoft.UI.Xaml;

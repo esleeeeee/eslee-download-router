@@ -114,7 +114,7 @@ public sealed class UserGuidanceTests
     public void TheBrowserScreenAsksTheLocatorInsteadOfPrintingAFixedPath()
     {
         var shell = File.ReadAllText(Path.Combine(
-            FindRepositoryRoot(), "src", "DownloadRouter.App", "MainWindow.xaml.cs"));
+            FindRepositoryRoot(), "src", "DownloadRouter.App", "Views", "BrowsersView.xaml.cs"));
 
         Assert.Contains("ExtensionFolderLocator.Locate(AppContext.BaseDirectory)", shell, StringComparison.Ordinal);
         Assert.DoesNotContain("src/DownloadRouter.Extension/dist", shell, StringComparison.Ordinal);
@@ -169,7 +169,7 @@ public sealed class UserGuidanceTests
     public void TheInformationScreenUsesTheSharedSupportSentence()
     {
         var shell = File.ReadAllText(Path.Combine(
-            FindRepositoryRoot(), "src", "DownloadRouter.App", "MainWindow.xaml.cs"));
+            FindRepositoryRoot(), "src", "DownloadRouter.App", "Views", "SettingsView.xaml.cs"));
 
         Assert.Contains("BrowserSupportCatalog.SupportSummary", shell, StringComparison.Ordinal);
         // The previously hard-coded sentence must be gone.
@@ -290,7 +290,7 @@ public sealed class UserGuidanceTests
     {
         var root = FindRepositoryRoot();
         var nativeHost = File.ReadAllText(Path.Combine(root, "src", "DownloadRouter.NativeHost", "Program.cs"));
-        var shell = File.ReadAllText(Path.Combine(root, "src", "DownloadRouter.App", "MainWindow.xaml.cs"));
+        var shell = File.ReadAllText(Path.Combine(root, "src", "DownloadRouter.App", "Views", "BrowsersView.xaml.cs"));
 
         Assert.Equal("gilicenlclaemgiijcjjejilikbooggj", ProtocolConstants.ExtensionId);
         Assert.Contains("ProtocolConstants.ExtensionId", nativeHost, StringComparison.Ordinal);

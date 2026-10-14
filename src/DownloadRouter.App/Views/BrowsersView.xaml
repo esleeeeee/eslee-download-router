@@ -43,13 +43,13 @@
             <StackPanel Spacing="8">
               <TextBlock x:Name="ExtensionFolderText" Style="{StaticResource BodyTextBlockStyle}" IsTextSelectionEnabled="True" TextWrapping="Wrap" />
               <StackPanel x:Name="ExtensionFolderActions" Orientation="Horizontal" Spacing="8">
-                <Button Click="CopyFolder_Click">
+                <Button AutomationProperties.Name="{c:L Ko='폴더 경로 복사', En='Copy folder path'}" Click="CopyFolder_Click">
                   <StackPanel Orientation="Horizontal" Spacing="8">
                     <FontIcon FontSize="14" Glyph="&#xE8C8;" />
                     <TextBlock Text="{c:L Ko='폴더 경로 복사', En='Copy folder path'}" />
                   </StackPanel>
                 </Button>
-                <Button Click="OpenFolder_Click">
+                <Button AutomationProperties.Name="{c:L Ko='폴더 열기', En='Open folder'}" Click="OpenFolder_Click">
                   <StackPanel Orientation="Horizontal" Spacing="8">
                     <FontIcon FontSize="14" Glyph="&#xE838;" />
                     <TextBlock Text="{c:L Ko='폴더 열기', En='Open folder'}" />

@@ -274,13 +274,17 @@ public sealed class UpdateCheckTests
     public void TheAboutScreenShowsTheUpdateCardNextToTheCurrentVersion()
     {
         var root = FindRepositoryRoot();
-        var about = File.ReadAllText(Path.Combine(root, "src", "DownloadRouter.App", "MainWindow.xaml.cs"));
-        var updates = File.ReadAllText(Path.Combine(root, "src", "DownloadRouter.App", "MainWindow.Updates.cs"));
+        var settingsXaml = File.ReadAllText(Path.Combine(root, "src", "DownloadRouter.App", "Views", "SettingsView.xaml"));
+        var settings = File.ReadAllText(Path.Combine(root, "src", "DownloadRouter.App", "Views", "SettingsView.xaml.cs"));
 
-        Assert.Contains("AddCard(\"현재 버전\", version.DisplayVersion)", about, StringComparison.Ordinal);
-        Assert.Contains("AddUpdateCard(version)", about, StringComparison.Ordinal);
-        Assert.Contains("지금 확인", updates, StringComparison.Ordinal);
-        Assert.Contains("Release 페이지 열기", updates, StringComparison.Ordinal);
+        // The settings "About" section shows the running version right above the update card.
+        Assert.True(settingsXaml.IndexOf("x:Name=\"VersionCard\"", StringComparison.Ordinal)
+            < settingsXaml.IndexOf("x:Name=\"UpdateCard\"", StringComparison.Ordinal));
+        Assert.Contains("version.DisplayVersion", settings, StringComparison.Ordinal);
+        Assert.Contains("RenderUpdateState", settings, StringComparison.Ordinal);
+        Assert.Contains("지금 확인", settingsXaml, StringComparison.Ordinal);
+        Assert.Contains("Release 페이지 열기", settingsXaml, StringComparison.Ordinal);
+        Assert.Contains("MainWindow.ReleasePageUrl()", settings, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -288,7 +292,8 @@ public sealed class UpdateCheckTests
     {
         var root = FindRepositoryRoot();
         var appSources = Directory
-            .EnumerateFiles(Path.Combine(root, "src", "DownloadRouter.App"), "*.cs", SearchOption.TopDirectoryOnly)
+            .EnumerateFiles(Path.Combine(root, "src", "DownloadRouter.App"), "*.cs", SearchOption.AllDirectories)
+            .Where(static path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
             .Select(File.ReadAllText);
 
         Assert.StartsWith("https://api.github.com/", UpdateCheckPolicy.LatestReleaseApiUrl, StringComparison.Ordinal);
