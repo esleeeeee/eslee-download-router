@@ -19,6 +19,7 @@
 - Korean and English in one build: Settings > Appearance > Language (Use Windows setting / 한국어 / English), applied after a restart. The installer also shows Korean or English.
 - Rule export and import (Site rules > ⋯): back up rules as JSON and import them on another PC; duplicates are skipped.
 - Optional Windows notification when a file is moved (Settings > Behavior, off by default; the tray balloon is used when Windows notifications are unavailable).
+- First-run guidance: until the browser extension has connected once, Home shows "The browser extension is not connected yet" with a link to the setup steps, the Browsers page shows the connection status, and the first window after installation opens on the Browsers page. Existing users with download history are not prompted.
 - Fixed: "Open files waiting for a folder" in the tray menu and the Tray Folder menu only showed the window instead of opening the waiting list.
 - Fixed: windows had no icon in the title bar and Alt+Tab because the icon resource number was passed where a handle was expected.
 - Reliability: commands that change the same download are now handled one at a time so a browser event and a folder choice arriving together can no longer overwrite each other; the settings file is written under a cross-process lock; agent polling and folder checks no longer run on the UI thread.
@@ -38,6 +39,7 @@
 - 한국어와 영어를 한 빌드로 제공합니다: 설정 > 화면 > 언어(Windows 설정 따르기 / 한국어 / English), 다시 시작하면 적용됩니다. 설치 프로그램도 한국어 또는 영어로 표시됩니다.
 - 규칙 내보내기·가져오기(사이트 규칙 > ⋯): 규칙을 JSON으로 백업하고 다른 PC에서 가져옵니다. 이미 있는 규칙은 건너뜁니다.
 - 파일을 옮기면 Windows 알림 표시(설정 > 동작, 기본 꺼짐. Windows 알림을 쓸 수 없으면 트레이 풍선으로 표시).
+- 처음 사용 안내: 브라우저 확장이 한 번도 연결되지 않았으면 홈에 "브라우저 확장을 아직 연결하지 않았습니다"와 연결 방법 링크를 표시하고, 브라우저 연결 화면에 연결 상태를 보여 주며, 설치 후 처음 여는 창은 브라우저 연결 화면으로 시작합니다. 다운로드 기록이 있는 기존 사용자에게는 표시하지 않습니다.
 - 수정: 트레이 메뉴와 Tray Folder 메뉴의 "저장 위치 선택 대기 열기"가 창만 열고 대기 목록으로 가지 않던 문제.
 - 수정: 아이콘 리소스 번호를 핸들 자리에 넘겨 창 제목 표시줄과 Alt+Tab에 앱 아이콘이 보이지 않던 문제.
 - 안정성: 같은 다운로드를 바꾸는 명령을 한 번에 하나씩 처리해, 브라우저 이벤트와 폴더 선택이 동시에 와도 서로 덮어쓰지 않습니다. 설정 파일은 프로세스 사이 잠금을 걸고 씁니다. Agent 조회와 폴더 검사가 화면 스레드를 막지 않습니다.

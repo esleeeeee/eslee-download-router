@@ -71,13 +71,19 @@
 | 항목 | 결과 |
 |---|---|
 | .NET Debug/Release build | 성공, 경고 0, 오류 0 |
-| .NET tests | 370/370 통과, Core 261, Infrastructure 20, Integration 89 |
+| .NET tests | 392/392 통과, Core 267, Infrastructure 22, Integration 103 |
+| Extension | lint, Node tests 31/31, Native Host 등록 호환 검사 통과 |
 | 테스트 사본 UI | `--data-root` 사본을 UI Automation과 PrintWindow 캡처로 조작: 홈, 규칙, 다운로드, 설정, 라이트·다크, 언어 전환 재시작, 일시 중지, 파일 종류 조건, 즐겨찾기, 폴더 선택 이동 |
 | 원격 접속 표시 | 125% 배율 원격 환경에서 흰 화면 없이 표시 |
 | 테스트 사본 격리 | 설치된 앱, HKCU Run, Native Messaging, Tray Folder 등록 변화 없음 |
 | 설치본 업그레이드 | 1.3.4 위 2.0.0 설치 성공, 규칙·기록·설정(알 수 없는 키 포함) 보존, 자동 시작과 6개 브라우저 등록 유지, Tray Folder Hosted 연결 유지 |
 | 실제 Whale | 업그레이드 설치본으로 로컬 서버 파일 다운로드 → 규칙 일치 → 선택 창 → 선택 폴더 이동, SHA-256 일치 |
-| 미확인 | Whale 외 브라우저, Tray Folder 새 메뉴 항목 표시, Windows 알림 표시, 내보내기·가져오기 파일 선택 창, 6시간 주기 정리, 다른 배율·해상도 |
+| 실제 Edge | 임시 프로필에 설치본 확장을 불러와 다운로드 → 자동 이동 |
+| Windows 알림 | 설치본에서 이동 알림이 Windows 알림 기록에 남음, 끄기·제거 시 등록 삭제 |
+| 내보내기·가져오기 | 실제 파일 창으로 내보내기, 가져오기(새 규칙 꺼짐, 중복 건너뜀, 네트워크 경로 거부) |
+| 기록 자동 정리 | 테스트 사본에서 Agent 시작 약 1분 뒤 지난 기록만 삭제 |
+| 처음 사용 안내 | 새 데이터 폴더 첫 실행에서 브라우저 연결 화면·홈 안내 표시, 연결 뒤 사라짐 |
+| 미확인 | Chrome·Brave·Vivaldi·Opera 실제 다운로드, Tray Folder 새 메뉴 항목 표시, 6시간 반복 주기, 다른 배율·해상도 |
 
 ## 최종 검증 기준 (1.x)
 
