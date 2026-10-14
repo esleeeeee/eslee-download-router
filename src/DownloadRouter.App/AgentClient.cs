@@ -1,7 +1,9 @@
 using System.IO.Pipes;
 using System.Text.Json;
 using DownloadRouter.Core.Ipc;
+using DownloadRouter.Core.Localization;
 using DownloadRouter.Core.Models;
+using DownloadRouter.Core.Startup;
 
 namespace DownloadRouter.App;
 
@@ -11,7 +13,7 @@ public sealed class AgentClient
     {
         await using var client = new NamedPipeClientStream(
             ".",
-            ProtocolConstants.AgentPipeName,
+            AppInstance.Current.AgentPipeName,
             PipeDirection.InOut,
             PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
         await client.ConnectAsync(1500, cancellationToken).ConfigureAwait(false);
@@ -22,7 +24,7 @@ public sealed class AgentClient
             JsonSerializer.SerializeToElement(payload ?? new { }, ProtocolJson.Options));
         await LengthPrefixedJsonProtocol.WriteAsync(client, request, cancellationToken).ConfigureAwait(false);
         return await LengthPrefixedJsonProtocol.ReadAsync<AgentResponse>(client, cancellationToken).ConfigureAwait(false)
-            ?? AgentResponse.Error(request.RequestId, "agent.empty-response", "Agent가 응답하지 않았습니다.");
+            ?? AgentResponse.Error(request.RequestId, "agent.empty-response", AppText.Pick("Agent가 응답하지 않았습니다.", "The agent did not respond."));
     }
 
     public static T? ReadData<T>(AgentResponse response)

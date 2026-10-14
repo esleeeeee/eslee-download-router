@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using DownloadRouter.Core.Models;
+using DownloadRouter.Core.Startup;
 
 namespace DownloadRouter.App;
 
@@ -9,7 +9,7 @@ public sealed class AgentProcessManager(AgentClient client)
     {
         try
         {
-            using var shutdownEvent = EventWaitHandle.OpenExisting(ProtocolConstants.AgentShutdownEventName);
+            using var shutdownEvent = EventWaitHandle.OpenExisting(AppInstance.Current.AgentShutdownEventName);
             shutdownEvent.Set();
         }
         catch (WaitHandleCannotBeOpenedException)
@@ -30,14 +30,21 @@ public sealed class AgentProcessManager(AgentClient client)
             return false;
         }
 
-        Process.Start(new ProcessStartInfo
+        var startInfo = new ProcessStartInfo
         {
             FileName = agentPath,
             WorkingDirectory = Path.GetDirectoryName(agentPath)!,
             UseShellExecute = false,
             CreateNoWindow = true,
             WindowStyle = ProcessWindowStyle.Hidden,
-        });
+        };
+        // The agent must serve the same data root as this app instance.
+        foreach (var argument in AppInstance.Current.ForwardedArguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        Process.Start(startInfo);
         for (var attempt = 0; attempt < 20; attempt++)
         {
             await Task.Delay(150, cancellationToken);
