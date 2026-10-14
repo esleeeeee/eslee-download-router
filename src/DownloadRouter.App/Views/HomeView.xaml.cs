@@ -23,6 +23,13 @@ public sealed partial class HomeView : UserControl, IAppView
     private readonly SummaryTile problemTile;
     private string? temporaryFoldersSignature;
 
+    /// <summary>
+    /// False until the agent answered once. Right after sign-in the page can open before the agent
+    /// listens, so the extension check is repeated on a later poll instead of being lost.
+    /// </summary>
+    private bool extensionStatusKnown;
+    private bool extensionStatusLoading;
+
     public HomeView()
     {
         InitializeComponent();
@@ -44,6 +51,11 @@ public sealed partial class HomeView : UserControl, IAppView
     public void OnLiveUpdate(LiveSnapshot snapshot, bool changed)
     {
         RenderStatus(snapshot);
+        if (!extensionStatusKnown && snapshot.AgentReachable)
+        {
+            _ = RefreshExtensionStatusAsync();
+        }
+
         var attention = AppServices.RootHealth.AttentionCount;
         RootAttentionBar.IsOpen = attention > 0;
         RootAttentionBar.Message = AppText.Pick(
@@ -138,6 +150,12 @@ public sealed partial class HomeView : UserControl, IAppView
 
     private async Task RefreshExtensionStatusAsync()
     {
+        if (extensionStatusLoading)
+        {
+            return;
+        }
+
+        extensionStatusLoading = true;
         try
         {
             var response = await AppServices.Agent.SendAsync("diagnostics.status");
@@ -146,11 +164,17 @@ public sealed partial class HomeView : UserControl, IAppView
                 && value.ValueKind == JsonValueKind.True;
             ExtensionRefreshBar.Message = DownloadRegistrationPolicy.ExtensionRefreshGuidance;
             ExtensionRefreshBar.IsOpen = refresh;
+            extensionStatusKnown = response.Success;
         }
         catch (Exception exception)
         {
             AppServices.WriteDiagnostic("app-startup.log", $"extension status read failed: {exception.GetType().Name}");
             ExtensionRefreshBar.IsOpen = false;
+            extensionStatusKnown = false;
+        }
+        finally
+        {
+            extensionStatusLoading = false;
         }
     }
 
