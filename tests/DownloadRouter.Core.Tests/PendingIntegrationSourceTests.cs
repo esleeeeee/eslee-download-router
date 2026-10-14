@@ -288,11 +288,16 @@ public sealed class PendingIntegrationSourceTests
         var disable = source[source.IndexOf("public void Disable()", StringComparison.Ordinal)..];
         disable = disable[..disable.IndexOf("public static void UnregisterAll()", StringComparison.Ordinal)];
         Assert.True(ensure.IndexOf("if (!AppServices.Instance.IsDefault)", StringComparison.Ordinal)
-            < ensure.IndexOf("manager.Register", StringComparison.Ordinal));
+            < ensure.IndexOf("Registry.CurrentUser.CreateSubKey(RegistryPath)", StringComparison.Ordinal));
         Assert.Contains("return false;", ensure, StringComparison.Ordinal);
         Assert.Contains("if (!AppServices.Instance.IsDefault)", disable, StringComparison.Ordinal);
         Assert.True(disable.IndexOf("return;", StringComparison.Ordinal) < disable.IndexOf("UnregisterAll();", StringComparison.Ordinal));
         Assert.Contains("NotificationService.UnregisterAll();", ReadAppFile("App.xaml.cs"), StringComparison.Ordinal);
+
+        // AppNotificationManager.Register fails (0x8007007E) in this self-contained unpackaged app;
+        // the classic toast API with a per-user AppUserModelId key is used instead.
+        Assert.DoesNotContain("AppNotificationManager.Default", source, StringComparison.Ordinal);
+        Assert.Contains("ToastNotificationManager.CreateToastNotifier(AppUserModelId)", source, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -1,21 +1,28 @@
+using System.Security;
 using DownloadRouter.Core.Localization;
 using Microsoft.UI.Dispatching;
-using Microsoft.Windows.AppNotifications;
-using Microsoft.Windows.AppNotifications.Builder;
+using Microsoft.Win32;
+using Windows.Data.Xml.Dom;
+using Windows.UI.Notifications;
 
 namespace DownloadRouter.App.Services;
 
 /// <summary>
-/// Windows notifications for "file moved". Registration happens only after the user turns the
-/// setting on, so an app that never notifies leaves no notification registration behind. When
-/// registration is impossible the caller falls back to the tray balloon.
+/// Windows notifications for "file moved". The app identity is a per-user AppUserModelId key
+/// (display name and icon) used with the classic toast API: the Windows App SDK
+/// AppNotificationManager.Register fails with 0x8007007E in this self-contained, unpackaged app.
+/// The key is written only after the user turns the setting on and only by the installed copy;
+/// turning the setting off or uninstalling removes it. When showing fails the caller falls back
+/// to the tray balloon.
 /// </summary>
 public sealed class NotificationService
 {
     public const string UnregisterArgument = "--unregister-notifications";
-    private const string ActionKey = "action";
-    private const string JobKey = "job";
-    private const string OpenJobAction = "open-job";
+    public const string AppUserModelId = "eslee.DownloadRouter";
+    private const string RegistryPath = @"Software\Classes\AppUserModelId\" + AppUserModelId;
+
+    /// <summary>Id the v2.0 development builds left behind through AppNotificationManager.Register.</summary>
+    private const string LegacyRegistrationDisplayName = "eslee Download Router";
 
     private readonly DispatcherQueue dispatcher;
     private bool registered;
@@ -25,13 +32,14 @@ public sealed class NotificationService
         this.dispatcher = dispatcher;
     }
 
-    /// <summary>Raised on the UI thread when the user clicks a notification about a job.</summary>
+    /// <summary>Raised on the UI thread when the user clicks a notification about a job while the app runs.</summary>
     public event EventHandler<Guid>? JobNotificationInvoked;
 
     public bool IsRegistered => registered;
 
     public bool EnsureRegistered()
     {
+        // A copy on another data folder must not create or change the installed app's identity.
         if (!AppServices.Instance.IsDefault)
         {
             return false;
@@ -44,21 +52,17 @@ public sealed class NotificationService
 
         try
         {
-            var manager = AppNotificationManager.Default;
-            manager.NotificationInvoked += OnNotificationInvoked;
+            using var key = Registry.CurrentUser.CreateSubKey(RegistryPath);
+            key.SetValue("DisplayName", "eslee Download Router");
             var icon = Path.Combine(AppContext.BaseDirectory, "Assets", "notification-icon.png");
             if (File.Exists(icon))
             {
-                manager.Register("eslee Download Router", new Uri(icon));
-            }
-            else
-            {
-                manager.Register();
+                key.SetValue("IconUri", icon);
             }
 
             registered = true;
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is UnauthorizedAccessException or IOException or SecurityException)
         {
             AppServices.WriteDiagnostic("app-startup.log", $"notification registration failed: {exception.GetType().Name} {exception.HResult:X8}");
         }
@@ -76,14 +80,16 @@ public sealed class NotificationService
 
         try
         {
-            var notification = new AppNotificationBuilder()
-                .AddArgument(ActionKey, OpenJobAction)
-                .AddArgument(JobKey, jobId.ToString("N"))
-                .AddText(AppText.Pick("파일을 옮겼습니다", "File moved"))
-                .AddText(fileName)
-                .AddText(destinationFolder)
-                .BuildNotification();
-            AppNotificationManager.Default.Show(notification);
+            var document = new XmlDocument();
+            document.LoadXml(
+                "<toast launch=\"open-job=" + jobId.ToString("N") + "\"><visual><binding template=\"ToastGeneric\">"
+                + "<text>" + SecurityElement.Escape(AppText.Pick("파일을 옮겼습니다", "File moved")) + "</text>"
+                + "<text>" + SecurityElement.Escape(fileName) + "</text>"
+                + "<text>" + SecurityElement.Escape(destinationFolder) + "</text>"
+                + "</binding></visual></toast>");
+            var toast = new ToastNotification(document);
+            toast.Activated += (_, _) => dispatcher.TryEnqueue(() => JobNotificationInvoked?.Invoke(this, jobId));
+            ToastNotificationManager.CreateToastNotifier(AppUserModelId).Show(toast);
             return true;
         }
         catch (Exception exception)
@@ -93,7 +99,7 @@ public sealed class NotificationService
         }
     }
 
-    /// <summary>Turns notifications off and removes this app's notification registration.</summary>
+    /// <summary>Turns notifications off and removes this app's notification identity.</summary>
     public void Disable()
     {
         if (!AppServices.Instance.IsDefault)
@@ -101,36 +107,57 @@ public sealed class NotificationService
             return;
         }
 
-        if (registered)
-        {
-            AppNotificationManager.Default.NotificationInvoked -= OnNotificationInvoked;
-        }
-
         UnregisterAll();
         registered = false;
     }
 
-    /// <summary>Removes the registration (used by the uninstaller and when the setting is turned off).</summary>
+    /// <summary>Removes the notification identity and history (setting turned off, or the uninstaller).</summary>
     public static void UnregisterAll()
     {
         try
         {
-            AppNotificationManager.Default.UnregisterAll();
+            ToastNotificationManager.History.Clear(AppUserModelId);
         }
         catch (Exception exception)
+        {
+            AppServices.WriteDiagnostic("app-startup.log", $"notification history clear failed: {exception.GetType().Name} {exception.HResult:X8}");
+        }
+
+        try
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(RegistryPath, throwOnMissingSubKey: false);
+            RemoveLegacyRegistration();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or IOException or SecurityException)
         {
             AppServices.WriteDiagnostic("app-startup.log", $"notification unregister failed: {exception.GetType().Name} {exception.HResult:X8}");
         }
     }
 
-    private void OnNotificationInvoked(AppNotificationManager sender, AppNotificationActivatedEventArgs args)
+    /// <summary>
+    /// Development builds of v2.0 called AppNotificationManager.Register, which stored a GUID-named
+    /// AppUserModelId pointing at this install before failing. Remove only entries whose icon lives
+    /// in this app's folder.
+    /// </summary>
+    private static void RemoveLegacyRegistration()
     {
-        if (args.Arguments.TryGetValue(ActionKey, out var action)
-            && action == OpenJobAction
-            && args.Arguments.TryGetValue(JobKey, out var job)
-            && Guid.TryParseExact(job, "N", out var jobId))
+        using var root = Registry.CurrentUser.OpenSubKey(@"Software\Classes\AppUserModelId", writable: true);
+        if (root is null)
         {
-            dispatcher.TryEnqueue(() => JobNotificationInvoked?.Invoke(this, jobId));
+            return;
+        }
+
+        foreach (var name in root.GetSubKeyNames().Where(static name => name.StartsWith('{')))
+        {
+            using var entry = root.OpenSubKey(name);
+            if (entry?.GetValue("DisplayName") is string displayName
+                && displayName == LegacyRegistrationDisplayName
+                && entry.GetValue("IconUri") is string icon
+                && icon.StartsWith(AppContext.BaseDirectory, StringComparison.OrdinalIgnoreCase))
+            {
+                entry.Dispose();
+                root.DeleteSubKeyTree(name, throwOnMissingSubKey: false);
+            }
         }
     }
 }
