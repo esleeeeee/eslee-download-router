@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### English
+
+- Fixed: Settings > About showed the version twice ("Version Version 2.0.0").
+- README in Korean and English rewritten with screenshots of every page.
+
+### Korean
+
+- 수정: 설정 > 정보에 버전이 "버전 버전 2.0.0"처럼 두 번 표시되던 문제.
+- 한국어·영어 README를 모든 화면의 사진과 함께 새로 작성.
+
 ## [2.0.0] - 2026-10-14
 
 ### English
