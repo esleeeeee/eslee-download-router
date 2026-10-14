@@ -313,6 +313,7 @@ public static class ProtocolConstants
     public const string AppActivationEventName = "Local\\eslee.DownloadRouter.App.Activate";
     public const string AppShutdownEventName = "Local\\eslee.DownloadRouter.App.Shutdown";
     public const string AgentShutdownEventName = "Local\\eslee.DownloadRouter.Agent.Shutdown";
+    public const string AgentMutexName = "Local\\eslee.DownloadRouter.Agent";
 
     public static readonly ISet<string> AllowedCommands = new HashSet<string>(StringComparer.Ordinal)
     {
