@@ -1,8 +1,10 @@
 # 프로젝트 상태
 
-기준일: 2026-09-30 (Asia/Seoul)
+기준일: 2026-10-14 (Asia/Seoul)
 
 ## 요약
+
+- 2.0.0: eslee 앱 시리즈 2.0 화면 전면 개편(WinUI 3, 폴더라커와 같은 색 토큰, 라이트·다크, 목록-상세 구성, 테마 대화상자, 새 아이콘)과 새 기능(자동 분류 잠시 멈추기, 규칙별 파일 종류 조건, 기준 폴더 없어짐 감지, 파일 열기·폴더에서 보기·다시 시도, 즐겨찾기·최근 폴더, 오래된 기록 자동 정리, 규칙 내보내기·가져오기, 이동 완료 알림, 한국어/영어). DB schema 9(파일 종류 열, 임시 규칙 판단, 후보 규칙 목록). 같은 작업 명령 직렬화, 설정 파일 프로세스 간 잠금, Native Host는 확장이 쓰는 명령만 전달. `--data-root` 테스트 사본 격리. .NET 370건 통과, 설치본 1.3.4→2.0.0 업그레이드와 실제 Whale 다운로드 이동 확인.
 
 - 1.3.4: 다운로드 번호 재사용으로 과거 terminal 작업을 잘못 찾던 버그 수정. Browser + DownloadId + 브라우저 시작 시각(ms)으로 구분하고 DB schema 7로 이력 보존 마이그레이션. 확장 0.3.0(build 2026.09.30) 새로고침 필요. .NET 213건, Extension 31건 통과; 실제 다운로드 재현은 자동 테스트와 구분합니다.
 
@@ -16,8 +18,8 @@
 
 - 1.2.0: 선택창의 상위 폴더 탐색과 개별 파일명 변경. 설치본 UI에서 상위 폴더 선택·이름 입력을 조작하고, 격리 이벤트로 재시작 후 실제 파일 저장과 내용 보존을 검증했습니다.
 
-- 현재 단계: 1.3.4 릴리즈.
-- 직전 정식 버전: 1.3.3
+- 현재 단계: 2.0.0 릴리스 준비.
+- 직전 정식 버전: 1.3.5
 - 공식 저장소: https://github.com/esleeeeee/eslee-download-router
 - 기본 브랜치: `main`
 - 변경 기록: [GitHub Pull Requests](https://github.com/esleeeeee/eslee-download-router/pulls?q=is%3Apr+is%3Amerged)
@@ -27,12 +29,12 @@
 
 ## 정식 버전 구성
 
-- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `1.3.4` 제품 버전을 사용합니다.
+- App, Agent, Native Host와 Installer는 `Directory.Build.props`의 단일 `2.0.0` 제품 버전을 사용합니다.
 - assembly informational version에는 빌드한 Git commit metadata가 포함됩니다.
 - Extension manifest 버전은 기존 정책에 따라 제품 assembly와 독립 관리합니다.
 - 고정 Extension ID `gilicenlclaemgiijcjjejilikbooggj`와 Native Messaging identity를 유지합니다.
 - 설치 프로그램은 현재 사용자 단위이며 App, Agent, Native Host와 Extension 파일을 함께 설치합니다.
-- v1.0.3부터 흰색 기반 master PNG와 9-size ICO를 App, Window, taskbar, 트레이, Installer, shortcut, 제거 항목과 Extension에 공통 적용합니다. eslee 로고, 폴더, cyan 다운로드와 분기 경로, gold node 구성은 유지합니다.
+- v2.0.0부터 파란 다운로드 분기 타일 master PNG(`assets/branding/eslee-download-router.png`, 투명 배경)와 9-size ICO를 App, Window(제목 표시줄·Alt+Tab), taskbar, 트레이, Agent·Native Host 실행 파일, Installer, shortcut, 제거 항목, Windows 알림과 Extension(0.3.1)에 공통 적용합니다. `scripts/generate-branding-assets.ps1`이 master에서 모든 크기를 만듭니다.
 - 트레이 아이콘은 별도 NotifyIcon 버전 협상 없이 셸 기본 툴팁 경로를 사용해 hover 시 제품명을 표시합니다.
 
 ## 구현 완료
@@ -64,7 +66,20 @@
 - Tray Folder 호스트 연동: hosted 모드에서 트레이 아이콘만 Tray Folder로 이동하고 다운로드 감시와 분류는 그대로 동작
 - 정보 화면의 업데이트 확인: GitHub 최신 정식 Release(draft/prerelease 제외)와 비교, 하루 1회 자동 확인, 수동 확인과 Release 페이지 열기, 실패해도 다운로드 기능에 영향 없음. 열리는 URL은 이 저장소 경로로 고정 검증
 
-## 최종 검증 기준
+## v2.0.0 검증
+
+| 항목 | 결과 |
+|---|---|
+| .NET Debug/Release build | 성공, 경고 0, 오류 0 |
+| .NET tests | 370/370 통과, Core 261, Infrastructure 20, Integration 89 |
+| 테스트 사본 UI | `--data-root` 사본을 UI Automation과 PrintWindow 캡처로 조작: 홈, 규칙, 다운로드, 설정, 라이트·다크, 언어 전환 재시작, 일시 중지, 파일 종류 조건, 즐겨찾기, 폴더 선택 이동 |
+| 원격 접속 표시 | 125% 배율 원격 환경에서 흰 화면 없이 표시 |
+| 테스트 사본 격리 | 설치된 앱, HKCU Run, Native Messaging, Tray Folder 등록 변화 없음 |
+| 설치본 업그레이드 | 1.3.4 위 2.0.0 설치 성공, 규칙·기록·설정(알 수 없는 키 포함) 보존, 자동 시작과 6개 브라우저 등록 유지, Tray Folder Hosted 연결 유지 |
+| 실제 Whale | 업그레이드 설치본으로 로컬 서버 파일 다운로드 → 규칙 일치 → 선택 창 → 선택 폴더 이동, SHA-256 일치 |
+| 미확인 | Whale 외 브라우저, Tray Folder 새 메뉴 항목 표시, Windows 알림 표시, 내보내기·가져오기 파일 선택 창, 6시간 주기 정리, 다른 배율·해상도 |
+
+## 최종 검증 기준 (1.x)
 
 | 항목 | 결과 |
 |---|---|
@@ -116,6 +131,13 @@
 - 다운로드 시작 탭 URL은 Chromium API가 신뢰할 수 있는 필드로 제공하지 않으므로 활성 탭을 추측하지 않습니다.
 - Agent JSONL 로그에는 다운로드 파일 이름이 남을 수 있고, `app-unhandled.log`에는 치환이 적용되지 않습니다. 로그를 공개하기 전에 직접 확인해야 합니다.
 - 1.0.1 시기에 설치된 환경에는 설치 폴더에 과거 `.pdb` 파일이 남아 있을 수 있습니다. 현재 설치 파일은 `.pdb`를 포함하지 않습니다.
+- 파일 종류 조건이 있는 규칙은 브라우저가 파일 이름을 알려 줄 때까지 판단을 미룹니다. 그동안 저장 위치 선택 창과 10분 자동 저장은 이름이 확정된 뒤에 적용됩니다.
+- 자동 분류를 멈춘 동안 시작된 다운로드는 나중에 다시 켜도 분류하지 않습니다.
+- 이동 완료 알림과 기준 폴더 감지는 앱(트레이 또는 Tray Folder)이 실행 중일 때만 동작합니다. 알림은 기본 꺼짐이며, Windows 알림을 쓸 수 없거나 테스트 사본이면 트레이 풍선으로 대신 표시하고 Tray Folder Hosted 모드에서는 트레이 풍선도 표시되지 않습니다.
+- 오래된 기록 자동 정리는 Agent가 실행 중일 때 시작 1분 뒤와 6시간마다 실행합니다. 처리 대기·실패 기록과 실제 파일은 지우지 않습니다.
+- 가져온 규칙은 꺼진 상태로 추가되며 네트워크(UNC) 기준 폴더는 가져오지 않습니다.
+- 언어 변경은 앱을 다시 시작해야 적용됩니다.
+- 브라우저에서는 확장이 쓰는 명령만 Native Host를 거쳐 전달됩니다. 개발용 `scripts/send-agent-command.ps1`도 이 명령만 보낼 수 있습니다.
 
 ## 유지보수 기준
 

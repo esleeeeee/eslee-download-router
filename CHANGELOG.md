@@ -20,6 +20,7 @@
 - Rule export and import (Site rules > ⋯): back up rules as JSON and import them on another PC; duplicates are skipped.
 - Optional Windows notification when a file is moved (Settings > Behavior, off by default; the tray balloon is used when Windows notifications are unavailable).
 - Fixed: "Open files waiting for a folder" in the tray menu and the Tray Folder menu only showed the window instead of opening the waiting list.
+- Fixed: windows had no icon in the title bar and Alt+Tab because the icon resource number was passed where a handle was expected.
 - Reliability: commands that change the same download are now handled one at a time so a browser event and a folder choice arriving together can no longer overwrite each other; the settings file is written under a cross-process lock; agent polling and folder checks no longer run on the UI thread.
 - Testing support: `--data-root <folder>` runs a separate copy with its own data, agent and names; such a copy never changes Windows startup, Native Messaging or the Tray Folder registration.
 - Unchanged: the data folder `%LOCALAPPDATA%\eslee\DownloadRouter` (database upgraded to schema 8 in place), executable names, the extension ID, the Tray Folder app id and existing menu action ids, and the update check as the only network access.
@@ -38,6 +39,7 @@
 - 규칙 내보내기·가져오기(사이트 규칙 > ⋯): 규칙을 JSON으로 백업하고 다른 PC에서 가져옵니다. 이미 있는 규칙은 건너뜁니다.
 - 파일을 옮기면 Windows 알림 표시(설정 > 동작, 기본 꺼짐. Windows 알림을 쓸 수 없으면 트레이 풍선으로 표시).
 - 수정: 트레이 메뉴와 Tray Folder 메뉴의 "저장 위치 선택 대기 열기"가 창만 열고 대기 목록으로 가지 않던 문제.
+- 수정: 아이콘 리소스 번호를 핸들 자리에 넘겨 창 제목 표시줄과 Alt+Tab에 앱 아이콘이 보이지 않던 문제.
 - 안정성: 같은 다운로드를 바꾸는 명령을 한 번에 하나씩 처리해, 브라우저 이벤트와 폴더 선택이 동시에 와도 서로 덮어쓰지 않습니다. 설정 파일은 프로세스 사이 잠금을 걸고 씁니다. Agent 조회와 폴더 검사가 화면 스레드를 막지 않습니다.
 - 테스트 지원: `--data-root <폴더>`로 데이터·Agent·이름을 따로 쓰는 별도 사본을 실행합니다. 이 사본은 Windows 자동 실행, Native Messaging, Tray Folder 등록을 바꾸지 않습니다.
 - 변경 없음: 데이터 폴더 `%LOCALAPPDATA%\eslee\DownloadRouter`(DB는 schema 8로 그대로 업그레이드), 실행 파일 이름, 확장 ID, Tray Folder 앱 id와 기존 메뉴 액션 id, 유일한 네트워크 접근인 업데이트 확인.
