@@ -338,9 +338,22 @@ public sealed class ProtocolAndStateTests
         Assert.Contains("ProductBranding.ApplyWindowIcon(appWindow)", mainWindowLifetime, StringComparison.Ordinal);
         Assert.Contains("ProductBranding.ApplyWindowIcon(appWindow)", selectionWindow, StringComparison.Ordinal);
         Assert.Contains("ApplicationIconResourceId = 32512", productBranding, StringComparison.Ordinal);
-        Assert.Contains("$artworkScale = 1.18", brandingGenerator, StringComparison.Ordinal);
-        Assert.Contains("16 = 1.15", brandingGenerator, StringComparison.Ordinal);
-        Assert.Contains("20 = 1.15", brandingGenerator, StringComparison.Ordinal);
+        // v2.0.0 master already fills its square; only the tiniest frames enlarge slightly.
+        Assert.Contains("$artworkScale = 1.0", brandingGenerator, StringComparison.Ordinal);
+        Assert.Contains("16 = 1.04", brandingGenerator, StringComparison.Ordinal);
+        Assert.Contains("20 = 1.04", brandingGenerator, StringComparison.Ordinal);
+        foreach (var project in new[] { "DownloadRouter.Agent", "DownloadRouter.NativeHost" })
+        {
+            Assert.Contains(
+                @"<ApplicationIcon>..\..\assets\branding\eslee-download-router.ico</ApplicationIcon>",
+                File.ReadAllText(Path.Combine(repositoryRoot, "src", project, project + ".csproj")),
+                StringComparison.Ordinal);
+        }
+
+        // The notification icon ships next to the app and the installer refreshes Explorer's icon cache.
+        Assert.Contains(@"Link=""Assets\notification-icon.png""", appProject, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(repositoryRoot, "assets", "branding", "eslee-download-router-notification.png")));
+        Assert.Contains("ChangesAssociations=yes", installerSource, StringComparison.Ordinal);
         Assert.Contains("ExtractIconEx(executablePath", trayIconHost, StringComparison.Ordinal);
         Assert.Contains(
             "CreateIconData(NifMessage | NifIcon | NifTip)",

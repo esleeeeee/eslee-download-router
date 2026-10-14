@@ -1,3 +1,9 @@
+# Builds every icon from the square, transparent master assets\branding\eslee-download-router.png
+# (v2.0.0: the blue download-router tile cut out of its generated artwork, with the light background
+# plate and drop shadow removed and a ~3% transparent margin):
+#   - assets\branding\eslee-download-router.ico: app, window, taskbar, tray, installer, shortcuts
+#   - assets\branding\eslee-download-router-notification.png: Windows notification icon (256 px)
+#   - src\DownloadRouter.Extension\icons\icon-{16,32,48,128}.png: browser extension
 [CmdletBinding()]
 param()
 
@@ -10,10 +16,12 @@ $icoPath = Join-Path $root 'assets\branding\eslee-download-router.ico'
 $extensionDirectory = Join-Path $root 'src\DownloadRouter.Extension\icons'
 $icoSizes = @(16, 20, 24, 32, 40, 48, 64, 128, 256)
 $extensionSizes = @(16, 32, 48, 128)
-$artworkScale = 1.18
+$notificationPath = Join-Path $root 'assets\branding\eslee-download-router-notification.png'
+# The master already fills the frame; the tiniest frames use part of the margin so the tile reads larger.
+$artworkScale = 1.0
 $smallFrameArtworkScales = @{
-    16 = 1.15
-    20 = 1.15
+    16 = 1.04
+    20 = 1.04
 }
 
 if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
@@ -117,6 +125,10 @@ try {
         $icoStream.Dispose()
     }
 
+    [System.IO.File]::WriteAllBytes(
+        $notificationPath,
+        (New-ResizedPngBytes -Source $source -Size 256 -ArtworkScale $artworkScale))
+
     foreach ($size in $extensionSizes) {
         $destination = Join-Path $extensionDirectory "icon-$size.png"
         $frameArtworkScale = if ($smallFrameArtworkScales.ContainsKey($size)) {
@@ -139,4 +151,5 @@ finally {
 
 Write-Host "Generated Windows icon: $icoPath"
 Write-Host "Generated extension icons: $($extensionSizes -join ', ')"
-Write-Host "Artwork scale: $artworkScale (16/20px: 1.15)"
+Write-Host "Generated notification icon: $notificationPath"
+Write-Host "Artwork scale: $artworkScale (16/20px: 1.04)"

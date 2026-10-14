@@ -4,6 +4,44 @@
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-14
+
+### English
+
+- New interface shared with the eslee app series 2.0: Windows 11 Fluent look with a fixed Windows-blue accent, light and dark themes (Settings > Appearance > Theme: Use Windows setting / Light / Dark) including a matching title bar, rounded cards, and themed dialogs instead of plain message boxes.
+- New layout: Home (sorting status, summary tiles that open the matching filter, 10-minute folders, recent downloads), Site rules (list with search, filters, right-click menu and folder drag-and-drop on the left, editor on the right), Downloads (list with search, status filters and multi-select on the left, actions for the selected download on the right), Browsers, and a Windows 11 style Settings page that saves every change immediately.
+- Pause sorting: pause rules for 30 minutes, 1 hour, 3 hours or until resumed from Home, the tray menu, or the Tray Folder menu. While paused, new downloads stay in the browser's default folder; downloads already being tracked continue.
+- File-type condition per rule: all files, only these types, or all except these types (for example `pdf, hwp, zip`, multi-part types such as `tar.gz` work). When the browser has not decided the file name yet, the rule is confirmed as soon as the name is known; a download that turns out not to match any rule is left alone.
+- Missing base folder detection: rules whose base folder was deleted or whose drive or network share is offline are marked "Needs attention" in the rules list, the navigation pane and Home. The check runs in the background with a time limit.
+- Downloads: open the moved file, show it in File Explorer, and retry a failed move from the details pane or the right-click menu. Opening a program file asks first.
+- Folder picker: favorite folders (☆) and the most recent folders of the same rule appear as one-click shortcuts.
+- Automatic history cleanup (Settings > Download history): remove finished entries older than 7, 30, 90, 180 or 365 days. Waiting and failed entries and the files themselves are never removed. Off by default.
+- Korean and English in one build: Settings > Appearance > Language (Use Windows setting / 한국어 / English), applied after a restart. The installer also shows Korean or English.
+- Rule export and import (Site rules > ⋯): back up rules as JSON and import them on another PC; duplicates are skipped.
+- Optional Windows notification when a file is moved (Settings > Behavior, off by default; the tray balloon is used when Windows notifications are unavailable).
+- Fixed: "Open files waiting for a folder" in the tray menu and the Tray Folder menu only showed the window instead of opening the waiting list.
+- Reliability: commands that change the same download are now handled one at a time so a browser event and a folder choice arriving together can no longer overwrite each other; the settings file is written under a cross-process lock; agent polling and folder checks no longer run on the UI thread.
+- Testing support: `--data-root <folder>` runs a separate copy with its own data, agent and names; such a copy never changes Windows startup, Native Messaging or the Tray Folder registration.
+- Unchanged: the data folder `%LOCALAPPDATA%\eslee\DownloadRouter` (database upgraded to schema 8 in place), executable names, the extension ID, the Tray Folder app id and existing menu action ids, and the update check as the only network access.
+
+### Korean
+
+- eslee 앱 시리즈 2.0과 같은 새 화면입니다. Windows 11 Fluent 모양에 Windows 기본 파란색을 강조색으로 쓰고, 라이트·다크 테마(설정 > 화면 > 테마: Windows 설정 따르기 / 라이트 / 다크)와 그에 맞춘 제목 표시줄, 둥근 카드, 테마가 적용된 대화상자를 제공합니다.
+- 새 구성: 홈(분류 상태, 누르면 해당 목록이 열리는 요약 타일, 10분 자동 저장, 최근 다운로드), 사이트 규칙(왼쪽 목록에 검색·필터·우클릭 메뉴·폴더 끌어다 놓기, 오른쪽 편집기), 다운로드(왼쪽 목록에 검색·상태 필터·여러 개 선택, 오른쪽에 선택한 다운로드의 작업), 브라우저 연결, 바꾸면 바로 저장되는 Windows 11 스타일 설정.
+- 자동 분류 잠시 멈추기: 홈, 트레이 메뉴, Tray Folder 메뉴에서 30분·1시간·3시간·다시 켤 때까지 규칙 적용을 멈춥니다. 멈춘 동안 새 다운로드는 브라우저 기본 폴더에 그대로 저장되고, 이미 처리 중인 다운로드는 계속 진행됩니다.
+- 규칙별 파일 종류 조건: 모든 파일 / 이 종류만 / 이 종류 제외(예: `pdf, hwp, zip`, `tar.gz` 같은 여러 단계 확장자도 가능). 브라우저가 파일 이름을 아직 정하지 않았으면 이름이 정해지는 즉시 규칙을 확정하고, 결국 어떤 규칙에도 맞지 않으면 건드리지 않습니다.
+- 기준 폴더 없어짐 감지: 기준 폴더가 지워졌거나 드라이브·네트워크 공유가 연결되지 않은 규칙을 규칙 목록, 왼쪽 메뉴, 홈에 "확인 필요"로 표시합니다. 검사는 시간 제한을 두고 백그라운드에서 합니다.
+- 다운로드: 상세 화면과 우클릭 메뉴에서 옮긴 파일 열기, 파일 탐색기에서 보기, 실패한 이동 다시 시도를 할 수 있습니다. 실행 파일을 열 때는 먼저 묻습니다.
+- 폴더 선택 창: 즐겨찾기(☆)한 폴더와 같은 규칙의 최근 폴더를 한 번에 고를 수 있습니다.
+- 오래된 기록 자동 정리(설정 > 다운로드 기록): 7·30·90·180·365일이 지난 끝난 기록을 지웁니다. 처리 대기·실패 기록과 실제 파일은 지우지 않습니다. 기본은 꺼짐입니다.
+- 한국어와 영어를 한 빌드로 제공합니다: 설정 > 화면 > 언어(Windows 설정 따르기 / 한국어 / English), 다시 시작하면 적용됩니다. 설치 프로그램도 한국어 또는 영어로 표시됩니다.
+- 규칙 내보내기·가져오기(사이트 규칙 > ⋯): 규칙을 JSON으로 백업하고 다른 PC에서 가져옵니다. 이미 있는 규칙은 건너뜁니다.
+- 파일을 옮기면 Windows 알림 표시(설정 > 동작, 기본 꺼짐. Windows 알림을 쓸 수 없으면 트레이 풍선으로 표시).
+- 수정: 트레이 메뉴와 Tray Folder 메뉴의 "저장 위치 선택 대기 열기"가 창만 열고 대기 목록으로 가지 않던 문제.
+- 안정성: 같은 다운로드를 바꾸는 명령을 한 번에 하나씩 처리해, 브라우저 이벤트와 폴더 선택이 동시에 와도 서로 덮어쓰지 않습니다. 설정 파일은 프로세스 사이 잠금을 걸고 씁니다. Agent 조회와 폴더 검사가 화면 스레드를 막지 않습니다.
+- 테스트 지원: `--data-root <폴더>`로 데이터·Agent·이름을 따로 쓰는 별도 사본을 실행합니다. 이 사본은 Windows 자동 실행, Native Messaging, Tray Folder 등록을 바꾸지 않습니다.
+- 변경 없음: 데이터 폴더 `%LOCALAPPDATA%\eslee\DownloadRouter`(DB는 schema 8로 그대로 업그레이드), 실행 파일 이름, 확장 ID, Tray Folder 앱 id와 기존 메뉴 액션 id, 유일한 네트워크 접근인 업데이트 확인.
+
 ## [1.3.4] - 2026-09-30
 
 - 브라우저 다운로드 번호가 재사용되면 과거 완료·취소 작업으로 오인해 선택 팝업이 생략되던 문제를 수정했습니다. 시작 시각을 함께 저장해 작업을 구분하고 모든 후속 이벤트에 같은 식별자를 전달합니다.
