@@ -270,20 +270,7 @@ See [SECURITY.md](SECURITY.md) for the security design.
 
 ## How it works
 
-```mermaid
-flowchart TD
-    A[Download starts in the browser] --> B[The extension sends the download details to the app]
-    B --> C{Does it match a site rule?}
-    C -->|No| Z[Left where the browser saved it]
-    C -->|Yes| D{How to save}
-    D -->|Move to a set folder automatically| E[Moved to the base folder when the download finishes]
-    D -->|Choose a subfolder for each download| F[Folder window]
-    F --> G[Moved to the chosen folder]
-    F --> H[Kept waiting]
-    E --> I[Result saved in the download history]
-    G --> I
-    H --> I
-```
+![Workflow: a download that matches a site rule is moved to the base folder or routed through the folder picker, others stay where the browser saved them, and every outcome is recorded](docs/images/en/workflow.png)
 
 1. The browser extension tells the app when a download starts and finishes (Native Messaging).
 2. A background service (the agent) compares it with your site rules and decides whether to move it or ask for a folder.
